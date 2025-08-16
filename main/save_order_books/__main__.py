@@ -1,11 +1,16 @@
 import asyncio
 import logging
-import typing
+
+import uvloop
+
+from main.save_order_books import (
+    models
+)
 
 from main.save_order_books.globals import (
     g_globals
 )
-
+from utils.time import TimeUtils
 
 logger = (
     logging.getLogger(
@@ -14,13 +19,60 @@ logger = (
 )
 
 
+async def init_db_models():
+    postgres_db_engine = (
+        g_globals.get_postgres_db_engine()
+    )
+
+    async with postgres_db_engine.begin() as connection:
+        await connection.run_sync(
+            models.Base.metadata.drop_all
+        )
+
+        await connection.run_sync(
+            models.Base.metadata.create_all
+        )
+
+
 async def on_new_order_book_data(
         action: str,
         asks: list[list[str, str, str, str]],
         bids: list[list[str, str, str, str]],
         symbol_name: str,
 ) -> None:
-    print(f'{action!r} asks {len(asks)} bids {len(bids)} {symbol_name!r}')
+    logger.info(
+        'Got new order book data'
+        f': action {action!r}, asks {len(asks)}, bids {len(bids)}, symbol name {symbol_name!r}'
+    )
+
+    postgres_db_session_maker = (
+        g_globals.get_postgres_db_session_maker()
+    )
+
+    async with postgres_db_session_maker() as session:
+        async with session.begin():
+            session.add(
+                models.OKXOrderBookData(
+                    # Primary key fields
+
+                    symbol_name=(
+                        symbol_name
+                    ),
+
+                    timestamp_ms=(
+                        TimeUtils.get_aware_current_timestamp_ms()
+                    ),
+
+                    # Attribute fields
+
+                    action=(
+                        action
+                    ),
+
+                    asks=asks,
+                    bids=bids,
+                ),
+            )
 
 
 async def start_web_socket_connection_manager_loops() -> None:
@@ -45,7 +97,7 @@ async def start_web_socket_connection_manager_loops() -> None:
     )
 
 
-def main() -> None:
+async def main() -> None:
     # Set up logging
 
     logging.basicConfig(
@@ -66,13 +118,19 @@ def main() -> None:
         )
     )
 
-    asyncio.run(
-        start_web_socket_connection_manager_loops(),
-    )
+    # Prepare DB
+
+    await init_db_models()
+
+    # Start loops
+
+    await start_web_socket_connection_manager_loops(),
 
 
 if (
         __name__ ==
         '__main__'
 ):
-    main()
+    uvloop.run(
+        main()
+    )

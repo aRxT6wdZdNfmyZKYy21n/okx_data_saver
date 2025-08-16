@@ -1,4 +1,8 @@
 aiogram
 asyncpg
 orjson
+pydantic
+pydantic-settings
+SQLAlchemy[asyncio]
 websockets
+uvloop
