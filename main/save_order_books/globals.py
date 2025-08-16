@@ -2,12 +2,17 @@ __all__ = (
     'g_globals',
 )
 
+import asyncio
+
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,
     create_async_engine, AsyncSession,
 )
 
+from constants.common import (
+    CommonConstants,
+)
 from main.save_order_books.okx_web_socket_connection_manager import (
     OKXWebSocketConnectionManager,
 )
@@ -22,6 +27,7 @@ class Globals(object):
         '__okx_web_socket_connection_manager',
         '__postgres_db_engine',
         '__postgres_db_session_maker',
+        '__postgres_db_task_queue',
     )
 
     def __init__(
@@ -57,6 +63,10 @@ class Globals(object):
             expire_on_commit=False,
         )
 
+        self.__postgres_db_task_queue: (
+            asyncio.Queue[CommonConstants.AsyncFunctionType]
+        ) = asyncio.Queue()
+
     def get_okx_web_socket_connection_manager(
             self,
     ) -> OKXWebSocketConnectionManager:
@@ -71,6 +81,12 @@ class Globals(object):
             self
     ) -> async_sessionmaker[AsyncSession]:
         return self.__postgres_db_session_maker
+
+    def get_postgres_db_task_queue(
+            self
+    ) -> asyncio.Queue[CommonConstants.AsyncFunctionType]:
+        return self.__postgres_db_task_queue
+
 
 
 g_globals = Globals()

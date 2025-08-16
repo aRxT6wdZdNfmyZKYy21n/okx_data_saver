@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import traceback
 
 import uvloop
 
@@ -25,9 +26,9 @@ async def init_db_models():
     )
 
     async with postgres_db_engine.begin() as connection:
-        await connection.run_sync(
-            models.Base.metadata.drop_all
-        )
+        # await connection.run_sync(
+        #     models.Base.metadata.drop_all
+        # )
 
         await connection.run_sync(
             models.Base.metadata.create_all
@@ -45,6 +46,26 @@ async def on_new_order_book_data(
         f': action {action!r}, asks {len(asks)}, bids {len(bids)}, symbol name {symbol_name!r}'
     )
 
+    postgres_db_task_queue = (
+        g_globals.get_postgres_db_task_queue()
+    )
+
+    postgres_db_task_queue.put_nowait(
+        save_order_book_data(
+            action,
+            asks,
+            bids,
+            symbol_name,
+        ),
+    )
+
+
+async def save_order_book_data(
+        action: str,
+        asks: list[list[str, str, str, str]],
+        bids: list[list[str, str, str, str]],
+        symbol_name: str,
+) -> None:
     postgres_db_session_maker = (
         g_globals.get_postgres_db_session_maker()
     )
@@ -72,6 +93,26 @@ async def on_new_order_book_data(
                     asks=asks,
                     bids=bids,
                 ),
+            )
+
+    logger.info(
+        'Order book data was saved'
+    )
+
+async def start_db_loop() -> None:
+    postgres_db_task_queue = (
+        g_globals.get_postgres_db_task_queue()
+    )
+
+    while True:
+        task = await postgres_db_task_queue.get()
+
+        try:
+            await task
+        except Exception as exception:
+            logger.error(
+                'Handled exception while awaiting DB tasl'
+                f': {"".join(traceback.format_exception(exception))}',
             )
 
 
@@ -113,8 +154,8 @@ async def main() -> None:
         ),
 
         level=(
-            # logging.INFO
-            logging.DEBUG
+            logging.INFO
+            # logging.DEBUG
         )
     )
 
@@ -124,7 +165,10 @@ async def main() -> None:
 
     # Start loops
 
-    await start_web_socket_connection_manager_loops(),
+    await asyncio.gather(
+        start_db_loop(),
+        start_web_socket_connection_manager_loops(),
+    )
 
 
 if (
