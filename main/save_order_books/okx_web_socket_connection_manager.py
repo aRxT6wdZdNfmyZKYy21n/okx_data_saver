@@ -17,7 +17,8 @@ from aiogram.utils.text_decorations import (
     markdown_decoration,
 )
 
-from main.save_order_books.constants import (
+from event.async_event import AsyncEvent
+from main.save_order_books.constants_ import (
     IS_NEED_SEND_NOTIFICATIONS_ABOUT_WEB_SOCKET_CONNECTION_CLOSED_WITH_ERROR,
     USE_PROXIES,
 )
@@ -38,6 +39,7 @@ class OKXWebSocketConnectionManager(object):
     __slots__ = (
         '__ask_quantity_by_price_map_by_symbol_name_map',
         '__bid_quantity_by_price_map_by_symbol_name_map',
+        '__on_new_order_book_data_event',
         '__process_idx',
         '__subscribed_symbol_name_set',
         '__web_socket_connection',
@@ -75,6 +77,10 @@ class OKXWebSocketConnectionManager(object):
                 ]
             ]
         ) | None = None
+
+        self.__on_new_order_book_data_event = AsyncEvent(
+            'OnNewOrderBookRawDataEvent'
+        )
 
         self.__process_idx = process_idx
         self.__subscribed_symbol_name_set: set[str] = set()
@@ -123,6 +129,11 @@ class OKXWebSocketConnectionManager(object):
                 symbol_name,
             )
         )
+
+    def get_on_new_order_book_data_event(
+            self,
+    ) -> AsyncEvent:
+        return self.__on_new_order_book_data_event
 
     async def start_loop(
             self
@@ -562,6 +573,8 @@ class OKXWebSocketConnectionManager(object):
             self.__bid_quantity_by_price_map_by_symbol_name_map
         )
 
+        on_new_order_book_data_event = self.__on_new_order_book_data_event
+
         order_book_sequence_id_by_symbol_name_map: (
             typing.Dict[
                 str,
@@ -761,4 +774,11 @@ class OKXWebSocketConnectionManager(object):
             logger.debug(
                 f'Order book of symbol with name {symbol_name!r} was updated'
                 f' (server timestamp (ms): {server_timestamp_ms})'
+            )
+
+            on_new_order_book_data_event(
+                action=action,
+                asks=asks,
+                bids=bids,
+                symbol_name=symbol_name,
             )
