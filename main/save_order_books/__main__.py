@@ -5,7 +5,7 @@ import traceback
 import uvloop
 
 from main.save_order_books import (
-    models
+    schemas
 )
 
 from main.save_order_books.globals import (
