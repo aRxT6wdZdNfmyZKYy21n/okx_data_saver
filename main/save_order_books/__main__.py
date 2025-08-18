@@ -31,7 +31,7 @@ async def init_db_models():
         # )
 
         await connection.run_sync(
-            models.Base.metadata.create_all
+            schemas.Base.metadata.create_all
         )
 
 
@@ -73,7 +73,7 @@ async def save_order_book_data(
     async with postgres_db_session_maker() as session:
         async with session.begin():
             session.add(
-                models.OKXOrderBookData(
+                schemas.OKXOrderBookData(
                     # Primary key fields
 
                     symbol_name=(

@@ -35,6 +35,10 @@ logger = logging.getLogger(
 )
 
 
+class _WebSocketConnectionTimeoutError(Exception):
+    pass
+
+
 class OKXWebSocketConnectionManager(object):
     __slots__ = (
         '__ask_quantity_by_price_map_by_symbol_name_map',
@@ -167,6 +171,36 @@ class OKXWebSocketConnectionManager(object):
                 await (
                     web_socket_connection.close()
                 )
+            except _WebSocketConnectionTimeoutError:
+                logger.warning(
+                    'OKX Spot order books WebSocket connection was timed out'
+                )
+
+                await (
+                    TelegramUtils.send_message_to_channel(
+                        message_markdown_text=(
+                            markdown_decoration.quote(
+                                'OKX Spot order books WebSocket connection was timed out'
+                            )
+                        )
+                    )
+                )
+
+                for task in (
+                        tasks
+                ):
+                    task.cancel()
+
+                try:
+                    await (
+                        web_socket_connection.close()
+                    )
+                except Exception as exception:
+                    logger.error(
+                        'Could not close OKX Spot WebSocket connection'
+                        ': handled exception'
+                        f': {"".join(traceback.format_exception(exception))}'
+                    )
             except websockets.exceptions.ConnectionClosedOK:
                 logger.info(
                     'OKX Spot order books WebSocket connection was closed (OK)'
@@ -250,58 +284,14 @@ class OKXWebSocketConnectionManager(object):
         if symbol_name in subscribed_symbol_name_set:
             return
 
-        logger.info(
-            f'OKX: Subscribing to {symbol_name!r}...',
-        )
-
         await self.__connect()
 
-        web_socket_connection = self.__web_socket_connection
-
-        assert web_socket_connection is not None, None
-
-        await (
-            web_socket_connection.send(
-                message=(
-                    self.__serialize_web_socket_message_raw_data(
-                        {
-                            'op': 'subscribe',
-                            'args': [{
-                                'channel': 'books',
-                                'instId': symbol_name
-                            }]
-                        },
-                    )
-                ),
-
-                text=(
-                    True
-                )
-            )
-        )
-
-        web_socket_connection_stats_raw_data = self.__web_socket_connection_stats_raw_data
-
-        (
-            web_socket_connection_stats_raw_data[
-                'subscriptions_count'
-            ]
-        ) = (
-            (
-                web_socket_connection_stats_raw_data[
-                    'subscriptions_count'
-                ]
-            ) +
-
-            1
+        await self.__subscribe(
+            symbol_name
         )
 
         subscribed_symbol_name_set.add(
             symbol_name,
-        )
-
-        logger.info(
-            f'OKX: Subscribed to {symbol_name!r}',
         )
 
     async def __connect(
@@ -354,6 +344,10 @@ class OKXWebSocketConnectionManager(object):
                 socks5_proxy_url = (
                     None
                 )
+
+            logger.info(
+                'Connecting to OKX Spot Web Socket...'
+            )
 
             try:
                 web_socket_connection = (
@@ -476,7 +470,7 @@ class OKXWebSocketConnectionManager(object):
                     0.5  # s
                 )
 
-            await self.subscribe(
+            await self.__subscribe(
                 symbol_name
             )
 
@@ -590,21 +584,28 @@ class OKXWebSocketConnectionManager(object):
                 'Listening...'
             )
 
-            message_raw_data_bytes = (
-                await (
-                    asyncio.wait_for(
-                        web_socket_connection.recv(
-                            decode=(
-                                False
-                            )
-                        ),
+            try:
+                message_raw_data_bytes = (
+                    await (
+                        asyncio.wait_for(
+                            web_socket_connection.recv(
+                                decode=(
+                                    False
+                                )
+                            ),
 
-                        timeout=(
-                            15.0  # s
+                            timeout=(
+                                15.0  # s
+                            )
                         )
                     )
                 )
-            )
+            except TimeoutError:
+                logger.warning(
+                    'Handled timeout error'
+                )
+
+                raise _WebSocketConnectionTimeoutError() from None
 
             (
                 web_socket_connection_stats_raw_data[
@@ -782,3 +783,56 @@ class OKXWebSocketConnectionManager(object):
                 bids=bids,
                 symbol_name=symbol_name,
             )
+
+    async def __subscribe(
+            self,
+
+            symbol_name: str
+    ) -> None:
+        logger.info(
+            f'OKX: Subscribing to {symbol_name!r}...',
+        )
+
+        web_socket_connection = self.__web_socket_connection
+
+        assert web_socket_connection is not None, None
+
+        await (
+            web_socket_connection.send(
+                message=(
+                    self.__serialize_web_socket_message_raw_data(
+                        {
+                            'op': 'subscribe',
+                            'args': [{
+                                'channel': 'books',
+                                'instId': symbol_name
+                            }]
+                        },
+                    )
+                ),
+
+                text=(
+                    True
+                )
+            )
+        )
+
+        web_socket_connection_stats_raw_data = self.__web_socket_connection_stats_raw_data
+
+        (
+            web_socket_connection_stats_raw_data[
+                'subscriptions_count'
+            ]
+        ) = (
+            (
+                web_socket_connection_stats_raw_data[
+                    'subscriptions_count'
+                ]
+            ) +
+
+            1
+        )
+
+        logger.info(
+            f'OKX: Subscribed to {symbol_name!r}',
+        )
