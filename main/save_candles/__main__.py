@@ -127,7 +127,11 @@ async def save_candles(
 
                 row_data = result.fetchone()
 
-            if row_data is not None:
+            is_last_candle_exists = (
+                row_data is not None
+            )
+
+            if is_last_candle_exists:
                 last_candle_data: schemas.OKXCandleData15m | schemas.OKXCandleData1H
 
                 last_candle_data, = row_data
@@ -322,6 +326,12 @@ async def save_candles(
                     candle_raw_data_list_to_insert.append(
                         candle_raw_data
                     )
+
+            if is_last_candle_exists:
+                assert candle_raw_data_to_update is not None, (
+                    symbol_name,
+                    interval_name,
+                )
 
             async with postgres_db_session_maker() as session:
                 async with session.begin():
