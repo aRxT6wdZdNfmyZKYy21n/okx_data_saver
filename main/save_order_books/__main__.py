@@ -154,8 +154,8 @@ async def main() -> None:
         ),
 
         level=(
-            logging.INFO
-            # logging.DEBUG
+            # logging.INFO
+            logging.DEBUG
         )
     )
 

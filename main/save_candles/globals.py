@@ -24,7 +24,6 @@ from settings import (
 
 class Globals(object):
     __slots__ = (
-        '__okx_web_socket_connection_manager',
         '__postgres_db_engine',
         '__postgres_db_session_maker',
         '__postgres_db_task_queue',
@@ -34,14 +33,6 @@ class Globals(object):
             self
     ) -> None:
         super().__init__()
-
-        self.__okx_web_socket_connection_manager = (
-            OKXWebSocketConnectionManager(
-                process_idx=0,
-                web_socket_connection_idx=0,
-                web_socket_connections_count_per_process=1
-            )
-        )
 
         self.__postgres_db_engine = postgres_db_engine = create_async_engine(
             'postgresql+asyncpg'
@@ -66,11 +57,6 @@ class Globals(object):
         self.__postgres_db_task_queue: (
             asyncio.Queue[CommonConstants.AsyncFunctionType]
         ) = asyncio.Queue()
-
-    def get_okx_web_socket_connection_manager(
-            self,
-    ) -> OKXWebSocketConnectionManager:
-        return self.__okx_web_socket_connection_manager
 
     def get_postgres_db_engine(
             self
