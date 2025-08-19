@@ -1,5 +1,6 @@
 aiogram
 asyncpg
+httpx
 orjson
 pydantic
 pydantic-settings

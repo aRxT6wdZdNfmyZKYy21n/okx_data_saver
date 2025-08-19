@@ -111,7 +111,7 @@ async def start_db_loop() -> None:
             await task
         except Exception as exception:
             logger.error(
-                'Handled exception while awaiting DB tasl'
+                'Handled exception while awaiting DB task'
                 f': {"".join(traceback.format_exception(exception))}',
             )
 
