@@ -46,6 +46,8 @@ if typing.TYPE_CHECKING:
     )
 
 
+_IS_NEED_SHOW_BOLLINGER_BANDS = False
+
 # Bogdan's color preset
 
 _BOLLINGER_BANDS_FILL_COLOR = (
@@ -260,7 +262,7 @@ class FinPlotChartWindow(QMainWindow):
             # volume_axis
         ) = (
             finplot.create_plot(
-                init_zoom_periods=1,
+                # init_zoom_periods=1,
                 rows=2  # 1  # 3
             )
         )
@@ -862,85 +864,86 @@ class FinPlotChartWindow(QMainWindow):
 
             return
 
-        bollinger_base_line_series = (
-            processor.get_bollinger_base_line_series()
-        )
-
-        bollinger_lower_band_series = (
-            processor.get_bollinger_lower_band_series()
-        )
-
-        bollinger_upper_band_series = (
-            processor.get_bollinger_upper_band_series()
-        )
-
         price_axis = (
             self.__price_axis
         )
 
-        if bollinger_base_line_series is not None:
-            assert (
-                bollinger_lower_band_series is not None
-            ), None
-
-            assert (
-                bollinger_upper_band_series is not None
-            ), None
-
-            self.__bollinger_base_line_plot.plot(
-                bollinger_base_line_series,
-                ax=price_axis,
-                color=_BOLLINGER_BASE_LINE_COLOR,
-                legend='Bollinger base line'
+        if _IS_NEED_SHOW_BOLLINGER_BANDS:
+            bollinger_base_line_series = (
+                processor.get_bollinger_base_line_series()
             )
 
-            bollinger_lower_band_plot = (
-                self.__bollinger_lower_band_plot
+            bollinger_lower_band_series = (
+                processor.get_bollinger_lower_band_series()
             )
 
-            bollinger_lower_band_plot.plot(
-                bollinger_lower_band_series,
-                ax=price_axis,
-                color=_BOLLINGER_LOWER_BAND_COLOR,
-                legend='Bollinger lower band'
+            bollinger_upper_band_series = (
+                processor.get_bollinger_upper_band_series()
             )
 
-            bollinger_upper_band_plot = (
-                self.__bollinger_upper_band_plot
-            )
+            if bollinger_base_line_series is not None:
+                assert (
+                    bollinger_lower_band_series is not None
+                ), None
 
-            bollinger_upper_band_plot.plot(
-                bollinger_upper_band_series,
-                ax=price_axis,
-                color=_BOLLINGER_UPPER_BAND_COLOR,
-                legend='Bollinger upper band'
-            )
+                assert (
+                    bollinger_upper_band_series is not None
+                ), None
 
-            bollinger_bands_fill_between_item = (
-                self.__bollinger_bands_fill_between_item
-            )
+                self.__bollinger_base_line_plot.plot(
+                    bollinger_base_line_series,
+                    ax=price_axis,
+                    color=_BOLLINGER_BASE_LINE_COLOR,
+                    legend='Bollinger base line'
+                )
 
-            if bollinger_bands_fill_between_item is None:
-                self.__bollinger_bands_fill_between_item = (
-                    bollinger_bands_fill_between_item  # noqa
-                ) = (
-                    finplot.fill_between(
-                        bollinger_lower_band_plot.item,
-                        bollinger_upper_band_plot.item,
+                bollinger_lower_band_plot = (
+                    self.__bollinger_lower_band_plot
+                )
 
-                        color=(
-                            _BOLLINGER_BANDS_FILL_COLOR
+                bollinger_lower_band_plot.plot(
+                    bollinger_lower_band_series,
+                    ax=price_axis,
+                    color=_BOLLINGER_LOWER_BAND_COLOR,
+                    legend='Bollinger lower band'
+                )
+
+                bollinger_upper_band_plot = (
+                    self.__bollinger_upper_band_plot
+                )
+
+                bollinger_upper_band_plot.plot(
+                    bollinger_upper_band_series,
+                    ax=price_axis,
+                    color=_BOLLINGER_UPPER_BAND_COLOR,
+                    legend='Bollinger upper band'
+                )
+
+                bollinger_bands_fill_between_item = (
+                    self.__bollinger_bands_fill_between_item
+                )
+
+                if bollinger_bands_fill_between_item is None:
+                    self.__bollinger_bands_fill_between_item = (
+                        bollinger_bands_fill_between_item  # noqa
+                    ) = (
+                        finplot.fill_between(
+                            bollinger_lower_band_plot.item,
+                            bollinger_upper_band_plot.item,
+
+                            color=(
+                                _BOLLINGER_BANDS_FILL_COLOR
+                            )
                         )
                     )
-                )
-        else:
-            assert (
-                bollinger_lower_band_series is None
-            ), None
+            else:
+                assert (
+                    bollinger_lower_band_series is None
+                ), None
 
-            assert (
-                bollinger_upper_band_series is None
-            ), None
+                assert (
+                    bollinger_upper_band_series is None
+                ), None
 
         # axis.reset()
         # self.__axis_overlay.reset()
@@ -972,6 +975,7 @@ class FinPlotChartWindow(QMainWindow):
             min_price is not None
         ), None
 
+        """
         finplot.set_y_range(
             float(
                 min_price *
@@ -999,6 +1003,7 @@ class FinPlotChartWindow(QMainWindow):
 
             ax=price_axis
         )
+        """
 
         # quantity_axis = (
         #     self.__quantity_axis
