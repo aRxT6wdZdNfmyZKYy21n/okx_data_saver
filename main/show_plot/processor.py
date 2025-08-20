@@ -21,6 +21,7 @@ from pandas import (
 
 from sqlalchemy import (
     select,
+    and_,
 )
 
 from main.save_candles import (
@@ -322,11 +323,11 @@ class FinPlotChartProcessor(object):
         )
 
         await (
-            self.__update_candles_dataframe()
+            self.__update_current_available_symbol_name_set()
         )
 
         await (
-            self.__update_current_available_symbol_name_set()
+            self.__update_candles_dataframe()
         )
 
         await self.__window.plot(
@@ -405,10 +406,6 @@ class FinPlotChartProcessor(object):
             self.__update_candles_dataframe()
         )
 
-        await (
-            self.__update()
-        )
-
         await self.__window.plot(
             is_need_run_once=(
                 True
@@ -442,402 +439,7 @@ class FinPlotChartProcessor(object):
     async def __update(
             self
     ) -> None:
-        current_interval_name = self.__current_interval_name
-
-        if current_interval_name is None:
-            print(
-                'current_interval_name is None'
-            )
-
-            return
-
-        current_symbol_name = self.__current_symbol_name
-
-        if current_symbol_name is None:
-            print(
-                'current_symbol_name is None'
-            )
-
-            return
-
-        db_schema: type[OKXCandleData15m] | type[OKXCandleData1H] = getattr(
-            schemas,
-            f'OKXCandleData{current_interval_name}'
-        )
-
-        postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
-
-        async with postgres_db_session_maker() as session:
-            result = await session.execute(
-                select(
-                    db_schema,
-                ).where(
-                    db_schema.symbol_name ==
-                    current_symbol_name
-                ).order_by(
-                    db_schema.start_timestamp_ms.desc(),
-                ).limit(
-                    10000
-                )
-            )
-
-            for row in result:
-                print(999, row)
-
-        """
-        candle_data_table_name_raw = (
-            Constants.BingX.CandleDataDatabaseTableNameFormat.format(
-                candle_interval_name_raw=(
-                    BingxCandleIntervalName.OneMinute.value  # one minute candles are primary
-                )
-            )
-        )
-
-        db_storage = (
-            g_common_globals.get_postgres_db_storage()
-        )
-
-        async with (
-                await (
-                    db_storage.get_connection()
-                )
-        ) as connection:
-            async for row_data in (
-                    connection.select_distinct_optimized(
-                        column=(
-                            'exchange_place'
-                        ),
-
-                        schema_name=(
-                            'bingx_market'
-                        ),
-
-                        table_name=(
-                            candle_data_table_name_raw
-                        )
-                    )
-            ):
-                exchange_place_id: int = (
-                    row_data.pop(
-                        'exchange_place'
-                    )
-                )
-
-                exchange_place = (
-                    ExchangePlace(
-                        exchange_place_id
-                    )
-                )
-
-                if available_symbol_name_set_by_exchange_place_map is None:
-                    self.__available_symbol_name_set_by_exchange_place_map = (
-                        available_symbol_name_set_by_exchange_place_map
-                    ) = (
-                        defaultdict(
-                            set
-                        )
-                    )
-
-                available_symbol_name_set = (
-                    available_symbol_name_set_by_exchange_place_map[
-                        exchange_place
-                    ]
-                )
-
-                async for row_data_2 in (
-                        connection.select_distinct_optimized(
-                            column=(
-                                'symbol_name'
-                            ),
-
-                            schema_name=(
-                                'bingx_market'
-                            ),
-
-                            table_name=(
-                                candle_data_table_name_raw
-                            ),
-
-                            where_condition_or_separators=[
-                                SqlCondition(
-                                    left_operand_name=(
-                                        '__target_table__.exchange_place'
-                                    ),
-
-                                    operator_sql_code=(
-                                        '='
-                                    ),
-
-                                    right_operand_data_type=(
-                                        SqlDataType.Integer
-                                    ),
-
-                                    right_operand_sql_code_fmt=(
-                                        None
-                                    ),
-
-                                    right_operand_value=(
-                                        exchange_place_id
-                                    )
-                                )
-                            ]
-                        )
-                ):
-                    symbol_name: str = (
-                        row_data_2.pop(
-                            'symbol_name'
-                        )
-                    )
-
-                    available_symbol_name_set.add(
-                        symbol_name
-                    )
-
-        if available_symbol_name_set_by_exchange_place_map is None:
-            print(
-                'available_symbol_name_set_by_exchange_place_map is None'
-            )
-
-            self.__bollinger_base_line_series = (
-                None
-            )
-
-            self.__bollinger_lower_band_series = (
-                None
-            )
-
-            self.__bollinger_upper_band_series = (
-                None
-            )
-
-            self.__current_available_symbol_name_set = (
-                None
-            )
-
-            self.__current_symbol_name = (
-                None
-            )
-
-            self.__candles_dataframe = (
-                None
-            )
-
-            self.__max_candle_price = (
-                None
-            )
-
-            self.__max_price = (
-                None
-            )
-
-            self.__min_candle_price = (
-                None
-            )
-
-            self.__min_price = (
-                None
-            )
-
-            self.__rsi_series = (
-                None
-            )
-
-            # TODO: plot
-
-            return
-
-        # TODO: remove deleted symbol names && exchange places
-
-        async with (
-                available_symbol_name_set_by_exchange_place_map_update_lock
-        ):
-            if current_exchange_place is None:
-                print(
-                    'current_exchange_place is None'
-                )
-
-                self.__bollinger_base_line_series = (
-                    None
-                )
-
-                self.__bollinger_lower_band_series = (
-                    None
-                )
-
-                self.__bollinger_upper_band_series = (
-                    None
-                )
-
-                self.__current_available_symbol_name_set = (
-                    None
-                )
-
-                self.__current_symbol_name = (
-                    None
-                )
-
-                self.__current_interval_name = (
-                    None
-                )
-
-                self.__candles_dataframe = (
-                    None
-                )
-
-                self.__max_candle_price = (
-                    None
-                )
-
-                self.__max_price = (
-                    None
-                )
-
-                self.__min_candle_price = (
-                    None
-                )
-
-                self.__min_price = (
-                    None
-                )
-
-                self.__rsi_series = (
-                    None
-                )
-
-                # TODO: plot
-
-                return
-
-            self.__current_available_symbol_name_set = (
-                current_available_symbol_name_set
-            ) = (
-                available_symbol_name_set_by_exchange_place_map.get(
-                    current_exchange_place
-                )
-            )
-
-            if current_available_symbol_name_set is None:
-                print(
-                    'current_available_symbol_name_set is None'
-                )
-
-                self.__bollinger_base_line_series = (
-                    None
-                )
-
-                self.__bollinger_lower_band_series = (
-                    None
-                )
-
-                self.__bollinger_upper_band_series = (
-                    None
-                )
-
-                self.__current_symbol_name = (
-                    None
-                )
-
-                self.__current_interval_name = (
-                    None
-                )
-
-                self.__candles_dataframe = (
-                    None
-                )
-
-                self.__max_candle_price = (
-                    None
-                )
-
-                self.__max_price = (
-                    None
-                )
-
-                self.__min_candle_price = (
-                    None
-                )
-
-                self.__min_price = (
-                    None
-                )
-
-                self.__rsi_series = (
-                    None
-                )
-
-                # TODO: plot
-
-                return
-
-            current_symbol_name = (
-                self.__current_symbol_name
-            )
-
-            if (
-                    current_symbol_name is None or
-
-                    (
-                        current_symbol_name not in
-                        current_available_symbol_name_set
-                    )
-            ):
-                print(
-                    f'current_symbol_name ({current_symbol_name!r}) is None or'
-                    ''
-                    ' ('
-                    '    current_symbol_name not in'
-                    '    current_available_symbol_name_set'
-                    ')'
-                )
-
-                self.__bollinger_base_line_series = (
-                    None
-                )
-
-                self.__bollinger_lower_band_series = (
-                    None
-                )
-
-                self.__bollinger_upper_band_series = (
-                    None
-                )
-
-                self.__current_interval_name = (
-                    None
-                )
-
-                self.__candles_dataframe = (
-                    None
-                )
-
-                self.__max_candle_price = (
-                    None
-                )
-
-                self.__max_price = (
-                    None
-                )
-
-                self.__min_candle_price = (
-                    None
-                )
-
-                self.__min_price = (
-                    None
-                )
-
-                self.__rsi_series = (
-                    None
-                )
-
-                # TODO: plot
-
-                return
-
-        await (
-            self.__update_candles_dataframe()
-        )
-        """
+        await self.__update_candles_dataframe()
 
     def __update_bollinger_series(
             self
@@ -924,19 +526,7 @@ class FinPlotChartProcessor(object):
             self.__candles_dataframe
         )
 
-
-        # TODO
-
-        """
-        db_storage = (
-            g_common_globals.get_postgres_db_storage()
-        )
-
-        min_start_timestamp_ms: (
-            typing.Optional[
-                int
-            ]
-        )
+        min_start_timestamp_ms: int
 
         if candles_dataframe is not None:
             min_pandas_start_timestamp: (
@@ -954,75 +544,48 @@ class FinPlotChartProcessor(object):
                 )
             )
         else:
-            min_start_timestamp_ms = (
-                None
-            )
+            min_start_timestamp_ms = 0
 
-        new_candle_raw_data_list: (
-            typing.Optional[
-                typing.List[
-                    typing.Dict
-                ]
-            ]
-        ) = None
+        new_candle_raw_data_list: list[dict] | None = None
+        new_max_candle_price: Decimal | None = None
+        new_min_candle_price: Decimal | None = None
 
-        new_max_candle_price: (
-            typing.Optional[
-                Decimal
-            ]
-        ) = None
+        db_schema: type[OKXCandleData15m] | type[OKXCandleData1H] = getattr(
+            schemas,
+            f'OKXCandleData{current_interval_name}'
+        )
 
-        new_min_candle_price: (
-            typing.Optional[
-                Decimal
-            ]
-        ) = None
+        postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
 
-        async with (
-                await (
-                    db_storage.get_connection()
-                )
-        ) as connection:
-            async for new_candle_raw_data in (
-                    connection.iter_bingx_candle_raw_data(
-                        column_and_sql_order_type_pairs=[
-                            (
-                                'symbol_name',
-                                SqlOrderType.Ascending
-                            ),
-
-                            (
-                                'start_timestamp_ms',
-                                SqlOrderType.Descending
-                            )
-                        ],
-
-                        interval_name=(
-                            current_interval_name
-                        ),
-
-                        # Filtering expressions
-
-                        min_start_timestamp_ms=(
-                            min_start_timestamp_ms
-                        ),
-
-                        symbol_name=(
+        async with postgres_db_session_maker() as session:
+            result = await session.execute(
+                select(
+                    db_schema,
+                ).where(
+                    and_(
+                        (
+                            db_schema.symbol_name ==
                             current_symbol_name
                         ),
 
-                        limit=(
-                            10000  # 1000  # TODO
+                        (
+                            db_schema.start_timestamp_ms >=
+                            min_start_timestamp_ms
                         )
                     )
-            ):
-                if new_candle_raw_data_list is None:
-                    new_candle_raw_data_list = []
+                ).order_by(
+                    db_schema.symbol_name.asc(),
+                    db_schema.start_timestamp_ms.desc(),
+                ).limit(
+                    10000
+                )
+            )
 
-                new_candle_high_price: Decimal = (
-                    new_candle_raw_data[
-                        'high_price'
-                    ]
+            for row in result:
+                new_candle_data: OKXCandleData15m | OKXCandleData1H = row[0]
+
+                new_candle_high_price = Decimal(
+                    new_candle_data.high_price
                 )
 
                 if (
@@ -1037,10 +600,8 @@ class FinPlotChartProcessor(object):
                         new_candle_high_price
                     )
 
-                new_candle_low_price: Decimal = (
-                    new_candle_raw_data[
-                        'low_price'
-                    ]
+                new_candle_low_price = Decimal(
+                    new_candle_data.low_price
                 )
 
                 if (
@@ -1055,27 +616,29 @@ class FinPlotChartProcessor(object):
                         new_candle_low_price
                     )
 
-                # Cast Decimals to floats
+                new_candle_raw_data = {
+                    'close_price': float(
+                        new_candle_data.close_price  # noqa
+                    ),
+                    'high_price': float(
+                        new_candle_high_price
+                    ),
+                    'low_price': float(
+                        new_candle_low_price
+                    ),
+                    'open_price': float(
+                        new_candle_data.open_price  # noqa
+                    ),
+                    'start_timestamp_ms': int(
+                        new_candle_data.start_timestamp_ms  # noqa
+                    ),
+                    'volume': float(
+                        new_candle_data.volume_quote_currency  # noqa
+                    ),
+                }
 
-                for key, value in (
-                        new_candle_raw_data.items()
-                ):
-                    if (
-                            type(
-                                value
-                            ) is
-
-                            Decimal
-                    ):
-                        (
-                            new_candle_raw_data[
-                                key
-                            ]
-                        ) = (
-                            float(
-                                value
-                            )
-                        )
+                if new_candle_raw_data_list is None:
+                    new_candle_raw_data_list = []
 
                 new_candle_raw_data_list.append(
                     new_candle_raw_data
@@ -1096,9 +659,7 @@ class FinPlotChartProcessor(object):
             ):
                 self.__max_candle_price = (
                     max_candle_price  # noqa
-                ) = (
-                    new_max_candle_price
-                )
+                ) = new_max_candle_price
 
                 self.__update_max_price()
 
@@ -1117,9 +678,7 @@ class FinPlotChartProcessor(object):
             ):
                 self.__min_candle_price = (
                     min_candle_price  # noqa
-                ) = (
-                    new_min_candle_price
-                )
+                ) = new_min_candle_price
 
                 self.__update_min_price()
 
@@ -1214,7 +773,12 @@ class FinPlotChartProcessor(object):
 
         self.__update_bollinger_series()
         self.__update_rsi_series()
-        """
+
+        await self.__window.plot(
+            is_need_run_once=(
+                True
+            )
+        )
 
     async def __update_current_available_symbol_name_set(
             self
