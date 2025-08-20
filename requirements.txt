@@ -1,9 +1,14 @@
 aiogram
 asyncpg
+git+https://github.com/aRxT6wdZdNfmyZKYy21n/finplot.git
 httpx
 orjson
 pydantic
 pydantic-settings
+PyQt6
+pyqtgraph
+qasync
 SQLAlchemy[asyncio]
+TA-Lib
 websockets
 uvloop
