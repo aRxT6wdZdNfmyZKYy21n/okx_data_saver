@@ -123,6 +123,7 @@ _RSI_PLOT_GRADIENT_LOWER_END_COLOR = (
 )
 
 _RSI_LINE_COLOR = '#d1c4e9'
+_TEST_LINE_COLOR = '#ffffff'
 
 # Pavel's color preset
 
@@ -525,7 +526,8 @@ class FinPlotChartWindow(QMainWindow):
             bollinger_lower_band_plot,
             bollinger_upper_band_plot,
             price_plot,
-            rsi_plot
+            rsi_plot,
+            test_plot
 
             # quantity_plot,
             # volume_plot
@@ -536,7 +538,7 @@ class FinPlotChartWindow(QMainWindow):
                 # 2
                 # 3
                 # 4
-                5
+                6
             )
         )
 
@@ -633,6 +635,10 @@ class FinPlotChartWindow(QMainWindow):
 
         self.__rsi_plot = (
             rsi_plot
+        )
+
+        self.__test_plot = (
+            test_plot
         )
 
         self.__symbol_name_combo_box = (
@@ -1025,6 +1031,18 @@ class FinPlotChartWindow(QMainWindow):
                 ax=self.__rsi_axis,
                 color=_RSI_LINE_COLOR,
                 legend='RSI (6)'
+            )
+
+        test_series = (
+            processor.get_test_series()
+        )
+
+        if test_series is not None:
+            self.__test_plot.plot(
+                test_series,
+                ax=price_axis,
+                color=_TEST_LINE_COLOR,
+                legend='Test'
             )
 
         # volume_axis = (

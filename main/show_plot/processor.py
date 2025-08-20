@@ -3,8 +3,8 @@ import logging
 import traceback
 import typing
 
-from collections import (
-    defaultdict
+from datetime import (
+    timedelta,
 )
 
 from decimal import (
@@ -60,6 +60,7 @@ class FinPlotChartProcessor(object):
         '__min_candle_price',
         '__min_price',
         '__rsi_series',
+        '__test_series',
         '__window'
     )
 
@@ -116,6 +117,10 @@ class FinPlotChartProcessor(object):
         ) = None
 
         self.__rsi_series: (
+            Series | None
+        ) = None
+
+        self.__test_series: (
             Series | None
         ) = None
 
@@ -225,6 +230,13 @@ class FinPlotChartProcessor(object):
     ):
         return self.__rsi_series
 
+    def get_test_series(
+            self,
+    ) -> (
+            Series | None
+    ):
+        return self.__test_series
+
     async def init(
             self,
     ) -> None:
@@ -322,6 +334,10 @@ class FinPlotChartProcessor(object):
             None
         )
 
+        self.__test_series = (
+            None
+        )
+
         await (
             self.__update_current_available_symbol_name_set()
         )
@@ -399,6 +415,10 @@ class FinPlotChartProcessor(object):
         )
 
         self.__rsi_series = (
+            None
+        )
+
+        self.__test_series = (
             None
         )
 
@@ -531,17 +551,10 @@ class FinPlotChartProcessor(object):
         if candles_dataframe is not None:
             min_pandas_start_timestamp: (
                 pandas.Timestamp
-            ) = (
-                candles_dataframe.index.max()
-            )
+            ) = candles_dataframe.index.max()
 
-            min_start_timestamp_ms = (
-                min_pandas_start_timestamp.value //
-
-                (
-                    10 **
-                    6
-                )
+            min_start_timestamp_ms = int(
+                min_pandas_start_timestamp.timestamp()
             )
         else:
             min_start_timestamp_ms = 0
@@ -577,7 +590,8 @@ class FinPlotChartProcessor(object):
                     db_schema.symbol_name.asc(),
                     db_schema.start_timestamp_ms.desc(),
                 ).limit(
-                    10000
+                    # 10000
+                    500
                 )
             )
 
@@ -773,6 +787,7 @@ class FinPlotChartProcessor(object):
 
         self.__update_bollinger_series()
         self.__update_rsi_series()
+        self.__update_test_series()
 
         await self.__window.plot(
             is_need_run_once=(
@@ -882,7 +897,7 @@ class FinPlotChartProcessor(object):
         rsi_series = (
             talib.RSI(  # noqa
                 candles_dataframe.close,
-                timeperiod=6
+                timeperiod=14  # 6
             )
         )
 
@@ -891,4 +906,54 @@ class FinPlotChartProcessor(object):
 
         self.__rsi_series = (
             rsi_series
+        )
+
+    def __update_test_series(
+            self
+    ) -> None:
+        current_interval_name = self.__current_interval_name
+
+        if current_interval_name is None:
+            return
+
+        candles_dataframe: DataFrame = (
+            self.__candles_dataframe
+        )
+
+        assert (
+            candles_dataframe is not None
+        ), None
+
+        test_series = Series()
+
+        start_timestamp: pandas.Timestamp
+
+        for start_timestamp, candle_data in candles_dataframe.iterrows():
+            candle_close_price = candle_data.close
+            candle_high_price = candle_data.high
+            candle_low_price = candle_data.low
+            candle_open_price = candle_data.open
+
+            is_bull = candle_close_price >= candle_open_price
+
+            second_price: float
+            third_price: float
+
+            if is_bull:
+                second_price = candle_low_price
+                third_price = candle_high_price
+            else:
+                second_price = candle_high_price
+                third_price = candle_low_price
+
+            test_series[start_timestamp] = candle_open_price
+            test_series[start_timestamp + timedelta(minutes=3, seconds=45)] = second_price
+            test_series[start_timestamp + timedelta(minutes=7, seconds=30)] = third_price
+            test_series[start_timestamp + timedelta(minutes=11, seconds=15)] = candle_close_price
+
+        if not test_series.size:
+            return
+
+        self.__test_series = (
+            test_series
         )
