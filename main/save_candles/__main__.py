@@ -9,6 +9,7 @@ import orjson
 import uvloop
 
 from sqlalchemy import (
+    and_,
     select,
     update
 )
@@ -357,8 +358,17 @@ async def save_candles(
                             ).values(
                                 candle_raw_data_to_update
                             ).where(
-                                db_schema.start_timestamp_ms ==
-                                start_timestamp_ms
+                                and_(
+                                    (
+                                        db_schema.symbol_name ==
+                                        symbol_name
+                                    ),
+
+                                    (
+                                        db_schema.start_timestamp_ms ==
+                                        start_timestamp_ms
+                                    )
+                                )
                             )
                         )
 
