@@ -16,8 +16,18 @@ import talib
 
 from pandas import (
     DataFrame,
-    Series
+    Series,
 )
+
+from sqlalchemy import (
+    select,
+)
+
+from main.save_candles import (
+    schemas
+)
+from main.save_candles.schemas import OKXCandleData15m, OKXCandleData1H
+from main.show_plot.globals import g_globals
 
 from main.show_plot.window import (
     FinPlotChartWindow
@@ -31,7 +41,7 @@ logger = logging.getLogger(
 
 _CANDLE_INTERVAL_NAMES: list[str] = [  # TODO: RU
     '15m',
-    '1h',
+    '1H',
 ]
 
 
@@ -113,7 +123,7 @@ class FinPlotChartProcessor(object):
         ) = None
 
     # async def fini(
-    #         self
+    #         self,
     # ) -> None:
     #     # TODO: fini the window
     #
@@ -125,175 +135,113 @@ class FinPlotChartProcessor(object):
     #     )
 
     def get_bollinger_base_line_series(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                Series
-            ]
+            Series | None
     ):
-        return (
-            self.__bollinger_base_line_series
-        )
+        return self.__bollinger_base_line_series
 
     def get_bollinger_lower_band_series(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                Series
-            ]
+            Series | None
     ):
-        return (
-            self.__bollinger_lower_band_series
-        )
+        return self.__bollinger_lower_band_series
 
     def get_bollinger_upper_band_series(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                Series
-            ]
+            Series | None
     ):
-        return (
-            self.__bollinger_upper_band_series
-        )
+        return self.__bollinger_upper_band_series
 
     @staticmethod
     def get_current_available_interval_names() -> (
-            typing.Optional[
-                typing.List[
-                    str
-                ]
-            ]
+            list[str] | None
     ):
-        return (
-            _CANDLE_INTERVAL_NAMES
-        )
+        return _CANDLE_INTERVAL_NAMES
 
     async def get_current_available_symbol_names(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                typing.List[
-                    str
-                ]
-            ]
+            list[str] | None
     ):
-        return (
-            await self.__get_current_available_symbol_names()
-        )
+        return await self.__get_current_available_symbol_names()
 
     def get_current_interval_name(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                str
-            ]
+            str | None
     ):
-        return (
-            self.__current_interval_name
-        )
+        return self.__current_interval_name
 
     def get_current_symbol_name(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                str
-            ]
+            str | None
     ):
-        return (
-            self.__current_symbol_name
-        )
+        return self.__current_symbol_name
 
     def get_candles_dataframe(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                DataFrame
-            ]
+            DataFrame | None
     ):
-        return (
-            self.__candles_dataframe
-        )
+        return self.__candles_dataframe
 
     def get_max_candle_price(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                Decimal
-            ]
+            Decimal | None
     ):
-        return (
-            self.__max_candle_price
-        )
+        return self.__max_candle_price
 
     def get_max_price(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                Decimal
-            ]
+            Decimal | None
     ):
-        return (
-            self.__max_price
-        )
+        return self.__max_price
 
     def get_min_candle_price(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                Decimal
-            ]
+            Decimal | None
     ):
-        return (
-            self.__min_candle_price
-        )
+        return self.__min_candle_price
 
     def get_min_price(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                Decimal
-            ]
+            Decimal | None
     ):
-        return (
-            self.__min_price
-        )
+        return self.__min_price
 
     def get_rsi_series(
-            self
+            self,
     ) -> (
-            typing.Optional[
-                Series
-            ]
+            Series | None
     ):
-        return (
-                self.__rsi_series
-        )
+        return self.__rsi_series
 
     async def init(
-            self
+            self,
     ) -> None:
         # init the window
 
-        window = (
-            FinPlotChartWindow(
-                processor=self
-            )
+        window = FinPlotChartWindow(
+            processor=self
         )
 
-        self.__window = (
-            window
-        )
+        self.__window = window
 
         # show the window
 
         window.show()
 
-        await (
-            window.plot(
-                is_need_run_once=(
-                    True
-                )
+        await window.plot(
+            is_need_run_once=(
+                True
             )
         )
 
@@ -319,24 +267,155 @@ class FinPlotChartProcessor(object):
 
             value: (
                 str
-            )
+            ),
     ) -> bool:
-        return (
-            await self.__update_current_interval_name(
-                value
+        if (
+                value not in
+                _CANDLE_INTERVAL_NAMES
+        ):
+            return False
+
+        if (
+                value ==
+                self.__current_interval_name
+        ):
+            return False
+
+        self.__current_interval_name = (
+            value
+        )
+
+        self.__bollinger_base_line_series = (
+            None
+        )
+
+        self.__bollinger_lower_band_series = (
+            None
+        )
+
+        self.__bollinger_upper_band_series = (
+            None
+        )
+
+        self.__candles_dataframe = (
+            None
+        )
+
+        self.__max_candle_price = (
+            None
+        )
+
+        self.__max_price = (
+            None
+        )
+
+        self.__min_candle_price = (
+            None
+        )
+
+        self.__min_price = (
+            None
+        )
+
+        self.__rsi_series = (
+            None
+        )
+
+        await (
+            self.__update_candles_dataframe()
+        )
+
+        await (
+            self.__update_current_available_symbol_name_set()
+        )
+
+        await self.__window.plot(
+            is_need_run_once=(
+                True
             )
         )
+
+        return True
 
     async def update_current_symbol_name(
             self,
 
             value: str
     ) -> bool:
-        return (
-            await self.__update_current_symbol_name(
-                value
+        current_available_symbol_name_set = (
+            self.__current_available_symbol_name_set
+        )
+
+        if current_available_symbol_name_set is None:
+            return False
+
+        if (
+                value not in
+                current_available_symbol_name_set
+        ):
+            return False
+
+        if (
+                value ==
+                self.__current_symbol_name
+        ):
+            return False
+
+        self.__current_symbol_name = (
+            value
+        )
+
+        self.__bollinger_base_line_series = (
+            None
+        )
+
+        self.__bollinger_lower_band_series = (
+            None
+        )
+
+        self.__bollinger_upper_band_series = (
+            None
+        )
+
+        self.__candles_dataframe = (
+            None
+        )
+
+        self.__max_candle_price = (
+            None
+        )
+
+        self.__max_price = (
+            None
+        )
+
+        self.__min_candle_price = (
+            None
+        )
+
+        self.__min_price = (
+            None
+        )
+
+        self.__rsi_series = (
+            None
+        )
+
+        await (
+            self.__update_candles_dataframe()
+        )
+
+        await (
+            self.__update()
+        )
+
+        await self.__window.plot(
+            is_need_run_once=(
+                True
             )
         )
+
+        return True
 
     async def __get_current_available_symbol_names(
             self
@@ -363,7 +442,47 @@ class FinPlotChartProcessor(object):
     async def __update(
             self
     ) -> None:
-        pass  # TODO
+        current_interval_name = self.__current_interval_name
+
+        if current_interval_name is None:
+            print(
+                'current_interval_name is None'
+            )
+
+            return
+
+        current_symbol_name = self.__current_symbol_name
+
+        if current_symbol_name is None:
+            print(
+                'current_symbol_name is None'
+            )
+
+            return
+
+        db_schema: type[OKXCandleData15m] | type[OKXCandleData1H] = getattr(
+            schemas,
+            f'OKXCandleData{current_interval_name}'
+        )
+
+        postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
+
+        async with postgres_db_session_maker() as session:
+            result = await session.execute(
+                select(
+                    db_schema,
+                ).where(
+                    db_schema.symbol_name ==
+                    current_symbol_name
+                ).order_by(
+                    db_schema.start_timestamp_ms.desc(),
+                ).limit(
+                    10000
+                )
+            )
+
+            for row in result:
+                print(999, row)
 
         """
         candle_data_table_name_raw = (
@@ -379,17 +498,56 @@ class FinPlotChartProcessor(object):
         )
 
         async with (
-                available_symbol_name_set_by_exchange_place_map_update_lock
-        ):
-            async with (
-                    await (
-                        db_storage.get_connection()
+                await (
+                    db_storage.get_connection()
+                )
+        ) as connection:
+            async for row_data in (
+                    connection.select_distinct_optimized(
+                        column=(
+                            'exchange_place'
+                        ),
+
+                        schema_name=(
+                            'bingx_market'
+                        ),
+
+                        table_name=(
+                            candle_data_table_name_raw
+                        )
                     )
-            ) as connection:
-                async for row_data in (
+            ):
+                exchange_place_id: int = (
+                    row_data.pop(
+                        'exchange_place'
+                    )
+                )
+
+                exchange_place = (
+                    ExchangePlace(
+                        exchange_place_id
+                    )
+                )
+
+                if available_symbol_name_set_by_exchange_place_map is None:
+                    self.__available_symbol_name_set_by_exchange_place_map = (
+                        available_symbol_name_set_by_exchange_place_map
+                    ) = (
+                        defaultdict(
+                            set
+                        )
+                    )
+
+                available_symbol_name_set = (
+                    available_symbol_name_set_by_exchange_place_map[
+                        exchange_place
+                    ]
+                )
+
+                async for row_data_2 in (
                         connection.select_distinct_optimized(
                             column=(
-                                'exchange_place'
+                                'symbol_name'
                             ),
 
                             schema_name=(
@@ -398,84 +556,42 @@ class FinPlotChartProcessor(object):
 
                             table_name=(
                                 candle_data_table_name_raw
-                            )
+                            ),
+
+                            where_condition_or_separators=[
+                                SqlCondition(
+                                    left_operand_name=(
+                                        '__target_table__.exchange_place'
+                                    ),
+
+                                    operator_sql_code=(
+                                        '='
+                                    ),
+
+                                    right_operand_data_type=(
+                                        SqlDataType.Integer
+                                    ),
+
+                                    right_operand_sql_code_fmt=(
+                                        None
+                                    ),
+
+                                    right_operand_value=(
+                                        exchange_place_id
+                                    )
+                                )
+                            ]
                         )
                 ):
-                    exchange_place_id: int = (
-                        row_data.pop(
-                            'exchange_place'
+                    symbol_name: str = (
+                        row_data_2.pop(
+                            'symbol_name'
                         )
                     )
 
-                    exchange_place = (
-                        ExchangePlace(
-                            exchange_place_id
-                        )
+                    available_symbol_name_set.add(
+                        symbol_name
                     )
-
-                    if available_symbol_name_set_by_exchange_place_map is None:
-                        self.__available_symbol_name_set_by_exchange_place_map = (
-                            available_symbol_name_set_by_exchange_place_map
-                        ) = (
-                            defaultdict(
-                                set
-                            )
-                        )
-
-                    available_symbol_name_set = (
-                        available_symbol_name_set_by_exchange_place_map[
-                            exchange_place
-                        ]
-                    )
-
-                    async for row_data_2 in (
-                            connection.select_distinct_optimized(
-                                column=(
-                                    'symbol_name'
-                                ),
-
-                                schema_name=(
-                                    'bingx_market'
-                                ),
-
-                                table_name=(
-                                    candle_data_table_name_raw
-                                ),
-
-                                where_condition_or_separators=[
-                                    SqlCondition(
-                                        left_operand_name=(
-                                            '__target_table__.exchange_place'
-                                        ),
-
-                                        operator_sql_code=(
-                                            '='
-                                        ),
-
-                                        right_operand_data_type=(
-                                            SqlDataType.Integer
-                                        ),
-
-                                        right_operand_sql_code_fmt=(
-                                            None
-                                        ),
-
-                                        right_operand_value=(
-                                            exchange_place_id
-                                        )
-                                    )
-                                ]
-                            )
-                    ):
-                        symbol_name: str = (
-                            row_data_2.pop(
-                                'symbol_name'
-                            )
-                        )
-
-                        available_symbol_name_set.add(
-                            symbol_name
-                        )
 
         if available_symbol_name_set_by_exchange_place_map is None:
             print(
@@ -498,15 +614,7 @@ class FinPlotChartProcessor(object):
                 None
             )
 
-            self.__current_exchange_place = (
-                None
-            )
-
             self.__current_symbol_name = (
-                None
-            )
-
-            self.__current_interval_name = (
                 None
             )
 
@@ -539,10 +647,6 @@ class FinPlotChartProcessor(object):
             return
 
         # TODO: remove deleted symbol names && exchange places
-
-        current_exchange_place = (
-            self.__current_exchange_place
-        )
 
         async with (
                 available_symbol_name_set_by_exchange_place_map_update_lock
@@ -734,141 +838,6 @@ class FinPlotChartProcessor(object):
             self.__update_candles_dataframe()
         )
         """
-
-    async def __update_current_interval_name(
-            self,
-
-            value: (
-                str
-            )
-    ) -> bool:
-        if (
-                value not in
-                _CANDLE_INTERVAL_NAMES
-        ):
-            return False
-
-        if (
-                value ==
-                self.__current_interval_name
-        ):
-            return False
-
-        self.__current_interval_name = (
-            value
-        )
-
-        self.__bollinger_base_line_series = (
-            None
-        )
-
-        self.__bollinger_lower_band_series = (
-            None
-        )
-
-        self.__bollinger_upper_band_series = (
-            None
-        )
-
-        self.__candles_dataframe = (
-            None
-        )
-
-        self.__max_candle_price = (
-            None
-        )
-
-        self.__max_price = (
-            None
-        )
-
-        self.__min_candle_price = (
-            None
-        )
-
-        self.__min_price = (
-            None
-        )
-
-        self.__rsi_series = (
-            None
-        )
-
-        await (
-            self.__update_candles_dataframe()
-        )
-
-        return True
-
-    async def __update_current_symbol_name(
-            self,
-
-            value: str
-    ) -> bool:
-        current_available_symbol_name_set = (
-            self.__current_available_symbol_name_set
-        )
-
-        if current_available_symbol_name_set is None:
-            return False
-
-        if (
-                value not in
-                current_available_symbol_name_set
-        ):
-            return False
-
-        if (
-                value ==
-                self.__current_symbol_name
-        ):
-            return False
-
-        self.__current_symbol_name = (
-            value
-        )
-
-        self.__bollinger_base_line_series = (
-            None
-        )
-
-        self.__bollinger_lower_band_series = (
-            None
-        )
-
-        self.__bollinger_upper_band_series = (
-            None
-        )
-
-        self.__candles_dataframe = (
-            None
-        )
-
-        self.__max_candle_price = (
-            None
-        )
-
-        self.__max_price = (
-            None
-        )
-
-        self.__min_candle_price = (
-            None
-        )
-
-        self.__min_price = (
-            None
-        )
-
-        self.__rsi_series = (
-            None
-        )
-
-        await (
-            self.__update_candles_dataframe()
-        )
-
-        return True
 
     def __update_bollinger_series(
             self
@@ -1246,6 +1215,80 @@ class FinPlotChartProcessor(object):
         self.__update_bollinger_series()
         self.__update_rsi_series()
         """
+
+    async def __update_current_available_symbol_name_set(
+            self
+    ) -> None:
+        current_interval_name = self.__current_interval_name
+
+        if current_interval_name is None:
+            print(
+                'current_interval_name is None'
+            )
+
+            self.__current_available_symbol_name_set = None
+
+            return
+
+        current_available_symbol_name_set: set[str] | None = None
+
+        db_schema: type[OKXCandleData15m] | type[OKXCandleData1H] = getattr(
+            schemas,
+            f'OKXCandleData{current_interval_name}'
+        )
+
+        postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
+
+        async with postgres_db_session_maker() as session:
+            recursive_cte_initial_query = select(
+                db_schema.symbol_name
+            ).order_by(
+                db_schema.symbol_name.asc()
+            ).limit(
+                1
+            ).cte(
+                name='symbol_name_cte',
+                recursive=True,
+            )
+
+            recursive_cte_sub_query = select(
+                db_schema.symbol_name
+            ).where(
+                db_schema.symbol_name >
+                recursive_cte_initial_query.c.symbol_name
+            ).order_by(
+                db_schema.symbol_name.asc()
+            ).limit(
+                1
+            )
+
+            recursive_cte_full_query = recursive_cte_initial_query.union_all(
+                recursive_cte_sub_query
+            )
+
+            # full_cte = initial_cte.union_all(
+            #     recursive_cte_initial_query,
+            # )
+            #
+            result = await session.execute(
+                select(
+                    recursive_cte_full_query
+                ),
+            )
+
+            for row in result:
+                symbol_name, = row
+
+                if current_available_symbol_name_set is None:
+                    current_available_symbol_name_set = set()
+
+                current_available_symbol_name_set.add(
+                    symbol_name
+                )
+
+        self.__current_available_symbol_name_set = (
+            current_available_symbol_name_set
+        )
 
     def __update_max_price(
             self

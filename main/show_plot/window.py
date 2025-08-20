@@ -791,7 +791,7 @@ class FinPlotChartWindow(QMainWindow):
     async def __on_symbol_name_changed(
             self,
 
-            idx: int
+            # idx: int
     ) -> None:
         current_symbol_name = (
             self.__symbol_name_combo_box.currentText()
@@ -814,7 +814,7 @@ class FinPlotChartWindow(QMainWindow):
         print(
             'Selected symbol name'
             f': {current_symbol_name!r}'
-            f' ({idx})'
+            # f' ({idx})'
         )
 
         if not (
