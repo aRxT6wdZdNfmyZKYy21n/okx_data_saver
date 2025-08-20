@@ -131,6 +131,8 @@ async def save_candles(
                 row_data is not None
             )
 
+            now_timestamp_ms = TimeUtils.get_aware_current_timestamp_ms()
+
             if is_last_candle_exists:
                 last_candle_data: schemas.OKXCandleData15m | schemas.OKXCandleData1H
 
@@ -141,7 +143,7 @@ async def save_candles(
                 )
             else:
                 last_candle_timestamp_ms = (
-                    TimeUtils.get_aware_current_timestamp_ms() -
+                    now_timestamp_ms -
 
                     (
                         1000 *  # ms
@@ -153,7 +155,10 @@ async def save_candles(
                     )
                 )
 
-            print(999, symbol_name, row_data, last_candle_timestamp_ms)
+            logger.info(
+                f'Saving {interval_name} candles for {symbol_name!r}'
+                f' ({(now_timestamp_ms - last_candle_timestamp_ms) // (1000 * 60 * 60 * 1)} hours left)'
+            )
 
             response = await api_session.get(
                 url='/api/v5/market/history-candles',
@@ -333,6 +338,16 @@ async def save_candles(
                     interval_name,
                 )
 
+            if not (
+                    candle_raw_data_to_update is not None or
+                    candle_raw_data_list_to_insert
+            ):
+                logger.info(
+                    'Nothing to update'
+                )
+
+                continue
+
             async with postgres_db_session_maker() as session:
                 async with session.begin():
                     if candle_raw_data_to_update is not None:
@@ -344,15 +359,14 @@ async def save_candles(
                             )
                         )
 
-                    await session.execute(
-                        insert(
-                            db_schema
-                        ),
+                    if candle_raw_data_list_to_insert:
+                        await session.execute(
+                            insert(
+                                db_schema
+                            ),
 
-                        candle_raw_data_list_to_insert
-                    )
-
-
+                            candle_raw_data_list_to_insert
+                        )
 
             logger.info(
                 f'Added {len(candle_tuples)} {interval_name} candles'
@@ -361,6 +375,7 @@ async def save_candles(
             await asyncio.sleep(
                 1.0  # s
             )
+
 
 async def start_candles_saving_loop() -> None:
     async with httpx.AsyncClient(
