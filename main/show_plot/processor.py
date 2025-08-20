@@ -60,6 +60,7 @@ class FinPlotChartProcessor(object):
         '__min_candle_price',
         '__min_price',
         '__rsi_series',
+        '__test_analytics_raw_data_list',
         '__test_series',
         '__window'
     )
@@ -119,6 +120,8 @@ class FinPlotChartProcessor(object):
         self.__rsi_series: (
             Series | None
         ) = None
+
+        self.__test_analytics_raw_data_list: list[dict[str, typing.Any]] | None = None
 
         self.__test_series: (
             Series | None
@@ -230,6 +233,11 @@ class FinPlotChartProcessor(object):
     ):
         return self.__rsi_series
 
+    def get_test_analytics_raw_data_list(
+            self,
+    ) -> list[dict[str, typing.Any]] | None:
+        return self.__test_analytics_raw_data_list
+
     def get_test_series(
             self,
     ) -> (
@@ -272,7 +280,7 @@ class FinPlotChartProcessor(object):
                 )
 
             await asyncio.sleep(
-                15.0  # s
+                5.0  # s
             )
 
     async def update_current_interval_name(
@@ -333,6 +341,8 @@ class FinPlotChartProcessor(object):
         self.__rsi_series = (
             None
         )
+
+        self.__test_analytics_raw_data_list = None
 
         self.__test_series = (
             None
@@ -417,6 +427,8 @@ class FinPlotChartProcessor(object):
         self.__rsi_series = (
             None
         )
+
+        self.__test_analytics_raw_data_list = None
 
         self.__test_series = (
             None
@@ -554,7 +566,8 @@ class FinPlotChartProcessor(object):
             ) = candles_dataframe.index.max()
 
             min_start_timestamp_ms = int(
-                min_pandas_start_timestamp.timestamp()
+                min_pandas_start_timestamp.timestamp() *
+                1000  # ms
             )
         else:
             min_start_timestamp_ms = 0
@@ -591,7 +604,8 @@ class FinPlotChartProcessor(object):
                     db_schema.start_timestamp_ms.desc(),
                 ).limit(
                     # 10000
-                    500
+                    1000
+                    # 50
                 )
             )
 
@@ -924,7 +938,8 @@ class FinPlotChartProcessor(object):
             candles_dataframe is not None
         ), None
 
-        test_series = Series()
+        prices: list[float] = []
+        start_timestamps: list[pandas.Timestamp] = []
 
         start_timestamp: pandas.Timestamp
 
@@ -946,10 +961,221 @@ class FinPlotChartProcessor(object):
                 second_price = candle_high_price
                 third_price = candle_low_price
 
-            test_series[start_timestamp] = candle_open_price
-            test_series[start_timestamp + timedelta(minutes=3, seconds=45)] = second_price
-            test_series[start_timestamp + timedelta(minutes=7, seconds=30)] = third_price
-            test_series[start_timestamp + timedelta(minutes=11, seconds=15)] = candle_close_price
+            prices.append(
+                candle_open_price
+            )
+
+            start_timestamps.append(
+                start_timestamp
+            )
+
+            prices.append(
+                second_price
+            )
+
+            start_timestamps.append(
+                start_timestamp + timedelta(minutes=3, seconds=45)
+            )
+
+            prices.append(
+                third_price
+            )
+
+            start_timestamps.append(
+                start_timestamp + timedelta(minutes=7, seconds=30)
+            )
+
+            prices.append(
+                candle_close_price
+            )
+
+            start_timestamps.append(
+                start_timestamp + timedelta(minutes=11, seconds=15)
+            )
+
+        prices_2: list[float] = []
+        start_timestamps_2: list[pandas.Timestamp] = []
+
+        for _ in range(10):
+            self.__process_1(
+                first_item_idx=0,
+                prices=prices,
+                prices_2=prices_2,
+                start_timestamps=start_timestamps,
+                start_timestamps_2=start_timestamps_2,
+            )
+
+            prices.clear()
+            start_timestamps.clear()
+
+            self.__process_1(
+                first_item_idx=1,
+                prices=prices_2,
+                prices_2=prices,
+                start_timestamps=start_timestamps_2,
+                start_timestamps_2=start_timestamps,
+            )
+
+            prices_2.clear()
+            start_timestamps_2.clear()
+
+        prices_3: list[float] = []
+        start_timestamps_3: list[pandas.Timestamp] = []
+
+        for _ in range(0):
+            self.__process_2(
+                first_item_idx=0,
+                prices=prices,
+                prices_2=prices_2,
+                start_timestamps=start_timestamps,
+                start_timestamps_2=start_timestamps_2,
+            )
+
+            prices.clear()
+            start_timestamps.clear()
+
+            self.__process_2(
+                first_item_idx=1,
+                prices=prices_2,
+                prices_2=prices_3,
+                start_timestamps=start_timestamps_2,
+                start_timestamps_2=start_timestamps_3,
+            )
+
+            prices_2.clear()
+            start_timestamps_2.clear()
+
+            self.__process_2(
+                first_item_idx=2,
+                prices=prices_3,
+                prices_2=prices,
+                start_timestamps=start_timestamps_3,
+                start_timestamps_2=start_timestamps,
+            )
+
+            prices_3.clear()
+            start_timestamps_3.clear()
+
+        if not start_timestamps:
+            return
+
+        test_analytics_raw_data_list: list[dict[str, typing.Any]] = []
+
+        for first_item_idx in range(len(start_timestamps) - 1):
+            second_item_idx = first_item_idx + 1
+
+            first_price = prices[first_item_idx]
+            first_start_timestamp = start_timestamps[first_item_idx]
+
+            second_price = prices[second_item_idx]
+            second_start_timestamp = start_timestamps[second_item_idx]
+
+            is_bull = second_price >= first_price
+
+            test_analytics_raw_data_list.append(
+                {
+                    'is_bull': is_bull,
+
+                    'first_price': first_price,
+                    'first_start_timestamp': first_start_timestamp,
+
+                    'second_price': second_price,
+                    'second_start_timestamp': second_start_timestamp,
+                }
+            )
+
+        self.__test_analytics_raw_data_list = test_analytics_raw_data_list
+
+        price_by_start_timestamp_map = {
+            timestamp: price
+            for timestamp, price in zip(
+                start_timestamps,
+                prices,
+            )
+        }
+
+        prices_final: list[float] = []
+        start_timestamps_final: list[pandas.Timestamp] = []
+
+        start_timestamp = start_timestamps[0]
+        end_timestamp = start_timestamps[-1]
+
+        old_price: float | None = None
+        old_start_timestamp: pandas.Timestamp | None = None
+
+        while start_timestamp <= end_timestamp:
+            price = price_by_start_timestamp_map.get(
+                start_timestamp
+            )
+
+            if price is None:
+                assert old_price is not None, None
+                assert old_start_timestamp is not None, None
+
+                next_price: float | None = None
+                next_timestamp = start_timestamp
+
+                while next_timestamp <= end_timestamp:
+                    next_price = price_by_start_timestamp_map.get(
+                        next_timestamp
+                    )
+
+                    if next_price is not None:
+                        break
+
+                    next_timestamp += timedelta(
+                        minutes=3,
+                        seconds=45,
+                    )
+
+                if next_price is not None:
+                    coefficient = (
+                        (
+                            start_timestamp.timestamp() -
+                            old_start_timestamp.timestamp()
+                        ) /
+
+                        (
+                            next_timestamp.timestamp() -
+                            old_start_timestamp.timestamp()
+                        )
+                    )
+
+                    price = (
+                        old_price +
+
+                        coefficient * (
+                            next_price -
+                            old_price
+                        )
+                    )
+                else:
+                    price = old_price
+
+                price_by_start_timestamp_map[
+                    start_timestamp
+                ] = price
+            else:
+                old_price = price
+                old_start_timestamp = start_timestamp
+
+            prices_final.append(
+                price,
+            )
+
+            start_timestamps_final.append(
+                start_timestamp,
+            )
+
+            start_timestamp += timedelta(
+                minutes=3,
+                seconds=45,
+            )
+
+        test_series = Series(
+            prices_final,
+            start_timestamps_final,
+        )
 
         if not test_series.size:
             return
@@ -957,3 +1183,127 @@ class FinPlotChartProcessor(object):
         self.__test_series = (
             test_series
         )
+
+    @staticmethod
+    def __process_1(
+            first_item_idx: int,
+            prices: list[float],
+            prices_2: list[float],
+            start_timestamps: list[pandas.Timestamp],
+            start_timestamps_2: list[pandas.Timestamp],
+    ) -> None:
+        while first_item_idx < len(start_timestamps) - 2:
+            second_item_idx = first_item_idx + 1
+            third_item_idx = second_item_idx + 1
+
+            first_price = prices[first_item_idx]
+            first_start_timestamp = start_timestamps[first_item_idx]
+
+            prices_2.append(
+                first_price
+            )
+
+            start_timestamps_2.append(
+                first_start_timestamp
+            )
+
+            second_price = prices[second_item_idx]
+            second_start_timestamp = start_timestamps[second_item_idx]
+
+            third_price = prices[third_item_idx]
+            third_start_timestamp = start_timestamps[third_item_idx]
+
+            is_bull_1 = second_price > first_price
+            is_bear_1 = second_price < first_price
+            is_cross_1 = second_price == first_price
+
+            is_bull_2 = third_price > second_price
+            is_bear_2 = third_price < second_price
+            is_cross_2 = third_price == second_price
+
+            if not (
+                    is_bull_1 == is_bull_2 or
+                    is_bear_1 == is_bear_2 or
+                    is_cross_1 or
+                    is_cross_2
+            ):
+                # second_price = (
+                #     (
+                #         first_price +
+                #         third_price
+                #     ) /
+                #
+                #     2.0
+                # )
+
+                prices_2.append(
+                    second_price
+                )
+
+                start_timestamps_2.append(
+                    second_start_timestamp
+                )
+
+            first_item_idx += 2
+
+    @staticmethod
+    def __process_2(
+            first_item_idx: int,
+            prices: list[float],
+            prices_2: list[float],
+            start_timestamps: list[pandas.Timestamp],
+            start_timestamps_2: list[pandas.Timestamp],
+    ) -> None:
+        while first_item_idx < len(start_timestamps) - 3:
+            second_item_idx = first_item_idx + 1
+            third_item_idx = second_item_idx + 1
+            fourth_item_idx = third_item_idx + 1
+
+            first_price = prices[first_item_idx]
+            first_start_timestamp = start_timestamps[first_item_idx]
+
+            prices_2.append(
+                first_price
+            )
+
+            start_timestamps_2.append(
+                first_start_timestamp
+            )
+
+            second_price = prices[second_item_idx]
+            second_start_timestamp = start_timestamps[second_item_idx]
+
+            third_price = prices[third_item_idx]
+            third_start_timestamp = start_timestamps[third_item_idx]
+
+            fourth_price = prices[fourth_item_idx]
+            fourth_start_timestamp = start_timestamps[fourth_item_idx]
+
+            if not (
+                    (
+                        first_price <= second_price <= fourth_price and
+                        first_price <= third_price <= fourth_price
+                    ) or
+
+                    (
+                        fourth_price <= second_price <= first_price and
+                        fourth_price <= third_price <= first_price
+                    )
+            ):
+                prices_2.append(
+                    second_price
+                )
+
+                start_timestamps_2.append(
+                    second_start_timestamp
+                )
+
+                prices_2.append(
+                    third_price
+                )
+
+                start_timestamps_2.append(
+                    third_start_timestamp
+                )
+
+            first_item_idx += 3

@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import traceback
 import typing
+from datetime import timedelta
 
 from decimal import (
     Decimal
 )
 
+import pandas
 from qasync import asyncSlot
 
 import finplot
@@ -637,6 +639,10 @@ class FinPlotChartWindow(QMainWindow):
             rsi_plot
         )
 
+        self.__test_analytics_rect_by_start_timestamp_ms_map: (
+            dict[int, FinRect]
+        ) = {}
+
         self.__test_plot = (
             test_plot
         )
@@ -965,6 +971,7 @@ class FinPlotChartWindow(QMainWindow):
             ax=price_axis  # .overlay()
         )
 
+        """
         max_price = (
             processor.get_max_price()
         )
@@ -981,7 +988,6 @@ class FinPlotChartWindow(QMainWindow):
             min_price is not None
         ), None
 
-        """
         finplot.set_y_range(
             float(
                 min_price *
@@ -1032,6 +1038,97 @@ class FinPlotChartWindow(QMainWindow):
                 color=_RSI_LINE_COLOR,
                 legend='RSI (6)'
             )
+
+        test_analytics_raw_data_list = processor.get_test_analytics_raw_data_list()
+
+        if test_analytics_raw_data_list is not None:
+            test_analytics_rect_by_start_timestamp_ms_map = (
+                self.__test_analytics_rect_by_start_timestamp_ms_map
+            )
+
+            for test_analytics_raw_data in test_analytics_raw_data_list:
+                start_timestamp: pandas.Timestamp = test_analytics_raw_data[
+                    'first_start_timestamp'
+                ]
+
+                start_timestamp_ms = int(
+                    start_timestamp.timestamp() *
+                    1000
+                )
+
+                if start_timestamp_ms in test_analytics_rect_by_start_timestamp_ms_map:
+                    continue
+
+                end_price: float = test_analytics_raw_data[
+                    'second_price'
+                ]
+
+                end_timestamp: pandas.Timestamp = test_analytics_raw_data[
+                    'second_start_timestamp'
+                ]
+
+                is_bull: bool = test_analytics_raw_data[
+                    'is_bull'
+                ]
+
+                start_price: float = test_analytics_raw_data[
+                    'first_price'
+                ]
+
+                test_analytics_color: QColor
+
+                if is_bull:
+                    test_analytics_color = QColor(
+                        0,
+                        255,
+                        0,
+
+                        int(
+                            255 *
+                            0.25
+                        )
+                    )
+                else:
+                    test_analytics_color = QColor(
+                        255,
+                        0,
+                        0,
+
+                        int(
+                            255 *
+                            0.25
+                        )
+                    )
+
+                # Add new rect
+
+                test_analytics_rect = (  # noqa
+                    test_analytics_rect_by_start_timestamp_ms_map[
+                        start_timestamp_ms
+                    ]
+                ) = finplot.add_rect(
+                    ax=price_axis,
+
+                    color=(
+                        test_analytics_color
+                    ),
+
+                    p0=(
+                        start_timestamp - timedelta(minutes=7, seconds=30),
+                        start_price,
+                    ),
+
+                    p1=(
+                        end_timestamp - timedelta(minutes=7, seconds=30),
+                        end_price,
+                    ),
+
+                    interactive=False,
+
+                    # pen=(
+                    #     test_analytics_color
+                    # ),
+                )
 
         test_series = (
             processor.get_test_series()
