@@ -317,16 +317,6 @@ async def save_candles(
                         )
                 ):
                     candle_raw_data_to_update = candle_raw_data
-
-                    # Remove primary key
-
-                    candle_raw_data_to_update.pop(
-                        'symbol_name',
-                    )
-
-                    candle_raw_data_to_update.pop(
-                        'start_timestamp_ms',
-                    )
                 else:
                     candle_raw_data_list_to_insert.append(
                         candle_raw_data
@@ -351,11 +341,24 @@ async def save_candles(
             async with postgres_db_session_maker() as session:
                 async with session.begin():
                     if candle_raw_data_to_update is not None:
+                        # Remove primary key
+
+                        candle_raw_data_to_update.pop(
+                            'symbol_name',
+                        )
+
+                        start_timestamp_ms: int = candle_raw_data_to_update.pop(
+                            'start_timestamp_ms',
+                        )
+
                         await session.execute(
                             update(
                                 db_schema
                             ).values(
                                 candle_raw_data_to_update
+                            ).where(
+                                db_schema.start_timestamp_ms ==
+                                start_timestamp_ms
                             )
                         )
 
