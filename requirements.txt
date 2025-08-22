@@ -3,6 +3,7 @@ asyncpg
 git+https://github.com/aRxT6wdZdNfmyZKYy21n/finplot.git
 httpx
 orjson
+pandas
 pydantic
 pydantic-settings
 PyQt6
