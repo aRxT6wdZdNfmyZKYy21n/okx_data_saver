@@ -240,9 +240,7 @@ class FinPlotChartProcessor(object):
 
     def get_test_series(
             self,
-    ) -> (
-            Series | None
-    ):
+    ) -> Series | None:
         return self.__test_series
 
     async def init(
@@ -356,11 +354,15 @@ class FinPlotChartProcessor(object):
             self.__update_candles_dataframe()
         )
 
-        await self.__window.plot(
+        window = self.__window
+
+        await window.plot(
             is_need_run_once=(
                 True
             )
         )
+
+        window.auto_range_price_plot()
 
         return True
 
@@ -438,11 +440,15 @@ class FinPlotChartProcessor(object):
             self.__update_candles_dataframe()
         )
 
-        await self.__window.plot(
+        window = self.__window
+
+        await window.plot(
             is_need_run_once=(
                 True
             )
         )
+
+        window.auto_range_price_plot()
 
         return True
 
@@ -604,7 +610,7 @@ class FinPlotChartProcessor(object):
                     db_schema.start_timestamp_ms.desc(),
                 ).limit(
                     # 10000
-                    1000
+                    200
                     # 50
                 )
             )
