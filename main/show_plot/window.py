@@ -4,14 +4,15 @@ import asyncio
 import traceback
 import typing
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas
+from pyqtgraph import Point
 from qasync import asyncSlot
 
 import pyqtgraph
 
-from PyQt6.QtCore import Qt, QRectF, QPointF, QSizeF
+from PyQt6.QtCore import Qt, QRectF, QPointF
 
 from PyQt6.QtGui import (
     QColor,
@@ -38,9 +39,17 @@ if typing.TYPE_CHECKING:
     )
 
 
-_IS_NEED_SHOW_BOLLINGER_BANDS = False
+_INTERVAL_DURATION_BY_NAME_MAP = {
+    '15m': timedelta(
+        minutes=15,
+    ),
 
-# Bogdan's color preset
+    '1H': timedelta(
+        hours=1,
+    ),
+}
+
+_IS_NEED_SHOW_BOLLINGER_BANDS = True
 
 _BOLLINGER_BANDS_FILL_COLOR = (
     QColor(
@@ -55,12 +64,28 @@ _BOLLINGER_BASE_LINE_COLOR = '#2962ff'
 _BOLLINGER_LOWER_BAND_COLOR = '#089981'
 _BOLLINGER_UPPER_BAND_COLOR = '#f23645'
 
-_CANDLE_BEAR_COLOR = (
-    '#000000'
+_CANDLE_BEAR_BODY_COLOR = QColor(
+    0xf2,
+    0x36,
+    0x45,
 )
 
-_CANDLE_BULL_COLOR = (
-    '#ffffff'
+_CANDLE_BEAR_SHADOW_COLOR = QColor(
+    0xf2,
+    0x36,
+    0x45,
+)
+
+_CANDLE_BULL_BODY_COLOR = QColor(
+    0x08,
+    0x99,
+    0x81,
+)
+
+_CANDLE_BULL_SHADOW_COLOR = QColor(
+    0x08,
+    0x99,
+    0x81,
 )
 
 _PLOT_BACKGROUND_UPPER_COLOR = (
@@ -114,89 +139,30 @@ _RSI_PLOT_GRADIENT_LOWER_END_COLOR = (
     )
 )
 
-_RSI_LINE_COLOR = '#d1c4e9'
+_RSI_LINE_COLOR = '#7e57c2'
 _TEST_LINE_COLOR = '#ffffff'
-
-# Pavel's color preset
-
-# _BOLLINGER_BANDS_FILL_COLOR = (
-#     QColor(
-#         33,
-#         150,
-#         243,
-#         0.05
-#     )
-# )
-#
-# _BOLLINGER_BASE_LINE_COLOR = '#2962ff'
-# _BOLLINGER_LOWER_BAND_COLOR = '#089981'
-# _BOLLINGER_UPPER_BAND_COLOR = '#f23645'
-#
-# _CANDLE_BEAR_COLOR = (
-#     '#f23645'
-# )
-#
-# _CANDLE_BULL_COLOR = (
-#     '#089981'
-# )
-#
-# _PLOT_BACKGROUND_UPPER_COLOR = (
-#     QColor(
-#         24,
-#         28,
-#         39
-#     )
-# )
-#
-# _PLOT_BACKGROUND_LOWER_COLOR = (
-#     QColor(
-#         19,
-#         23,
-#         34
-#     )
-# )
-#
-# _RSI_PLOT_GRADIENT_UPPER_START_COLOR = (
-#     QColor(
-#         76,
-#         175,
-#         80
-#     )
-# )
-#
-# _RSI_PLOT_GRADIENT_UPPER_END_COLOR = (
-#     QColor(
-#         76,
-#         175,
-#         80,
-#         0
-#     )
-# )
-#
-# _RSI_PLOT_GRADIENT_LOWER_START_COLOR = (
-#     QColor(
-#         255,
-#         82,
-#         82,
-#         0
-#     )
-# )
-#
-# _RSI_PLOT_GRADIENT_LOWER_END_COLOR = (
-#     QColor(
-#         255,
-#         82,
-#         82,
-#         255
-#     )
-# )
-#
-# _RSI_LINE_COLOR = '#7e57c2'
 
 
 class RectItem(pyqtgraph.RectROI):
-    def __init__(self, brush, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(
+            self,
+            brush,
+            is_centered: bool,
+            pen,
+            position: Point,
+            size: Point,
+    ) -> None:
+        super().__init__(
+            position,
+            size,
+
+            centered=is_centered,
+            movable=False,
+            pen=pen,
+            rotatable=False,
+            resizable=False,
+            removable=False,
+        )
 
         self.__brush = brush
 
@@ -228,12 +194,141 @@ class CandlestickItem(RectItem):
     def __init__(
             self,
 
-            *args,
-            **kwargs,
+            close_price: float,
+            end_timestamp_ns: float,
+            high_price: float,
+            low_price: float,
+            open_price: float,
+            start_timestamp_ns: float,
     ) -> None:
+        body_color, shadow_color = self.__generate_body_and_shadow_color_pair(
+            close_price,
+            open_price,
+        )
+
         super().__init__(
+            brush=body_color,
+            is_centered=False,
+            pen=shadow_color,
+            position=self.__generate_position(
+                open_price,
+                start_timestamp_ns,
+            ),
+            size=self.__generate_size(
+                close_price,
+                end_timestamp_ns,
+                open_price,
+                start_timestamp_ns,
+            ),
+        )
+
+        self.__close_price = close_price
+        self.__end_timestamp_ns = end_timestamp_ns
+        self.__high_price = high_price
+        self.__low_price = low_price
+        self.__open_price = open_price
+        self.__start_timestamp_ns = start_timestamp_ns
+
+    def paint(self, painter, *args):
+        # painter.setPen(
+        #     self.currentPen,
+        # )
+
+        # painter.drawLine(
+        #     QPointF(0, self.__low_price),
+        #     QPointF(0, self.__high_price)
+        # )
+
+        super().paint(
+            painter,
             *args,
-            **kwargs,
+        )
+
+    def update_data(
+            self,
+
+            close_price: float,
+            end_timestamp_ns: float,
+            high_price: float,
+            low_price: float,
+            open_price: float,
+            start_timestamp_ns: float,
+    ) -> None:
+        self.__close_price = close_price
+        self.__end_timestamp_ns = end_timestamp_ns
+        self.__high_price = high_price
+        self.__low_price = low_price
+        self.__open_price = open_price
+        self.__start_timestamp_ns = start_timestamp_ns
+
+        self.setPos(
+            self.__generate_position(
+                open_price,
+                start_timestamp_ns,
+            )
+        )
+
+        self.setSize(
+            self.__generate_size(
+                close_price,
+                end_timestamp_ns,
+                open_price,
+                start_timestamp_ns,
+            )
+        )
+
+        body_color, shadow_color = self.__generate_body_and_shadow_color_pair(
+            close_price,
+            open_price,
+        )
+
+        self.set_brush(
+            body_color,
+        )
+
+        self.setPen(
+            shadow_color,
+        )
+
+    @staticmethod
+    def __generate_body_and_shadow_color_pair(
+            close_price: float,
+            open_price: float,
+    ) -> tuple[QColor, QColor]:
+        is_bull = close_price >= open_price
+
+        body_color: QColor
+        shadow_color: QColor
+
+        if is_bull:
+            body_color = _CANDLE_BULL_BODY_COLOR
+            shadow_color =_CANDLE_BULL_SHADOW_COLOR
+        else:
+            body_color = _CANDLE_BEAR_BODY_COLOR
+            shadow_color = _CANDLE_BEAR_SHADOW_COLOR
+
+        return body_color, shadow_color
+
+    @staticmethod
+    def __generate_position(
+            open_price: float,
+            start_timestamp_ns: float,
+    ) -> Point:
+        return Point(
+            start_timestamp_ns,
+            open_price
+        )
+
+    @staticmethod
+    def __generate_size(
+            close_price: float,
+            end_timestamp_ns: float,
+            open_price: float,
+            start_timestamp_ns: float,
+    ) -> Point:
+        return Point(
+            end_timestamp_ns - start_timestamp_ns,
+            close_price - open_price
         )
 
 
@@ -244,14 +339,22 @@ class DateTimeAxisItem(pyqtgraph.AxisItem):
         self.enableAutoSIPrefix(False)
 
     def tickStrings(self, values, scale, spacing):
-        return [
-            datetime.fromtimestamp(
-                value //
-                10 ** 9
-            ).isoformat()
+        tick_strings = []
 
-            for value in values
-        ]
+        for value in values:
+            try:
+                tick_string = datetime.fromtimestamp(
+                    value //
+                    10 ** 9
+                ).isoformat()
+            except ValueError:
+                tick_string = 'N/A'
+
+            tick_strings.append(
+                tick_string,
+            )
+
+        return tick_strings
 
 
 class FinPlotChartWindow(QMainWindow):
@@ -477,12 +580,9 @@ class FinPlotChartWindow(QMainWindow):
             price_plot
         )
 
-        self.__price_plot_data_item = (
-            price_plot.plot(
-                pen=(255, 255, 255),  # TODO: TradingView
-                name='Price',
-            )
-        )
+        self.__price_candlestick_item_by_start_timestamp_ms_map: (
+            dict[int, CandlestickItem]
+        ) = {}
 
         self.__processor = (
             processor
@@ -708,10 +808,23 @@ class FinPlotChartWindow(QMainWindow):
             processor.get_candles_dataframe()
         )
 
+        price_candlestick_item_by_start_timestamp_ms_map = (
+            self.__price_candlestick_item_by_start_timestamp_ms_map
+        )
+
+        price_plot = self.__price_plot
+
         if candles_dataframe is None:
             print(
                 'candles_dataframe is None'
             )
+
+            for price_candlestick_item in price_candlestick_item_by_start_timestamp_ms_map.values():
+                price_plot.removeItem(
+                    price_candlestick_item,
+                )
+
+            price_candlestick_item_by_start_timestamp_ms_map.clear()
 
             return
 
@@ -783,75 +896,61 @@ class FinPlotChartWindow(QMainWindow):
         # plot.reset()
         # self.__plot_overlay.reset()
 
-        # TODO
-        """
-        self.__price_plot.candlestick_ochl(
-            candles_dataframe[[
-                'open',
-                'close',
-                'high',
-                'low'
-            ]],
-            # legend='price',
-            ax=price_plot  # .overlay()
-        )
-        """
+        current_interval_name = processor.get_current_interval_name()
 
-        """
-        max_price = (
-            processor.get_max_price()
-        )
+        assert current_interval_name is not None, None
 
-        assert (
-            max_price is not None
-        ), None
+        current_interval_duration = _INTERVAL_DURATION_BY_NAME_MAP[
+            current_interval_name
+        ]
 
-        min_price = (
-            processor.get_min_price()
-        )
+        candle_start_timestamp_ms_set: set[int] = set()
 
-        assert (
-            min_price is not None
-        ), None
+        for start_timestamp, candle_data in candles_dataframe.iterrows():
+            end_timestamp = start_timestamp + current_interval_duration
 
-        finplot.set_y_range(
-            float(
-                min_price *
+            candle_close_price = candle_data.close
+            candle_high_price = candle_data.high
+            candle_low_price = candle_data.low
+            candle_open_price = candle_data.open
 
-                (
-                    1 -
+            start_timestamp_ms = int(
+                start_timestamp.timestamp() *
+                1000
+            )
 
-                    Decimal(
-                        '0.05'  # 5%
-                    )
+            candle_start_timestamp_ms_set.add(
+                start_timestamp_ms,
+            )
+
+            price_candlestick_item = price_candlestick_item_by_start_timestamp_ms_map.get(
+                start_timestamp_ms
+            )
+
+            if price_candlestick_item is not None:
+                price_candlestick_item.update_data(
+                    candle_close_price,
+                    end_timestamp.value,
+                    candle_high_price,
+                    candle_low_price,
+                    candle_open_price,
+                    start_timestamp.value
                 )
-            ),
-
-            float(
-                max_price *
-
-                (
-                    1 +
-
-                    Decimal(
-                        '0.05'  # 5%
-                    )
+            else:
+                price_candlestick_item = price_candlestick_item_by_start_timestamp_ms_map[
+                    start_timestamp_ms
+                ] = CandlestickItem(
+                    candle_close_price,
+                    end_timestamp.value,
+                    candle_high_price,
+                    candle_low_price,
+                    candle_open_price,
+                    start_timestamp.value
                 )
-            ),
 
-            ax=price_plot
-        )
-        """
-
-        # quantity_plot = (
-        #     self.__quantity_plot
-        # )
-
-        # self.__quantity_plot.plot(  # TODO
-        #     candles_dataframe.quantity,
-        #     legend='quantity',
-        #     ax=quantity_plot
-        # )
+                price_plot.addItem(
+                    price_candlestick_item
+                )
 
         rsi_series = (
             processor.get_rsi_series()
@@ -863,8 +962,6 @@ class FinPlotChartWindow(QMainWindow):
                 rsi_series.array,
             )
 
-        price_plot = self.__price_plot
-
         test_analytics_raw_data_list = processor.get_test_analytics_raw_data_list()
 
         test_analytics_rect_item_by_start_timestamp_ms_map = (
@@ -872,7 +969,7 @@ class FinPlotChartWindow(QMainWindow):
         )
 
         if test_analytics_raw_data_list is not None:
-            test_analytics_raw_data_by_start_timestamp_ms_map: dict[int, dict[str, typing.Any]] = {}
+            test_analytics_raw_data_by_start_timestamp_ms_map: dict[int, dict[str, typing.Any]] = {}  # TODO: test_analytics_raw_data_list -> test_analytics_raw_data_by_start_timestamp_ms_map
 
             for test_analytics_raw_data in test_analytics_raw_data_list:
                 start_timestamp: pandas.Timestamp = test_analytics_raw_data[
@@ -933,12 +1030,12 @@ class FinPlotChartWindow(QMainWindow):
                         )
                     )
 
-                test_analytics_rect_item_position = (
+                test_analytics_rect_item_position = Point(
                     start_timestamp.value,
                     start_price,
                 )
 
-                test_analytics_rect_item_size = (
+                test_analytics_rect_item_size = Point(
                     (
                         end_timestamp.value -
                         start_timestamp.value
@@ -978,22 +1075,19 @@ class FinPlotChartWindow(QMainWindow):
                             test_analytics_color
                         ),
 
+                        is_centered=False,
+
                         pen=(
                             test_analytics_color
                         ),
 
-                        pos=(
+                        position=(
                             test_analytics_rect_item_position
                         ),
 
                         size=(
                             test_analytics_rect_item_size
                         ),
-
-                        movable=False,
-                        rotatable=False,
-                        resizable=False,
-                        removable=False,
                     )
 
                     price_plot.addItem(
@@ -1032,35 +1126,6 @@ class FinPlotChartWindow(QMainWindow):
                 test_series.index,
                 test_series.array,
             )
-
-        # volume_plot = (
-        #     self.__volume_plot
-        # )
-
-        # self.__volume_plot.volume_ocv(
-        #     candles_dataframe['open close volume'.split()],  # .volume,
-        #     # legend='volume',
-        #     # kind='volume',
-        #     ax=volume_plot  # .overlay()
-        # )
-
-        # # finplot.refresh()  # refresh autoscaling when all plots complete
-
-        """
-        def update(txt):
-        df = download(txt)
-        if len(df) < 20: # symbol does not exist
-            return
-        info.setText('Loading symbol name...')
-        price = df['Open Close High Low'.split()]
-        volume = df['Open Close Volume'.split()]
-        ax.reset()  # remove previous plots
-        axo.reset()  # remove previous plots
-        fplt.candlestick_ochl(price)
-        fplt.volume_ocv(volume, ax=axo)
-        fplt.refresh() # refresh autoscaling when all plots complete
-        Thread(target=lambda: info.setText(get_name(txt))).start() # slow, so use thread
-        """
 
     def auto_range_price_plot(self) -> None:
         self.__price_plot.getViewBox().autoRange()
