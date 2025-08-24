@@ -12,7 +12,7 @@ from qasync import asyncSlot
 
 import pyqtgraph
 
-from PyQt6.QtCore import Qt, QRectF, QPointF
+from PyQt6.QtCore import Qt, QRectF
 
 from PyQt6.QtGui import (
     QColor,
@@ -143,51 +143,79 @@ _RSI_LINE_COLOR = '#7e57c2'
 _TEST_LINE_COLOR = '#ffffff'
 
 
-class RectItem(pyqtgraph.RectROI):
+class RectItem(pyqtgraph.GraphicsObject):
     def __init__(
             self,
-            brush,
-            is_centered: bool,
-            pen,
+            brush_color: QColor,
+            pen_color: QColor,
             position: Point,
             size: Point,
     ) -> None:
-        super().__init__(
-            position,
-            size,
+        super().__init__()
 
-            centered=is_centered,
-            movable=False,
-            pen=pen,
-            rotatable=False,
-            resizable=False,
-            removable=False,
+        self.setPos(
+            position,
         )
 
-        self.__brush = brush
+        self.__brush_color = brush_color
+        self.__pen_color = pen_color
+        self.__size = size
 
-    def paint(self, painter, *args):
-        size: pyqtgraph.Point = self.state['size']
+    def boundingRect(self):
+        size = self.__size
 
-        rect = QRectF(
+        return QRectF(
             0,
             0,
             size[0],
             size[1]
         ).normalized()
 
-        painter.setPen(self.currentPen)
-        painter.setBrush(self.__brush)
-        painter.translate(rect.left(), rect.top())
-        painter.scale(rect.width(), rect.height())
-        painter.drawRect(0, 0, 1, 1)
+    def paint(self, painter, *args):
+        rect = self.boundingRect()
 
-    def set_brush(self, brush) -> None:
-        self.__brush = brush
+        painter.setPen(
+            pyqtgraph.mkPen(
+                self.__pen_color,
+            ),
+        )
 
-    def addScaleHandle(self, *args, **kwargs):
-        if self.resizable:
-            super().addScaleHandle(*args, **kwargs)
+        painter.setBrush(
+            pyqtgraph.mkBrush(
+                self.__brush_color,
+            ),
+        )
+
+        painter.translate(
+            rect.left(),
+            rect.top(),
+        )
+
+        painter.scale(
+            rect.width(),
+            rect.height()
+        )
+
+        painter.drawRect(
+            0,
+            0,
+            1,
+            1
+        )
+
+    def set_brush_color(self, value: QColor) -> None:
+        self.__brush_color = value
+
+    def set_pen_color(self, value: QColor) -> None:
+        self.__pen_color = value
+
+    def set_size(self, value: Point) -> None:
+        self.__size = value
+
+    def _get_pen_color(
+            self
+    ) -> QColor:
+        return self.__pen_color
 
 
 class CandlestickItem(RectItem):
@@ -207,10 +235,10 @@ class CandlestickItem(RectItem):
         )
 
         super().__init__(
-            brush=body_color,
-            is_centered=False,
-            pen=shadow_color,
+            brush_color=body_color,
+            pen_color=shadow_color,
             position=self.__generate_position(
+                end_timestamp_ns,
                 open_price,
                 start_timestamp_ns,
             ),
@@ -230,14 +258,24 @@ class CandlestickItem(RectItem):
         self.__start_timestamp_ns = start_timestamp_ns
 
     def paint(self, painter, *args):
-        # painter.setPen(
-        #     self.currentPen,
-        # )
+        painter.setPen(
+            pyqtgraph.mkPen(
+                self._get_pen_color(),
+                width=2,
+            ),
+        )
 
-        # painter.drawLine(
-        #     QPointF(0, self.__low_price),
-        #     QPointF(0, self.__high_price)
-        # )
+        timestamp_ms_delta = (
+            (
+                self.__end_timestamp_ns -
+                self.__start_timestamp_ns
+            ) * 0.25
+        )
+
+        painter.drawLine(
+            Point(timestamp_ms_delta, self.__high_price - self.__open_price),
+            Point(timestamp_ms_delta, self.__low_price - self.__open_price)
+        )
 
         super().paint(
             painter,
@@ -263,12 +301,13 @@ class CandlestickItem(RectItem):
 
         self.setPos(
             self.__generate_position(
+                end_timestamp_ns,
                 open_price,
                 start_timestamp_ns,
             )
         )
 
-        self.setSize(
+        self.set_size(
             self.__generate_size(
                 close_price,
                 end_timestamp_ns,
@@ -282,11 +321,11 @@ class CandlestickItem(RectItem):
             open_price,
         )
 
-        self.set_brush(
+        self.set_brush_color(
             body_color,
         )
 
-        self.setPen(
+        self.set_pen_color(
             shadow_color,
         )
 
@@ -311,11 +350,12 @@ class CandlestickItem(RectItem):
 
     @staticmethod
     def __generate_position(
+            end_timestamp_ns: float,
             open_price: float,
             start_timestamp_ns: float,
     ) -> Point:
         return Point(
-            start_timestamp_ns,
+            start_timestamp_ns + (end_timestamp_ns - start_timestamp_ns) * 0.25,
             open_price
         )
 
@@ -327,7 +367,7 @@ class CandlestickItem(RectItem):
             start_timestamp_ns: float,
     ) -> Point:
         return Point(
-            end_timestamp_ns - start_timestamp_ns,
+            (end_timestamp_ns - start_timestamp_ns) * 0.5,
             close_price - open_price
         )
 
@@ -1048,11 +1088,11 @@ class FinPlotChartWindow(QMainWindow):
                 )
 
                 if test_analytics_rect_item is not None:
-                    test_analytics_rect_item.setPen(
+                    test_analytics_rect_item.set_pen_color(
                         test_analytics_color
                     )
 
-                    test_analytics_rect_item.set_brush(
+                    test_analytics_rect_item.set_brush_color(
                         test_analytics_color
                     )
 
@@ -1060,7 +1100,7 @@ class FinPlotChartWindow(QMainWindow):
                         test_analytics_rect_item_position
                     )
 
-                    test_analytics_rect_item.setSize(
+                    test_analytics_rect_item.set_size(
                         test_analytics_rect_item_size
                     )
                 else:
@@ -1071,13 +1111,11 @@ class FinPlotChartWindow(QMainWindow):
                             start_timestamp_ms
                         ]
                     ) = RectItem(
-                        brush=(
+                        brush_color=(
                             test_analytics_color
                         ),
 
-                        is_centered=False,
-
-                        pen=(
+                        pen_color=(
                             test_analytics_color
                         ),
 

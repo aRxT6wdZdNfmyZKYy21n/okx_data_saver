@@ -610,7 +610,7 @@ class FinPlotChartProcessor(object):
                     db_schema.start_timestamp_ms.desc(),
                 ).limit(
                     # 10000
-                    200
+                    1000
                     # 50
                 )
             )
