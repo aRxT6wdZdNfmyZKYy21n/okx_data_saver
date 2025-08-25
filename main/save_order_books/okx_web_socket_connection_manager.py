@@ -782,6 +782,7 @@ class OKXWebSocketConnectionManager(object):
                 asks=asks,
                 bids=bids,
                 symbol_name=symbol_name,
+                timestamp_ms=server_timestamp_ms,
             )
 
     async def __subscribe(

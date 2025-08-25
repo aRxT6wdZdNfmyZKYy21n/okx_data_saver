@@ -40,10 +40,12 @@ async def on_new_order_book_data(
         asks: list[list[str, str, str, str]],
         bids: list[list[str, str, str, str]],
         symbol_name: str,
+        timestamp_ms: int,
 ) -> None:
     logger.info(
         'Got new order book data'
-        f': action {action!r}, asks {len(asks)}, bids {len(bids)}, symbol name {symbol_name!r}'
+        f': action {action!r}, asks {len(asks)}, bids {len(bids)}'
+        f', symbol name {symbol_name!r}, timestamp (ms) {timestamp_ms}'
     )
 
     postgres_db_task_queue = (
@@ -56,6 +58,7 @@ async def on_new_order_book_data(
             asks,
             bids,
             symbol_name,
+            timestamp_ms,
         ),
     )
 
@@ -65,6 +68,7 @@ async def save_order_book_data(
         asks: list[list[str, str, str, str]],
         bids: list[list[str, str, str, str]],
         symbol_name: str,
+        timestamp_ms: int
 ) -> None:
     postgres_db_session_maker = (
         g_globals.get_postgres_db_session_maker()
@@ -81,7 +85,7 @@ async def save_order_book_data(
                     ),
 
                     timestamp_ms=(
-                        TimeUtils.get_aware_current_timestamp_ms()
+                        timestamp_ms
                     ),
 
                     # Attribute fields
