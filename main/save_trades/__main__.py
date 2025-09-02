@@ -257,7 +257,7 @@ async def save_trades(
                         last_trade_id is not None and
 
                         (
-                            trade_timestamp_ms ==
+                            trade_id ==
                             last_trade_id
                         )
                 ):
