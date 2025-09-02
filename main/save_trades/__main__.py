@@ -29,10 +29,6 @@ from main.save_trades.globals import (
     g_globals
 )
 
-from utils.time import (
-    TimeUtils
-)
-
 
 logger = (
     logging.getLogger(
@@ -40,10 +36,8 @@ logger = (
     )
 )
 
-_STEP_DURATION_MS = (
-    1000 *  # ms
-    60 *    # s
-    15      # m
+_TRADES_COUNT_PER_UPDATE = (
+    100
 )
 
 
@@ -112,47 +106,34 @@ async def save_trades(
                 row_data is not None
             )
 
-            last_trade_timestamp_ms: int
-
-            now_timestamp_ms = TimeUtils.get_aware_current_timestamp_ms()
+            last_trade_id: int
 
             if is_last_trade_exists:
                 last_trade_data: schemas.OKXTradeData
 
                 last_trade_data, = row_data
 
-                last_trade_timestamp_ms = (
-                    last_trade_data.timestamp_ms
+                last_trade_id = (
+                    last_trade_data.trade_id
                 )
             else:
-                last_trade_timestamp_ms = (
-                    now_timestamp_ms -
-
-                    (
-                        1000 *  # ms
-                        60   *  # s
-                        60   *  # m
-                        24   *  # h
-                        365  *  # d
-                        7      # y
-                    )
-                )
+                last_trade_id = 0
 
             logger.info(
                 f'Saving trades for {symbol_name!r}'
-                f' ({(now_timestamp_ms - last_trade_timestamp_ms) // (1000 * 60 * 60 * 1)} hours left)'
+                f' (from {last_trade_id} trade ID)'
             )
 
             response = await api_session.get(
                 url='/api/v5/market/history-trades',
                 params={
                     'instId': symbol_name,
-                    'type': '2',  # pagination type is 'timestamp'
+                    'type': '1',  # pagination type is 'trade_id'
                     'after': (
-                        last_trade_timestamp_ms +
-                        _STEP_DURATION_MS
+                        last_trade_id +
+                        _TRADES_COUNT_PER_UPDATE
                     ),
-                    'before': last_trade_timestamp_ms - 1,
+                    'before': last_trade_id - 1,
                     'limit': 100,  # max
                 }
             )
@@ -273,11 +254,11 @@ async def save_trades(
                 )
 
                 if (
-                        last_trade_timestamp_ms is not None and
+                        last_trade_id is not None and
 
                         (
                             trade_timestamp_ms ==
-                            last_trade_timestamp_ms
+                            last_trade_id
                         )
                 ):
                     trade_raw_data_to_update = trade_raw_data
