@@ -98,7 +98,7 @@ async def save_trades(
                         db_schema.symbol_name ==
                         symbol_name
                     ).order_by(
-                        db_schema.timestamp_ms.desc(),
+                        db_schema.trade_id.desc(),
                     ).limit(
                         1
                     )
