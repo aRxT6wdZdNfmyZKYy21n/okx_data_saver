@@ -37,7 +37,7 @@ logger = (
 )
 
 _INITIAL_TRADE_ID_BY_SYMBOL_NAME_MAP = {
-    'BTC-USDT': 699836971,
+    'BTC-USDT': 744536971,
 }
 
 _TRADES_COUNT_PER_UPDATE = (
@@ -356,7 +356,7 @@ async def start_trades_saving_loop() -> None:
                 )
 
             await asyncio.sleep(
-                15.0  # s
+                1.0  # s
             )
 
 
