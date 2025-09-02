@@ -17,7 +17,7 @@ from aiogram.utils.text_decorations import (
     markdown_decoration,
 )
 
-from event.async_event import AsyncEvent
+from event.async_ import AsyncEvent
 from main.save_order_books.constants_ import (
     IS_NEED_SEND_NOTIFICATIONS_ABOUT_WEB_SOCKET_CONNECTION_CLOSED_WITH_ERROR,
     USE_PROXIES,
@@ -633,8 +633,9 @@ class OKXWebSocketConnectionManager(object):
             )
 
             if event_name is not None:
-                assert event_name == 'subscribe', (
+                assert event_name == 'subscribe', (  # TODO: in ('subscribe', 'notice')
                     event_name,
+                    message_raw_data
                 )
 
                 continue
