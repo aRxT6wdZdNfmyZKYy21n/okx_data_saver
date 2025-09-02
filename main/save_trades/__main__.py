@@ -36,6 +36,10 @@ logger = (
     )
 )
 
+_INITIAL_TRADE_ID_BY_SYMBOL_NAME_MAP = {
+    'BTC-USDT': 699836971,
+}
+
 _TRADES_COUNT_PER_UPDATE = (
     100
 )
@@ -117,7 +121,9 @@ async def save_trades(
                     last_trade_data.trade_id
                 )
             else:
-                last_trade_id = 0
+                last_trade_id = _INITIAL_TRADE_ID_BY_SYMBOL_NAME_MAP[
+                    symbol_name
+                ]
 
             logger.info(
                 f'Saving trades for {symbol_name!r}'
