@@ -338,7 +338,7 @@ async def save_trades(
         )
 
         await asyncio.sleep(
-            1.0  # s
+            0.5  # s
         )
 
 
@@ -359,7 +359,7 @@ async def start_trades_saving_loop() -> None:
                 )
 
             await asyncio.sleep(
-                1.0  # s
+                0.5  # s
             )
 
 
