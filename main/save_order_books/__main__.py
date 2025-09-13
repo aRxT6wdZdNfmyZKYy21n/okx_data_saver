@@ -11,13 +11,19 @@ from main.save_order_books import (
 from main.save_order_books.globals import (
     g_globals
 )
-from utils.time import TimeUtils
+
 
 logger = (
     logging.getLogger(
         __name__
     )
 )
+
+
+_SYMBOL_NAMES = [
+    'BTC-USDT',
+    'ETH-USDT',
+]
 
 
 async def init_db_models():
@@ -133,9 +139,10 @@ async def start_web_socket_connection_manager_loops() -> None:
         on_new_order_book_data
     )
 
-    await okx_web_socket_connection_manager.subscribe(
-        symbol_name='BTC-USDT'
-    )
+    for symbol_name in _SYMBOL_NAMES:
+        await okx_web_socket_connection_manager.subscribe(
+            symbol_name=symbol_name
+        )
 
     await asyncio.gather(
         okx_web_socket_connection_manager.start_loop(),

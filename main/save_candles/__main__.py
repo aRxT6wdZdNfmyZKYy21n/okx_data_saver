@@ -40,6 +40,11 @@ logger = (
 
 _CANDLES_COUNT_PER_REQUEST = 300
 
+_SYMBOL_NAMES = [
+    'BTC-USDT',
+    'ETH-USDT',
+]
+
 
 async def init_db_models():
     postgres_db_engine = (
@@ -76,10 +81,7 @@ async def start_db_loop() -> None:
 async def save_candles(
         api_session: httpx.AsyncClient,
 ) -> None:
-    for symbol_name in (
-            'BTC-USDT',
-            'ETH-USDT'
-    ):
+    for symbol_name in _SYMBOL_NAMES:
         for interval_name, interval_duration_ms in (
                 (
                     '15m',
