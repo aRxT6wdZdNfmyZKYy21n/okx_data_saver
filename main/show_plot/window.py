@@ -453,7 +453,10 @@ class FinPlotChartWindow(QMainWindow):
         graphics_layout_widget: pyqtgraph.GraphicsLayout = pyqtgraph.GraphicsLayoutWidget()  # noqa
 
         price_plot = graphics_layout_widget.addPlot(
-            title='Plot'
+            title='Plot',
+            pen='w',
+            symbolBrush=(127, 0, 0),
+            symbolPen='w'
         )
 
         price_date_axis = DateTimeAxisItem(
@@ -545,20 +548,6 @@ class FinPlotChartWindow(QMainWindow):
         """
 
         (
-            interval_name_label,
-            interval_name_combo_box
-        ) = (
-            QtUtils.create_label_and_combo_box(
-                'Интервал',
-                self.__on_interval_name_changed,
-
-                alignment=(
-                    Qt.AlignmentFlag.AlignLeft
-                )
-            )
-        )
-
-        (
             symbol_name_label,
             symbol_name_combo_box
         ) = (
@@ -608,16 +597,14 @@ class FinPlotChartWindow(QMainWindow):
             asyncio.Lock()
         )
 
-        self.__interval_name_combo_box = (
-            interval_name_combo_box
-        )
-
-        self.__interval_name_label = (
-            interval_name_label
-        )
-
         self.__price_plot = (
             price_plot
+        )
+
+        self.__price_plot_data_item = (
+            price_plot.plot(
+                name='Price',
+            )
         )
 
         self.__price_candlestick_item_by_start_timestamp_ms_map: (
@@ -684,16 +671,6 @@ class FinPlotChartWindow(QMainWindow):
             2, 2, 2, 1
         )
 
-        functionality_layout.addWidget(
-            interval_name_label,
-            0, 4, 2, 1
-        )
-
-        functionality_layout.addWidget(
-            interval_name_combo_box,
-            2, 4, 2, 1
-        )
-
         window_layout.addWidget(
             graphics_layout_widget
         )
@@ -746,39 +723,6 @@ class FinPlotChartWindow(QMainWindow):
                         is_need_run_once=False
                     )
                 )
-
-    @asyncSlot()
-    async def __on_interval_name_changed(
-            self,
-
-            # idx: str
-    ) -> None:
-        current_interval_name = (
-            self.__interval_name_combo_box.currentText()
-        )
-
-        if not current_interval_name:
-            return
-
-        processor = (
-            self.__processor
-        )
-
-        if (
-                current_interval_name ==
-                processor.get_current_interval_name()
-        ):
-            return
-
-        print(
-            'Selected interval name'
-            f': {current_interval_name!r}'
-            # f' ({idx})'
-        )
-
-        await processor.update_current_interval_name(
-            current_interval_name
-        )
 
     @asyncSlot()
     async def __on_symbol_name_changed(
@@ -834,18 +778,8 @@ class FinPlotChartWindow(QMainWindow):
             current_available_symbol_names
         )
 
-        current_available_interval_names = (
-            processor.get_current_available_interval_names()
-        )
-
-        QtUtils.update_combo_box_values(
-            self.__interval_name_combo_box,
-            self.__interval_name_label,
-            current_available_interval_names
-        )
-
-        candles_dataframe = (
-            processor.get_candles_dataframe()
+        trades_dataframe = (
+            processor.get_trades_dataframe()
         )
 
         price_candlestick_item_by_start_timestamp_ms_map = (
@@ -854,9 +788,9 @@ class FinPlotChartWindow(QMainWindow):
 
         price_plot = self.__price_plot
 
-        if candles_dataframe is None:
+        if trades_dataframe is None:
             print(
-                'candles_dataframe is None'
+                'trades_dataframe is None'
             )
 
             for price_candlestick_item in price_candlestick_item_by_start_timestamp_ms_map.values():
@@ -936,61 +870,58 @@ class FinPlotChartWindow(QMainWindow):
         # plot.reset()
         # self.__plot_overlay.reset()
 
-        current_interval_name = processor.get_current_interval_name()
+        # TODO
+        # trade_start_timestamp_ms_set: set[int] = set()
 
-        assert current_interval_name is not None, None
+        # for start_timestamp, trade_data in trades_dataframe.iterrows():
+        #     end_timestamp = start_timestamp + current_interval_duration
+        #
+        #     trade_price = trade_data.close
+        #
+        #     start_timestamp_ms = int(
+        #         start_timestamp.timestamp() *
+        #         1000
+        #     )
+        #
+        #     trade_start_timestamp_ms_set.add(
+        #         start_timestamp_ms,
+        #     )
+        #
+        #     price_candlestick_item = price_candlestick_item_by_start_timestamp_ms_map.get(
+        #         start_timestamp_ms
+        #     )
+        #
+        #     if price_candlestick_item is not None:
+        #         price_candlestick_item.update_data(
+        #             candle_close_price,
+        #             end_timestamp.value,
+        #             candle_high_price,
+        #             candle_low_price,
+        #             candle_open_price,
+        #             start_timestamp.value
+        #         )
+        #     else:
+        #         price_candlestick_item = price_candlestick_item_by_start_timestamp_ms_map[
+        #             start_timestamp_ms
+        #         ] = CandlestickItem(
+        #             candle_close_price,
+        #             end_timestamp.value,
+        #             candle_high_price,
+        #             candle_low_price,
+        #             candle_open_price,
+        #             start_timestamp.value
+        #         )
+        #
+        #         price_plot.addItem(
+        #             price_candlestick_item
+        #         )
 
-        current_interval_duration = _INTERVAL_DURATION_BY_NAME_MAP[
-            current_interval_name
-        ]
+        price_series: pandas.Series = trades_dataframe.price
 
-        candle_start_timestamp_ms_set: set[int] = set()
-
-        for start_timestamp, candle_data in candles_dataframe.iterrows():
-            end_timestamp = start_timestamp + current_interval_duration
-
-            candle_close_price = candle_data.close
-            candle_high_price = candle_data.high
-            candle_low_price = candle_data.low
-            candle_open_price = candle_data.open
-
-            start_timestamp_ms = int(
-                start_timestamp.timestamp() *
-                1000
-            )
-
-            candle_start_timestamp_ms_set.add(
-                start_timestamp_ms,
-            )
-
-            price_candlestick_item = price_candlestick_item_by_start_timestamp_ms_map.get(
-                start_timestamp_ms
-            )
-
-            if price_candlestick_item is not None:
-                price_candlestick_item.update_data(
-                    candle_close_price,
-                    end_timestamp.value,
-                    candle_high_price,
-                    candle_low_price,
-                    candle_open_price,
-                    start_timestamp.value
-                )
-            else:
-                price_candlestick_item = price_candlestick_item_by_start_timestamp_ms_map[
-                    start_timestamp_ms
-                ] = CandlestickItem(
-                    candle_close_price,
-                    end_timestamp.value,
-                    candle_high_price,
-                    candle_low_price,
-                    candle_open_price,
-                    start_timestamp.value
-                )
-
-                price_plot.addItem(
-                    price_candlestick_item
-                )
+        self.__price_plot_data_item.setData(
+            price_series.index,
+            price_series.array,
+        )
 
         rsi_series = (
             processor.get_rsi_series()

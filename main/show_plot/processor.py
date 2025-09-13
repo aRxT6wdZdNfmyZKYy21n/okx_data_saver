@@ -20,15 +20,17 @@ from pandas import (
 )
 
 from sqlalchemy import (
-    select,
     and_,
+    select,
+    text,
 )
 
-from main.save_candles import (
-    schemas
+from main.save_trades.schemas import (
+    OKXTradeData,
 )
-from main.save_candles.schemas import OKXCandleData15m, OKXCandleData1H
-from main.show_plot.globals import g_globals
+from main.show_plot.globals import (
+    g_globals,
+)
 
 from main.show_plot.window import (
     FinPlotChartWindow
@@ -53,15 +55,14 @@ class FinPlotChartProcessor(object):
         '__bollinger_upper_band_series',
         '__current_available_symbol_name_set',
         '__current_symbol_name',
-        '__current_interval_name',
-        '__candles_dataframe',
-        '__max_candle_price',
         '__max_price',
-        '__min_candle_price',
+        '__max_trade_price',
         '__min_price',
+        '__min_trade_price',
         '__rsi_series',
         '__test_analytics_raw_data_list',
         '__test_series',
+        '__trades_dataframe',
         '__window'
     )
 
@@ -93,27 +94,19 @@ class FinPlotChartProcessor(object):
             str | None
         ) = None
 
-        self.__current_interval_name: (
-            str | None
-        ) = None
-
-        self.__candles_dataframe: (
-            DataFrame | None
-        ) = None
-
-        self.__max_candle_price: (
-            Decimal | None
-        ) = None
-
         self.__max_price: (
             Decimal | None
         ) = None
 
-        self.__min_candle_price: (
+        self.__max_trade_price: (
             Decimal | None
         ) = None
 
         self.__min_price: (
+            Decimal | None
+        ) = None
+
+        self.__min_trade_price: (
             Decimal | None
         ) = None
 
@@ -125,6 +118,10 @@ class FinPlotChartProcessor(object):
 
         self.__test_series: (
             Series | None
+        ) = None
+
+        self.__trades_dataframe: (
+            DataFrame | None
         ) = None
 
         self.__window: (
@@ -177,13 +174,6 @@ class FinPlotChartProcessor(object):
     ):
         return await self.__get_current_available_symbol_names()
 
-    def get_current_interval_name(
-            self,
-    ) -> (
-            str | None
-    ):
-        return self.__current_interval_name
-
     def get_current_symbol_name(
             self,
     ) -> (
@@ -191,19 +181,12 @@ class FinPlotChartProcessor(object):
     ):
         return self.__current_symbol_name
 
-    def get_candles_dataframe(
-            self,
-    ) -> (
-            DataFrame | None
-    ):
-        return self.__candles_dataframe
-
-    def get_max_candle_price(
+    def get_max_trade_price(
             self,
     ) -> (
             Decimal | None
     ):
-        return self.__max_candle_price
+        return self.__max_trade_price
 
     def get_max_price(
             self,
@@ -212,12 +195,12 @@ class FinPlotChartProcessor(object):
     ):
         return self.__max_price
 
-    def get_min_candle_price(
+    def get_min_trade_price(
             self,
     ) -> (
             Decimal | None
     ):
-        return self.__min_candle_price
+        return self.__min_trade_price
 
     def get_min_price(
             self,
@@ -242,6 +225,13 @@ class FinPlotChartProcessor(object):
             self,
     ) -> Series | None:
         return self.__test_series
+
+    def get_trades_dataframe(
+            self,
+    ) -> (
+            DataFrame | None
+    ):
+        return self.__trades_dataframe
 
     async def init(
             self,
@@ -278,93 +268,8 @@ class FinPlotChartProcessor(object):
                 )
 
             await asyncio.sleep(
-                5.0  # s
+                1.0  # s
             )
-
-    async def update_current_interval_name(
-            self,
-
-            value: (
-                str
-            ),
-    ) -> bool:
-        if (
-                value not in
-                _CANDLE_INTERVAL_NAMES
-        ):
-            return False
-
-        if (
-                value ==
-                self.__current_interval_name
-        ):
-            return False
-
-        self.__current_interval_name = (
-            value
-        )
-
-        self.__bollinger_base_line_series = (
-            None
-        )
-
-        self.__bollinger_lower_band_series = (
-            None
-        )
-
-        self.__bollinger_upper_band_series = (
-            None
-        )
-
-        self.__candles_dataframe = (
-            None
-        )
-
-        self.__max_candle_price = (
-            None
-        )
-
-        self.__max_price = (
-            None
-        )
-
-        self.__min_candle_price = (
-            None
-        )
-
-        self.__min_price = (
-            None
-        )
-
-        self.__rsi_series = (
-            None
-        )
-
-        self.__test_analytics_raw_data_list = None
-
-        self.__test_series = (
-            None
-        )
-
-        await (
-            self.__update_current_available_symbol_name_set()
-        )
-
-        await (
-            self.__update_candles_dataframe()
-        )
-
-        window = self.__window
-
-        await window.plot(
-            is_need_run_once=(
-                True
-            )
-        )
-
-        window.auto_range_price_plot()
-
-        return True
 
     async def update_current_symbol_name(
             self,
@@ -406,23 +311,19 @@ class FinPlotChartProcessor(object):
             None
         )
 
-        self.__candles_dataframe = (
-            None
-        )
-
-        self.__max_candle_price = (
-            None
-        )
-
         self.__max_price = (
             None
         )
 
-        self.__min_candle_price = (
+        self.__max_trade_price = (
             None
         )
 
         self.__min_price = (
+            None
+        )
+
+        self.__min_trade_price = (
             None
         )
 
@@ -436,8 +337,12 @@ class FinPlotChartProcessor(object):
             None
         )
 
+        self.__trades_dataframe = (
+            None
+        )
+
         await (
-            self.__update_candles_dataframe()
+            self.__update_trades_dataframe()
         )
 
         window = self.__window
@@ -477,17 +382,18 @@ class FinPlotChartProcessor(object):
     async def __update(
             self
     ) -> None:
-        await self.__update_candles_dataframe()
+        await self.__update_current_available_symbol_name_set()
+        await self.__update_trades_dataframe()
 
     def __update_bollinger_series(
             self
     ) -> None:
-        candles_dataframe = (
-            self.__candles_dataframe
+        trades_dataframe = (
+            self.__trades_dataframe
         )
 
         assert (
-            candles_dataframe is not None
+            trades_dataframe is not None
         ), None
 
         (
@@ -496,7 +402,7 @@ class FinPlotChartProcessor(object):
             bollinger_lower_band_series
         ) = (
             talib.BBANDS(  # noqa
-                candles_dataframe.close,
+                trades_dataframe.price,
 
                 matype=(
                     talib.MA_Type.SMA  # noqa
@@ -539,7 +445,7 @@ class FinPlotChartProcessor(object):
             bollinger_upper_band_series
         )
 
-    async def __update_candles_dataframe(
+    async def __update_trades_dataframe(
             self
     ) -> None:
         current_symbol_name = (
@@ -549,65 +455,46 @@ class FinPlotChartProcessor(object):
         if current_symbol_name is None:
             return
 
-        current_interval_name = (
-            self.__current_interval_name
+        trades_dataframe = (
+            self.__trades_dataframe
         )
 
-        if current_interval_name is None:
-            print(
-                'current_interval_name is None'
-            )
+        min_trade_id: int  # TODO: min_trade_id
 
-            return
+        if trades_dataframe is not None:
+            min_pandas_trade_id = trades_dataframe.index.max()
 
-        candles_dataframe = (
-            self.__candles_dataframe
-        )
-
-        min_start_timestamp_ms: int
-
-        if candles_dataframe is not None:
-            min_pandas_start_timestamp: (
-                pandas.Timestamp
-            ) = candles_dataframe.index.max()
-
-            min_start_timestamp_ms = int(
-                min_pandas_start_timestamp.timestamp() *
-                1000  # ms
+            min_trade_id = int(
+                min_pandas_trade_id
             )
         else:
-            min_start_timestamp_ms = 0
+            min_trade_id = 0
 
-        new_candle_raw_data_list: list[dict] | None = None
-        new_max_candle_price: Decimal | None = None
-        new_min_candle_price: Decimal | None = None
-
-        db_schema: type[OKXCandleData15m] | type[OKXCandleData1H] = getattr(
-            schemas,
-            f'OKXCandleData{current_interval_name}'
-        )
+        new_trade_raw_data_list: list[dict] | None = None
+        new_max_trade_price: Decimal | None = None
+        new_min_trade_price: Decimal | None = None
 
         postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
 
         async with postgres_db_session_maker() as session:
             result = await session.execute(
                 select(
-                    db_schema,
+                    OKXTradeData,
                 ).where(
                     and_(
                         (
-                            db_schema.symbol_name ==
+                            OKXTradeData.symbol_name ==
                             current_symbol_name
                         ),
 
                         (
-                            db_schema.start_timestamp_ms >=
-                            min_start_timestamp_ms
+                            OKXTradeData.trade_id >=
+                            min_trade_id
                         )
                     )
                 ).order_by(
-                    db_schema.symbol_name.asc(),
-                    db_schema.start_timestamp_ms.desc(),
+                    OKXTradeData.symbol_name.asc(),
+                    OKXTradeData.trade_id.desc(),
                 ).limit(
                     # 10000
                     1000
@@ -616,159 +503,117 @@ class FinPlotChartProcessor(object):
             )
 
             for row in result:
-                new_candle_data: OKXCandleData15m | OKXCandleData1H = row[0]
+                new_trade_data: OKXTradeData = row[0]
 
-                new_candle_high_price = Decimal(
-                    new_candle_data.high_price
-                )
+                new_trade_price = new_trade_data.price
 
                 if (
-                        new_max_candle_price is None or
+                        new_max_trade_price is None or
 
                         (
-                            new_max_candle_price <
-                            new_candle_high_price
+                            new_max_trade_price <
+                            new_trade_price
                         )
                 ):
-                    new_max_candle_price = (
-                        new_candle_high_price
+                    new_max_trade_price = (
+                        new_trade_price
                     )
-
-                new_candle_low_price = Decimal(
-                    new_candle_data.low_price
-                )
 
                 if (
-                        new_min_candle_price is None or
+                        new_min_trade_price is None or
 
                         (
-                            new_min_candle_price >
-                            new_candle_low_price
+                            new_min_trade_price >
+                            new_trade_price
                         )
                 ):
-                    new_min_candle_price = (
-                        new_candle_low_price
+                    new_min_trade_price = (
+                        new_trade_price
                     )
 
-                new_candle_raw_data = {
-                    'close_price': float(
-                        new_candle_data.close_price  # noqa
+                new_trade_raw_data = {
+                    'price': float(
+                        new_trade_price
                     ),
-                    'high_price': float(
-                        new_candle_high_price
+                    'quantity': float(
+                        new_trade_data.quantity
                     ),
-                    'low_price': float(
-                        new_candle_low_price
+                    'timestamp_ms': (
+                        new_trade_data.timestamp_ms
                     ),
-                    'open_price': float(
-                        new_candle_data.open_price  # noqa
-                    ),
-                    'start_timestamp_ms': int(
-                        new_candle_data.start_timestamp_ms  # noqa
-                    ),
-                    'volume': float(
-                        new_candle_data.volume_quote_currency  # noqa
+                    'trade_id': (
+                        new_trade_data.trade_id
                     ),
                 }
 
-                if new_candle_raw_data_list is None:
-                    new_candle_raw_data_list = []
+                if new_trade_raw_data_list is None:
+                    new_trade_raw_data_list = []
 
-                new_candle_raw_data_list.append(
-                    new_candle_raw_data
+                new_trade_raw_data_list.append(
+                    new_trade_raw_data
                 )
 
-        if new_max_candle_price is not None:
-            max_candle_price = (
-                self.__max_candle_price
+        if new_max_trade_price is not None:
+            max_trade_price = (
+                self.__max_trade_price
             )
 
             if (
-                    max_candle_price is None or
+                    max_trade_price is None or
 
                     (
-                        max_candle_price <
-                        new_max_candle_price
+                        max_trade_price <
+                        new_max_trade_price
                     )
             ):
-                self.__max_candle_price = (
-                    max_candle_price  # noqa
-                ) = new_max_candle_price
+                self.__max_trade_price = (
+                    max_trade_price  # noqa
+                ) = new_max_trade_price
 
                 self.__update_max_price()
 
-        if new_min_candle_price is not None:
-            min_candle_price = (
-                self.__min_candle_price
+        if new_min_trade_price is not None:
+            min_trade_price = (
+                self.__min_trade_price
             )
 
             if (
-                    min_candle_price is None or
+                    min_trade_price is None or
 
                     (
-                        min_candle_price >
-                        new_min_candle_price
+                        min_trade_price >
+                        new_min_trade_price
                     )
             ):
-                self.__min_candle_price = (
-                    min_candle_price  # noqa
-                ) = new_min_candle_price
+                self.__min_trade_price = (
+                    min_trade_price  # noqa
+                ) = new_min_trade_price
 
                 self.__update_min_price()
 
-        if new_candle_raw_data_list is None:
+        if new_trade_raw_data_list is None:
             return
 
-        new_candles_dataframe = (
+        new_trades_dataframe = (
             DataFrame.from_records(
-                new_candle_raw_data_list,
+                new_trade_raw_data_list,
 
                 columns=[
-                    'close_price',
-                    'high_price',
-                    'low_price',
-                    'open_price',
-                    'start_timestamp_ms',
-                    'volume'
+                    'price',
+                    'quantity',
+                    'timestamp_ms',
+                    'trade_id'
                 ]
             )
         )
 
         assert (
-            new_candles_dataframe.size
+            new_trades_dataframe.size
         ), None
 
-        new_candles_dataframe.rename(
-            columns={
-                'close_price': (
-                    'close'
-                ),
-
-                'high_price': (
-                    'high'
-                ),
-
-                'low_price': (
-                    'low'
-                ),
-
-                'open_price': (
-                    'open'
-                ),
-
-                'start_timestamp_ms': (
-                    'time'
-                )
-            },
-
-            inplace=(
-                True
-            )
-        )
-
-        new_candles_dataframe.time = (
+        new_trades_dataframe.timestamp_ms = (
             pandas.to_datetime(
-                new_candles_dataframe.time,
+                new_trades_dataframe.timestamp_ms,
 
                 unit=(
                     'ms'
@@ -776,33 +621,33 @@ class FinPlotChartProcessor(object):
             )
         )
 
-        new_candles_dataframe.set_index(
-            'time',
+        new_trades_dataframe.set_index(
+            'trade_id',
             inplace=True
         )
 
-        new_candles_dataframe.sort_values(
-            'time',
+        new_trades_dataframe.sort_values(
+            'trade_id',
             inplace=True
         )
 
-        if candles_dataframe is not None:
-            candles_dataframe.update(  # TODO: check thread-safety
-                new_candles_dataframe
+        if trades_dataframe is not None:
+            trades_dataframe.update(  # TODO: check thread-safety
+                new_trades_dataframe,
             )
 
-            candles_dataframe = (
-                candles_dataframe.combine_first(
-                    new_candles_dataframe
+            trades_dataframe = (
+                trades_dataframe.combine_first(
+                    new_trades_dataframe,
                 )
             )
         else:
-            candles_dataframe = (
-                new_candles_dataframe
+            trades_dataframe = (
+                new_trades_dataframe
             )
 
-        self.__candles_dataframe = (
-            candles_dataframe
+        self.__trades_dataframe = (
+            trades_dataframe
         )
 
         self.__update_bollinger_series()
@@ -818,61 +663,39 @@ class FinPlotChartProcessor(object):
     async def __update_current_available_symbol_name_set(
             self
     ) -> None:
-        current_interval_name = self.__current_interval_name
-
-        if current_interval_name is None:
-            print(
-                'current_interval_name is None'
-            )
-
-            self.__current_available_symbol_name_set = None
-
-            return
-
         current_available_symbol_name_set: set[str] | None = None
-
-        db_schema: type[OKXCandleData15m] | type[OKXCandleData1H] = getattr(
-            schemas,
-            f'OKXCandleData{current_interval_name}'
-        )
 
         postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
 
         async with postgres_db_session_maker() as session:
-            recursive_cte_initial_query = select(
-                db_schema.symbol_name
-            ).order_by(
-                db_schema.symbol_name.asc()
-            ).limit(
-                1
-            ).cte(
-                name='symbol_name_cte',
-                recursive=True,
+            recursive_cte_full_query = text(
+                '''
+WITH RECURSIVE symbol_name_cte(symbol_name) AS 
+(
+  (
+    SELECT okx_trade_data.symbol_name AS symbol_name 
+    FROM okx_trade_data ORDER BY okx_trade_data.symbol_name ASC 
+    LIMIT 1
+  )
+  UNION ALL
+  SELECT (
+    SELECT symbol_name
+    FROM okx_trade_data
+    WHERE symbol_name > cte.symbol_name
+    ORDER BY symbol_name ASC 
+    LIMIT 1
+  )
+  FROM symbol_name_cte AS cte
+  WHERE cte.symbol_name IS NOT NULL
+)
+SELECT symbol_name
+FROM symbol_name_cte
+WHERE symbol_name IS NOT NULL;
+                '''
             )
 
-            recursive_cte_sub_query = select(
-                db_schema.symbol_name
-            ).where(
-                db_schema.symbol_name >
-                recursive_cte_initial_query.c.symbol_name
-            ).order_by(
-                db_schema.symbol_name.asc()
-            ).limit(
-                1
-            )
-
-            recursive_cte_full_query = recursive_cte_initial_query.union_all(
-                recursive_cte_sub_query
-            )
-
-            # full_cte = initial_cte.union_all(
-            #     recursive_cte_initial_query,
-            # )
-            #
             result = await session.execute(
-                select(
-                    recursive_cte_full_query
-                ),
+                recursive_cte_full_query,
             )
 
             for row in result:
@@ -889,34 +712,44 @@ class FinPlotChartProcessor(object):
             current_available_symbol_name_set
         )
 
+        window = self.__window
+
+        await window.plot(
+            is_need_run_once=(
+                True
+            )
+        )
+
+        # window.auto_range_price_plot()
+
     def __update_max_price(
             self
     ) -> None:
         self.__max_price = (
-            self.__max_candle_price
+            self.__max_trade_price
         )
 
     def __update_min_price(
             self
     ) -> None:
         self.__min_price = (
-            self.__min_candle_price
+            self.__min_trade_price
         )
 
     def __update_rsi_series(
             self
     ) -> None:
-        candles_dataframe = (
-            self.__candles_dataframe
+        trades_dataframe = (
+            self.__trades_dataframe
         )
 
         assert (
-            candles_dataframe is not None
+            trades_dataframe is not None
         ), None
 
         rsi_series = (
             talib.RSI(  # noqa
-                candles_dataframe.close,
+                trades_dataframe.price,
                 timeperiod=14  # 6
             )
         )
@@ -931,44 +764,41 @@ class FinPlotChartProcessor(object):
     def __update_test_series(
             self
     ) -> None:
-        current_interval_name = self.__current_interval_name
-
-        if current_interval_name is None:
-            return
-
-        candles_dataframe: DataFrame = (
-            self.__candles_dataframe
+        trades_dataframe: DataFrame = (
+            self.__trades_dataframe
         )
 
         assert (
-            candles_dataframe is not None
+            trades_dataframe is not None
         ), None
+
+        return  # TODO
 
         prices: list[float] = []
         start_timestamps: list[pandas.Timestamp] = []
 
         start_timestamp: pandas.Timestamp
 
-        for start_timestamp, candle_data in candles_dataframe.iterrows():
-            candle_close_price = candle_data.close
-            candle_high_price = candle_data.high
-            candle_low_price = candle_data.low
-            candle_open_price = candle_data.open
+        for start_timestamp, trade_data in trades_dataframe.iterrows():
+            trade_close_price = trade_data.close
+            trade_high_price = trade_data.high
+            trade_low_price = trade_data.low
+            trade_open_price = trade_data.open
 
-            is_bull = candle_close_price >= candle_open_price
+            is_bull = trade_close_price >= trade_open_price
 
             second_price: float
             third_price: float
 
             if is_bull:
-                second_price = candle_low_price
-                third_price = candle_high_price
+                second_price = trade_low_price
+                third_price = trade_high_price
             else:
-                second_price = candle_high_price
-                third_price = candle_low_price
+                second_price = trade_high_price
+                third_price = trade_low_price
 
             prices.append(
-                candle_open_price
+                trade_open_price
             )
 
             start_timestamps.append(
@@ -992,7 +822,7 @@ class FinPlotChartProcessor(object):
             )
 
             prices.append(
-                candle_close_price
+                trade_close_price
             )
 
             start_timestamps.append(
