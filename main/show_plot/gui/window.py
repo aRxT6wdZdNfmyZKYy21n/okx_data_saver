@@ -36,8 +36,8 @@ from PyQt6.QtWidgets import (
 from main.show_plot.gui.item.candlestick import (
     CandlestickItem,
 )
-from main.show_plot.gui.item.datetime_axis import (
-    DateTimeAxisItem,
+from main.show_plot.gui.item.datetime_by_trade_id_axis import (
+    DateTimeByTradeIDAxisItem,
 )
 from main.show_plot.gui.item.rect import (
     RectItem,
@@ -222,8 +222,9 @@ class FinPlotChartWindow(QMainWindow):
             symbolPen='w'
         )
 
-        price_date_axis = DateTimeAxisItem(
+        price_date_axis = DateTimeByTradeIDAxisItem(
             orientation='bottom',
+            processor=processor,
         )
 
         price_plot.setAxisItems({
@@ -241,8 +242,9 @@ class FinPlotChartWindow(QMainWindow):
             title='RSI'
         )
 
-        rsi_date_axis = DateTimeAxisItem(
+        rsi_date_axis = DateTimeByTradeIDAxisItem(
             orientation='bottom',
+            processor=processor,
         )
 
         rsi_plot.setAxisItems({

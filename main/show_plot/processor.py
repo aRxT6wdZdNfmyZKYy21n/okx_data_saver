@@ -632,7 +632,7 @@ class FinPlotChartProcessor(object):
         )
 
         if trades_dataframe is not None:
-            trades_dataframe.update(  # TODO: check thread-safety
+            trades_dataframe.update(
                 new_trades_dataframe,
             )
 
