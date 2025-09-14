@@ -4,10 +4,6 @@ import asyncio
 import traceback
 import typing
 
-from datetime import (
-    timedelta,
-)
-
 import pandas
 from pyqtgraph import (
     Point,
@@ -55,16 +51,6 @@ if typing.TYPE_CHECKING:
         FinPlotChartProcessor
     )
 
-
-_INTERVAL_DURATION_BY_NAME_MAP = {
-    '15m': timedelta(
-        minutes=15,
-    ),
-
-    '1H': timedelta(
-        hours=1,
-    ),
-}
 
 _IS_NEED_SHOW_BOLLINGER_BANDS = True
 
@@ -216,7 +202,7 @@ class FinPlotChartWindow(QMainWindow):
         graphics_layout_widget: pyqtgraph.GraphicsLayout = pyqtgraph.GraphicsLayoutWidget()  # noqa
 
         price_plot = graphics_layout_widget.addPlot(
-            title='Plot',
+            title='Price',
             pen='w',
             symbolBrush=(127, 0, 0),
             symbolPen='w'
