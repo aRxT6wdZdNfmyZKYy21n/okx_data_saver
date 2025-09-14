@@ -263,6 +263,8 @@ class FinPlotChartWindow(QMainWindow):
             ),
         )
 
+        graphics_layout_widget.nextRow()
+
         candles_plot_by_interval_name_map: dict[str, typing.Any] = {}  # TODO: typing
 
         for interval_name in PlotConstants.IntervalNames:
