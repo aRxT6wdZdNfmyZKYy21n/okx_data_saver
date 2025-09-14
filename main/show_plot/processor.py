@@ -32,7 +32,7 @@ from main.show_plot.globals import (
     g_globals,
 )
 
-from main.show_plot.window import (
+from main.show_plot.gui.window import (
     FinPlotChartWindow
 )
 

@@ -4,15 +4,23 @@ import asyncio
 import traceback
 import typing
 
-from datetime import datetime, timedelta
+from datetime import (
+    timedelta,
+)
 
 import pandas
-from pyqtgraph import Point
-from qasync import asyncSlot
+from pyqtgraph import (
+    Point,
+)
+from qasync import (
+    asyncSlot,
+)
 
 import pyqtgraph
 
-from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtCore import (
+    Qt,
+)
 
 from PyQt6.QtGui import (
     QColor,
@@ -22,15 +30,24 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QMainWindow,
     QVBoxLayout,
-    QWidget
+    QWidget,
 )
 
+from main.show_plot.gui.item.candlestick import (
+    CandlestickItem,
+)
+from main.show_plot.gui.item.datetime_axis import (
+    DateTimeAxisItem,
+)
+from main.show_plot.gui.item.rect import (
+    RectItem,
+)
 from utils.async_ import (
-    create_task_with_exceptions_logging
+    create_task_with_exceptions_logging,
 )
 
 from utils.qt import (
-    QtUtils
+    QtUtils,
 )
 
 if typing.TYPE_CHECKING:
@@ -141,260 +158,6 @@ _RSI_PLOT_GRADIENT_LOWER_END_COLOR = (
 
 _RSI_LINE_COLOR = '#7e57c2'
 _TEST_LINE_COLOR = '#ffffff'
-
-
-class RectItem(pyqtgraph.GraphicsObject):
-    def __init__(
-            self,
-            brush_color: QColor,
-            pen_color: QColor,
-            position: Point,
-            size: Point,
-    ) -> None:
-        super().__init__()
-
-        self.setPos(
-            position,
-        )
-
-        self.__brush_color = brush_color
-        self.__pen_color = pen_color
-        self.__size = size
-
-    def boundingRect(self):
-        size = self.__size
-
-        return QRectF(
-            0,
-            0,
-            size[0],
-            size[1]
-        ).normalized()
-
-    def paint(self, painter, *args):
-        rect = self.boundingRect()
-
-        painter.setPen(
-            pyqtgraph.mkPen(
-                self.__pen_color,
-            ),
-        )
-
-        painter.setBrush(
-            pyqtgraph.mkBrush(
-                self.__brush_color,
-            ),
-        )
-
-        painter.translate(
-            rect.left(),
-            rect.top(),
-        )
-
-        painter.scale(
-            rect.width(),
-            rect.height()
-        )
-
-        painter.drawRect(
-            0,
-            0,
-            1,
-            1
-        )
-
-    def set_brush_color(self, value: QColor) -> None:
-        self.__brush_color = value
-
-    def set_pen_color(self, value: QColor) -> None:
-        self.__pen_color = value
-
-    def set_size(self, value: Point) -> None:
-        self.__size = value
-
-    def _get_pen_color(
-            self
-    ) -> QColor:
-        return self.__pen_color
-
-
-class CandlestickItem(RectItem):
-    def __init__(
-            self,
-
-            close_price: float,
-            end_timestamp_ns: float,
-            high_price: float,
-            low_price: float,
-            open_price: float,
-            start_timestamp_ns: float,
-    ) -> None:
-        body_color, shadow_color = self.__generate_body_and_shadow_color_pair(
-            close_price,
-            open_price,
-        )
-
-        super().__init__(
-            brush_color=body_color,
-            pen_color=shadow_color,
-            position=self.__generate_position(
-                end_timestamp_ns,
-                open_price,
-                start_timestamp_ns,
-            ),
-            size=self.__generate_size(
-                close_price,
-                end_timestamp_ns,
-                open_price,
-                start_timestamp_ns,
-            ),
-        )
-
-        self.__close_price = close_price
-        self.__end_timestamp_ns = end_timestamp_ns
-        self.__high_price = high_price
-        self.__low_price = low_price
-        self.__open_price = open_price
-        self.__start_timestamp_ns = start_timestamp_ns
-
-    def paint(self, painter, *args):
-        painter.setPen(
-            pyqtgraph.mkPen(
-                self._get_pen_color(),
-                width=2,
-            ),
-        )
-
-        timestamp_ms_delta = (
-            (
-                self.__end_timestamp_ns -
-                self.__start_timestamp_ns
-            ) * 0.25
-        )
-
-        painter.drawLine(
-            Point(timestamp_ms_delta, self.__high_price - self.__open_price),
-            Point(timestamp_ms_delta, self.__low_price - self.__open_price)
-        )
-
-        super().paint(
-            painter,
-            *args,
-        )
-
-    def update_data(
-            self,
-
-            close_price: float,
-            end_timestamp_ns: float,
-            high_price: float,
-            low_price: float,
-            open_price: float,
-            start_timestamp_ns: float,
-    ) -> None:
-        self.__close_price = close_price
-        self.__end_timestamp_ns = end_timestamp_ns
-        self.__high_price = high_price
-        self.__low_price = low_price
-        self.__open_price = open_price
-        self.__start_timestamp_ns = start_timestamp_ns
-
-        self.setPos(
-            self.__generate_position(
-                end_timestamp_ns,
-                open_price,
-                start_timestamp_ns,
-            )
-        )
-
-        self.set_size(
-            self.__generate_size(
-                close_price,
-                end_timestamp_ns,
-                open_price,
-                start_timestamp_ns,
-            )
-        )
-
-        body_color, shadow_color = self.__generate_body_and_shadow_color_pair(
-            close_price,
-            open_price,
-        )
-
-        self.set_brush_color(
-            body_color,
-        )
-
-        self.set_pen_color(
-            shadow_color,
-        )
-
-    @staticmethod
-    def __generate_body_and_shadow_color_pair(
-            close_price: float,
-            open_price: float,
-    ) -> tuple[QColor, QColor]:
-        is_bull = close_price >= open_price
-
-        body_color: QColor
-        shadow_color: QColor
-
-        if is_bull:
-            body_color = _CANDLE_BULL_BODY_COLOR
-            shadow_color =_CANDLE_BULL_SHADOW_COLOR
-        else:
-            body_color = _CANDLE_BEAR_BODY_COLOR
-            shadow_color = _CANDLE_BEAR_SHADOW_COLOR
-
-        return body_color, shadow_color
-
-    @staticmethod
-    def __generate_position(
-            end_timestamp_ns: float,
-            open_price: float,
-            start_timestamp_ns: float,
-    ) -> Point:
-        return Point(
-            start_timestamp_ns + (end_timestamp_ns - start_timestamp_ns) * 0.25,
-            open_price
-        )
-
-    @staticmethod
-    def __generate_size(
-            close_price: float,
-            end_timestamp_ns: float,
-            open_price: float,
-            start_timestamp_ns: float,
-    ) -> Point:
-        return Point(
-            (end_timestamp_ns - start_timestamp_ns) * 0.5,
-            close_price - open_price
-        )
-
-
-class DateTimeAxisItem(pyqtgraph.AxisItem):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.setLabel(text='Time', units=None)
-        self.enableAutoSIPrefix(False)
-
-    def tickStrings(self, values, scale, spacing):
-        tick_strings = []
-
-        for value in values:
-            try:
-                tick_string = datetime.fromtimestamp(
-                    value //
-                    10 ** 9
-                ).isoformat()
-            except ValueError:
-                tick_string = 'N/A'
-
-            tick_strings.append(
-                tick_string,
-            )
-
-        return tick_strings
 
 
 class FinPlotChartWindow(QMainWindow):
