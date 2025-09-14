@@ -4,6 +4,10 @@ import asyncio
 import traceback
 import typing
 
+from functools import (
+    partial,
+)
+
 import pandas
 from pyqtgraph import (
     Point,
@@ -29,6 +33,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from constants.plot import (
+    PlotConstants,
+)
 from main.show_plot.gui.item.candlestick import (
     CandlestickItem,
 )
@@ -196,7 +203,7 @@ class FinPlotChartWindow(QMainWindow):
         )
 
         self.setWindowTitle(
-            'Chart'
+            'Chart',
         )
 
         graphics_layout_widget: pyqtgraph.GraphicsLayout = pyqtgraph.GraphicsLayoutWidget()  # noqa
@@ -222,6 +229,13 @@ class FinPlotChartWindow(QMainWindow):
             y=True
         )
 
+        price_plot.sigXRangeChanged.connect(
+            partial(
+                self.__update_plots_x_range,
+                price_plot,
+            ),
+        )
+
         graphics_layout_widget.nextRow()
 
         rsi_plot = graphics_layout_widget.addPlot(
@@ -242,20 +256,50 @@ class FinPlotChartWindow(QMainWindow):
             y=True
         )
 
-        def update_rsi_plot_x_range():  # TODO: move to method
-            rsi_plot.setXRange(
-                *price_plot.getViewBox().viewRange()[0],
-                padding=0
+        rsi_plot.sigXRangeChanged.connect(
+            partial(
+                self.__update_plots_x_range,
+                rsi_plot,
+            ),
+        )
+
+        candles_plot_by_interval_name_map: dict[str, typing.Any] = {}  # TODO: typing
+
+        for interval_name in PlotConstants.IntervalNames:
+            candles_plot = graphics_layout_widget.addPlot(
+                title=f'Candles ({interval_name})',
             )
 
-        def update_price_plot_x_range():  # TODO: move to method
-            price_plot.setXRange(
-                *rsi_plot.getViewBox().viewRange()[0],
-                padding=0
+            candles_date_axis = DateTimeByTradeIDAxisItem(
+                orientation='bottom',
+                processor=processor,
             )
 
-        price_plot.sigXRangeChanged.connect(update_rsi_plot_x_range)
-        rsi_plot.sigXRangeChanged.connect(update_price_plot_x_range)
+            candles_plot.setAxisItems({
+                'bottom': candles_date_axis
+            })
+
+            candles_plot.showGrid(
+                x=True,
+                y=True
+            )
+
+            assert interval_name not in candles_plot_by_interval_name_map, (
+                interval_name,
+            )
+
+            candles_plot_by_interval_name_map[
+                interval_name
+            ] = candles_plot
+
+            candles_plot.sigXRangeChanged.connect(
+                partial(
+                    self.__update_plots_x_range,
+                    candles_plot,
+                ),
+            )
+
+            graphics_layout_widget.nextRow()
 
         # Create a linear gradient for any plot background
 
@@ -344,6 +388,10 @@ class FinPlotChartWindow(QMainWindow):
         ) = None
         """
 
+        self.__candles_plot_by_interval_name_map = (
+            candles_plot_by_interval_name_map
+        )
+
         self.__drawing_lock = (
             asyncio.Lock()
         )
@@ -429,6 +477,25 @@ class FinPlotChartWindow(QMainWindow):
         window_layout.addLayout(
             functionality_layout
         )
+
+    def __update_plots_x_range(
+            self,
+            current_plot: pyqtgraph.PlotWidget,  # TODO: check typing
+    ):  # TODO: move to method
+        x_range = current_plot.getViewBox().viewRange()[0]
+
+        for plot in (
+            *self.__candles_plot_by_interval_name_map.values(),
+            self.__price_plot,
+            self.__rsi_plot,
+        ):
+            if plot is current_plot:
+                continue
+
+            plot.setXRange(
+                *x_range,
+                padding=0
+            )
 
     async def plot(
             self,

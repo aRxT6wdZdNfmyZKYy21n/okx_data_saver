@@ -42,17 +42,12 @@ logger = logging.getLogger(
 )
 
 
-_CANDLE_INTERVAL_NAMES: list[str] = [  # TODO: RU
-    '15m',
-    '1H',
-]
-
-
 class FinPlotChartProcessor(object):
     __slots__ = (
         '__bollinger_base_line_series',
         '__bollinger_lower_band_series',
         '__bollinger_upper_band_series',
+        '__candle_dataframe_by_interval_name_map',
         '__current_available_symbol_name_set',
         '__current_symbol_name',
         '__max_price',
@@ -85,6 +80,8 @@ class FinPlotChartProcessor(object):
         self.__bollinger_upper_band_series: (
             Series | None
         ) = None
+
+        self.__candle_dataframe_by_interval_name_map: dict[str, pandas.DataFrame] = {}
 
         self.__current_available_symbol_name_set: (
             set[str] | None
