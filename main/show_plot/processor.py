@@ -25,6 +25,8 @@ from sqlalchemy import (
     text,
 )
 
+from constants.common import CommonConstants
+from constants.plot import PlotConstants
 from main.save_trades.schemas import (
     OKXTradeData,
 )
@@ -158,11 +160,10 @@ class FinPlotChartProcessor(object):
     ):
         return self.__bollinger_upper_band_series
 
-    @staticmethod
-    def get_current_available_interval_names() -> (
-            list[str] | None
-    ):
-        return _CANDLE_INTERVAL_NAMES
+    def get_candle_dataframe_by_interval_name_map(
+            self,
+    ) -> dict[str, pandas.DataFrame]:
+        return self.__candle_dataframe_by_interval_name_map
 
     async def get_current_available_symbol_names(
             self,
@@ -308,6 +309,8 @@ class FinPlotChartProcessor(object):
             None
         )
 
+        self.__candle_dataframe_by_interval_name_map.clear()
+
         self.__max_price = (
             None
         )
@@ -442,6 +445,167 @@ class FinPlotChartProcessor(object):
             bollinger_upper_band_series
         )
 
+    def __update_candle_dataframe_by_interval_name_map(
+            self
+    ) -> None:
+        trades_dataframe = (
+            self.__trades_dataframe
+        )
+
+        assert (
+            trades_dataframe is not None
+        ), None
+
+        candle_dataframe_by_interval_name_map = (
+            self.__candle_dataframe_by_interval_name_map
+        )
+
+        for interval_name in PlotConstants.IntervalNames:
+            candle_raw_data_list: list[dict[str, typing.Any]] = []
+
+            interval_duration = CommonConstants.IntervalDurationByNameMap[
+                interval_name
+            ]
+
+            interval_duration_ms = int(
+                interval_duration.total_seconds() *
+                1000  # ms
+            )
+
+            last_candle_raw_data: dict[str, typing.Any] | None = None
+
+            trade_id: int
+
+            for trade_id, row in trades_dataframe.iterrows():
+                price: float = row.price
+                quantity: float = row.quantity
+                volume = price * quantity
+
+                timestamp: pandas.Timestamp = row.timestamp_ms
+
+                timestamp_ms = (
+                    timestamp.value //
+                    10 ** 6
+                )
+
+                candle_start_timestamp_ms = (
+                    timestamp_ms -
+
+                    (
+                        timestamp_ms %
+                        interval_duration_ms
+                    )
+                )
+
+                candle_end_timestamp_ms = (
+                    candle_start_timestamp_ms +
+                    interval_duration_ms
+                )
+
+                if last_candle_raw_data is None:
+                    last_candle_raw_data = {
+                        'close_price': price,
+                        'end_timestamp_ms': candle_end_timestamp_ms,
+                        'end_trade_id': trade_id + 1,
+                        'high_price': price,
+                        'low_price': price,
+                        'open_price': price,
+                        'start_timestamp_ms': candle_start_timestamp_ms,
+                        'start_trade_id': trade_id,
+                        'volume': volume,
+                    }
+                else:
+                    if candle_start_timestamp_ms == last_candle_raw_data['start_timestamp_ms']:
+                        # Update candle raw data
+
+                        if price > last_candle_raw_data['high_price']:
+                            last_candle_raw_data['high_price'] = price
+
+                        if price < last_candle_raw_data['low_price']:
+                            last_candle_raw_data['low_price'] = price
+
+                        last_candle_raw_data.update({
+                            'end_trade_id': trade_id,
+                            'close_price': price,
+
+                            'volume': (
+                                last_candle_raw_data[
+                                    'volume'
+                                ] +
+
+                                volume
+                            ),
+                        })
+                    else:
+                        # Flush candle raw data
+
+                        candle_raw_data_list.append(
+                            last_candle_raw_data,
+                        )
+
+                        last_candle_raw_data = None
+
+            if last_candle_raw_data is not None:
+                # Flush candle raw data
+
+                candle_raw_data_list.append(
+                    last_candle_raw_data,
+                )
+
+                last_candle_raw_data = None  # noqa
+
+            candles_dataframe = (
+                DataFrame.from_records(
+                    candle_raw_data_list,
+
+                    columns=[
+                        'close_price',
+                        'end_timestamp_ms',
+                        'end_trade_id',
+                        'high_price',
+                        'low_price',
+                        'open_price',
+                        'start_timestamp_ms',
+                        'start_trade_id',
+                        'volume',
+                    ]
+                )
+            )
+
+            assert (
+                candles_dataframe.size
+            ), None
+
+            candles_dataframe.end_timestamp_ms = (
+                pandas.to_datetime(
+                    candles_dataframe.end_timestamp_ms,
+
+                    unit='ms',
+                )
+            )
+
+            candles_dataframe.start_timestamp_ms = (
+                pandas.to_datetime(
+                    candles_dataframe.start_timestamp_ms,
+
+                    unit='ms',
+                )
+            )
+
+            candles_dataframe.set_index(
+                'start_timestamp_ms',
+                inplace=True,
+            )
+
+            candles_dataframe.sort_values(
+                'start_timestamp_ms',
+                inplace=True,
+            )
+
+            candle_dataframe_by_interval_name_map[
+                interval_name
+            ] = candles_dataframe
+
     async def __update_trades_dataframe(
             self
     ) -> None:
@@ -493,8 +657,9 @@ class FinPlotChartProcessor(object):
                     OKXTradeData.symbol_name.asc(),
                     OKXTradeData.trade_id.desc(),
                 ).limit(
+                    50000,
                     # 10000
-                    1000
+                    # 1000
                     # 50
                 )
             )
@@ -648,6 +813,7 @@ class FinPlotChartProcessor(object):
         )
 
         self.__update_bollinger_series()
+        self.__update_candle_dataframe_by_interval_name_map()
         self.__update_rsi_series()
         self.__update_test_series()
 

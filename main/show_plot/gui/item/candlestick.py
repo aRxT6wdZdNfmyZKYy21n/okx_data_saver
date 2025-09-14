@@ -12,6 +12,31 @@ from main.show_plot.gui.item.rect import (
 )
 
 
+_CANDLE_BEAR_BODY_COLOR = QColor(
+    0xf2,
+    0x36,
+    0x45,
+)
+
+_CANDLE_BEAR_SHADOW_COLOR = QColor(
+    0xf2,
+    0x36,
+    0x45,
+)
+
+_CANDLE_BULL_BODY_COLOR = QColor(
+    0x08,
+    0x99,
+    0x81,
+)
+
+_CANDLE_BULL_SHADOW_COLOR = QColor(
+    0x08,
+    0x99,
+    0x81,
+)
+
+
 class CandlestickItem(RectItem):
     def __init__(
             self,

@@ -4,7 +4,7 @@ class PlotConstants(object):
     IntervalNames = [
         '1m',
         '15m',
-        '1H',
-        '4H',
-        '1D'
+        # '1H',
+        # '4H',
+        # '1D'
     ]
