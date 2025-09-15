@@ -474,9 +474,31 @@ class FinPlotChartProcessor(object):
 
             last_candle_raw_data: dict[str, typing.Any] | None = None
 
+            old_candle_dataframe = candle_dataframe_by_interval_name_map.get(
+                interval_name,
+            )
+
+            min_trade_id: int
+
+            if old_candle_dataframe is not None:
+                min_start_timestamp: pandas.Timestamp = (
+                    old_candle_dataframe.index.max()
+                )
+
+                row = old_candle_dataframe.loc[
+                    min_start_timestamp
+                ]
+
+                min_trade_id: int = row.start_trade_id
+            else:
+                min_trade_id = 0
+
             trade_id: int
 
             for trade_id, row in trades_dataframe.iterrows():
+                if trade_id < min_trade_id:
+                    continue
+
                 price: float = row.price
                 quantity: float = row.quantity
                 volume = price * quantity
@@ -554,7 +576,7 @@ class FinPlotChartProcessor(object):
 
                 last_candle_raw_data = None  # noqa
 
-            candles_dataframe = (
+            new_candle_dataframe = (
                 DataFrame.from_records(
                     candle_raw_data_list,
 
@@ -573,38 +595,53 @@ class FinPlotChartProcessor(object):
             )
 
             assert (
-                candles_dataframe.size
+                new_candle_dataframe.size
             ), None
 
-            candles_dataframe.end_timestamp_ms = (
+            new_candle_dataframe.end_timestamp_ms = (
                 pandas.to_datetime(
-                    candles_dataframe.end_timestamp_ms,
+                    new_candle_dataframe.end_timestamp_ms,
 
                     unit='ms',
                 )
             )
 
-            candles_dataframe.start_timestamp_ms = (
+            new_candle_dataframe.start_timestamp_ms = (
                 pandas.to_datetime(
-                    candles_dataframe.start_timestamp_ms,
+                    new_candle_dataframe.start_timestamp_ms,
 
                     unit='ms',
                 )
             )
 
-            candles_dataframe.set_index(
+            new_candle_dataframe.set_index(
                 'start_timestamp_ms',
                 inplace=True,
             )
 
-            candles_dataframe.sort_values(
+            new_candle_dataframe.sort_values(
                 'start_timestamp_ms',
                 inplace=True,
             )
+
+            candle_dataframe: pandas.DataFrame
+
+            if old_candle_dataframe is not None:
+                old_candle_dataframe.update(
+                    new_candle_dataframe,
+                )
+
+                candle_dataframe = (
+                    old_candle_dataframe.combine_first(
+                        new_candle_dataframe,
+                    )
+                )
+            else:
+                candle_dataframe = new_candle_dataframe
 
             candle_dataframe_by_interval_name_map[
                 interval_name
-            ] = candles_dataframe
+            ] = candle_dataframe
 
     async def __update_trades_dataframe(
             self

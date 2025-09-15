@@ -968,5 +968,7 @@ class FinPlotChartWindow(QMainWindow):
                 test_series.array,
             )
 
-    def auto_range_price_plot(self) -> None:
+    def auto_range_price_plot(
+            self,
+    ) -> None:
         self.__price_plot.getViewBox().autoRange()
