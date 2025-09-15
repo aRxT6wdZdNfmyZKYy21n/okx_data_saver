@@ -54,6 +54,7 @@ class FinPlotChartProcessor(object):
         '__bollinger_upper_band_series',
         '__candle_dataframe_by_interval_name_map',
         '__current_available_symbol_name_set',
+        '__current_rsi_interval_name',
         '__current_symbol_name',
         '__max_price',
         '__max_trade_price',
@@ -63,6 +64,7 @@ class FinPlotChartProcessor(object):
         '__test_analytics_raw_data_list',
         '__test_series',
         '__trades_dataframe',
+        '__velocity_series',
         '__window',
     )
 
@@ -72,33 +74,21 @@ class FinPlotChartProcessor(object):
         super().__init__()
 
         self.__bollinger_base_line_series: Series | None = None
-
         self.__bollinger_lower_band_series: Series | None = None
-
         self.__bollinger_upper_band_series: Series | None = None
-
         self.__candle_dataframe_by_interval_name_map: dict[str, pandas.DataFrame] = {}
-
         self.__current_available_symbol_name_set: set[str] | None = None
-
+        self.__current_rsi_interval_name: str | None = None
         self.__current_symbol_name: str | None = None
-
         self.__max_price: Decimal | None = None
-
         self.__max_trade_price: Decimal | None = None
-
         self.__min_price: Decimal | None = None
-
         self.__min_trade_price: Decimal | None = None
-
         self.__rsi_series: Series | None = None
-
         self.__test_analytics_raw_data_list: list[dict[str, typing.Any]] | None = None
-
         self.__test_series: Series | None = None
-
         self.__trades_dataframe: DataFrame | None = None
-
+        self.__velocity_series: Series | None = None
         self.__window: FinPlotChartWindow | None = None
 
     # async def fini(
@@ -132,6 +122,11 @@ class FinPlotChartProcessor(object):
         self,
     ) -> list[str] | None:
         return await self.__get_current_available_symbol_names()
+
+    def get_current_rsi_interval_name(
+            self,
+    ) -> str | None:
+        return self.__current_rsi_interval_name
 
     def get_current_symbol_name(
         self,
@@ -178,6 +173,11 @@ class FinPlotChartProcessor(object):
     ) -> DataFrame | None:
         return self.__trades_dataframe
 
+    def get_velocity_series(
+        self,
+    ) -> Series | None:
+        return self.__velocity_series
+
     async def init(
         self,
     ) -> None:
@@ -219,6 +219,29 @@ class FinPlotChartProcessor(object):
                 1.0  # s
             )
 
+    async def update_current_rsi_interval_name(
+        self,
+        value: str,
+    ) -> bool:
+        if value == self.__current_rsi_interval_name:
+            return False
+
+        self.__current_rsi_interval_name = value
+
+        self.__rsi_series = None
+
+        self.__update_rsi_series()
+
+        window = self.__window
+
+        await window.plot(
+            is_need_run_once=True,
+        )
+
+        window.auto_range_price_plot()
+
+        return True
+
     async def update_current_symbol_name(
         self,
         value: str,
@@ -237,28 +260,18 @@ class FinPlotChartProcessor(object):
         self.__current_symbol_name = value
 
         self.__bollinger_base_line_series = None
-
         self.__bollinger_lower_band_series = None
-
         self.__bollinger_upper_band_series = None
-
         self.__candle_dataframe_by_interval_name_map.clear()
-
         self.__max_price = None
-
         self.__max_trade_price = None
-
         self.__min_price = None
-
         self.__min_trade_price = None
-
         self.__rsi_series = None
-
         self.__test_analytics_raw_data_list = None
-
         self.__test_series = None
-
         self.__trades_dataframe = None
+        self.__velocity_series = None
 
         await self.__update_trades_dataframe()
 
@@ -319,9 +332,7 @@ class FinPlotChartProcessor(object):
         assert bollinger_upper_band_series.size, None
 
         self.__bollinger_base_line_series = bollinger_base_line_series
-
         self.__bollinger_lower_band_series = bollinger_lower_band_series
-
         self.__bollinger_upper_band_series = bollinger_upper_band_series
 
     def __update_candle_dataframe_by_interval_name_map(
@@ -353,11 +364,11 @@ class FinPlotChartProcessor(object):
             min_trade_id: int
 
             if old_candle_dataframe is not None:
-                min_start_timestamp: pandas.Timestamp = old_candle_dataframe.index.max()
+                min_pandas_trade_id = old_candle_dataframe.index.max()
 
-                row = old_candle_dataframe.loc[min_start_timestamp]
-
-                min_trade_id: int = row.start_trade_id
+                min_trade_id = int(
+                    min_pandas_trade_id,
+                )
             else:
                 min_trade_id = 0
 
@@ -385,19 +396,7 @@ class FinPlotChartProcessor(object):
                     candle_start_timestamp_ms + interval_duration_ms
                 )
 
-                if last_candle_raw_data is None:
-                    last_candle_raw_data = {
-                        'close_price': price,
-                        'end_timestamp_ms': candle_end_timestamp_ms,
-                        'end_trade_id': trade_id + 1,
-                        'high_price': price,
-                        'low_price': price,
-                        'open_price': price,
-                        'start_timestamp_ms': candle_start_timestamp_ms,
-                        'start_trade_id': trade_id,
-                        'volume': volume,
-                    }
-                else:
+                if last_candle_raw_data is not None:
                     if (
                         candle_start_timestamp_ms
                         == last_candle_raw_data['start_timestamp_ms']
@@ -412,6 +411,7 @@ class FinPlotChartProcessor(object):
 
                         last_candle_raw_data.update(
                             {
+                                'trades_count': last_candle_raw_data['trades_count'] + 1,
                                 'end_trade_id': trade_id,
                                 'close_price': price,
                                 'volume': last_candle_raw_data['volume'] + volume,
@@ -425,6 +425,20 @@ class FinPlotChartProcessor(object):
                         )
 
                         last_candle_raw_data = None
+
+                if last_candle_raw_data is None:
+                    last_candle_raw_data = {
+                        'close_price': price,
+                        'end_timestamp_ms': candle_end_timestamp_ms,
+                        'end_trade_id': trade_id + 1,
+                        'high_price': price,
+                        'low_price': price,
+                        'open_price': price,
+                        'start_timestamp_ms': candle_start_timestamp_ms,
+                        'start_trade_id': trade_id,
+                        'trades_count': 1,
+                        'volume': volume,
+                    }
 
             if last_candle_raw_data is not None:
                 # Flush candle raw data
@@ -446,11 +460,15 @@ class FinPlotChartProcessor(object):
                     'open_price',
                     'start_timestamp_ms',
                     'start_trade_id',
+                    'trades_count',
                     'volume',
                 ],
             )
 
-            assert new_candle_dataframe.size, None
+            assert new_candle_dataframe.size, (
+                min_trade_id,
+                old_candle_dataframe,
+            )
 
             new_candle_dataframe.end_timestamp_ms = pandas.to_datetime(
                 new_candle_dataframe.end_timestamp_ms,
@@ -463,12 +481,12 @@ class FinPlotChartProcessor(object):
             )
 
             new_candle_dataframe.set_index(
-                'start_timestamp_ms',
+                'start_trade_id',
                 inplace=True,
             )
 
             new_candle_dataframe.sort_values(
-                'start_timestamp_ms',
+                'start_trade_id',
                 inplace=True,
             )
 
@@ -530,10 +548,11 @@ class FinPlotChartProcessor(object):
                     OKXTradeData.trade_id.desc(),
                 )
                 .limit(
-                    500000,
-                    # 50000,
-                    # 10000
-                    # 1000
+                    # 1_000_000,
+                    500_000,
+                    # 50_000,
+                    # 10_000
+                    # 1_000
                     # 50
                 )
             )
@@ -662,6 +681,13 @@ class FinPlotChartProcessor(object):
             f'Test series were updated by {timer.elapsed:.3f}s'
         )
 
+        with Timer() as timer:
+            self.__update_velocity_series()
+
+        logger.info(
+            f'Velocity series were updated by {timer.elapsed:.3f}s'
+        )
+
         await self.__window.plot(
             is_need_run_once=True,
         )
@@ -735,12 +761,22 @@ WHERE symbol_name IS NOT NULL;
     def __update_rsi_series(
         self,
     ) -> None:
-        trades_dataframe = self.__trades_dataframe
+        current_rsi_interval_name = self.__current_rsi_interval_name
 
-        assert trades_dataframe is not None, None
+        if current_rsi_interval_name is None:
+            return
+
+        candle_dataframe_by_interval_name_map = self.__candle_dataframe_by_interval_name_map
+
+        candle_dataframe = candle_dataframe_by_interval_name_map.get(
+            current_rsi_interval_name,
+        )
+
+        if candle_dataframe is None:
+            return
 
         rsi_series = talib.RSI(  # noqa
-            trades_dataframe.price,
+            candle_dataframe.close_price,
             timeperiod=14,  # 6
         )
 
@@ -992,6 +1028,18 @@ WHERE symbol_name IS NOT NULL;
             return
 
         self.__test_series = test_series
+
+    def __update_velocity_series(self) -> None:
+        candle_dataframe_by_interval_name_map = self.__candle_dataframe_by_interval_name_map
+
+        candle_dataframe_1m = candle_dataframe_by_interval_name_map.get(
+            PlotConstants.VelocityIntervalName,
+        )
+
+        if candle_dataframe_1m is None:
+            return
+
+        self.__velocity_series = candle_dataframe_1m.trades_count
 
     @staticmethod
     def __process_1(

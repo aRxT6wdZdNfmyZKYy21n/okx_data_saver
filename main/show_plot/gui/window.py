@@ -117,6 +117,7 @@ _RSI_PLOT_GRADIENT_LOWER_END_COLOR = QColor(
 
 _RSI_LINE_COLOR = '#7e57c2'
 _TEST_LINE_COLOR = '#ffffff'
+_VELOCITY_LINE_COLOR = '#ffffff'
 
 
 class FinPlotChartWindow(QMainWindow):
@@ -162,9 +163,9 @@ class FinPlotChartWindow(QMainWindow):
             'Chart',
         )
 
-        graphics_layout_widget: pyqtgraph.GraphicsLayout = (
+        graphics_layout_widget: pyqtgraph.GraphicsLayout = (  # noqa
             pyqtgraph.GraphicsLayoutWidget()
-        )  # noqa
+        )
 
         price_plot = graphics_layout_widget.addPlot(
             title='Price',
@@ -181,7 +182,7 @@ class FinPlotChartWindow(QMainWindow):
         price_plot.setAxisItems(
             {
                 'bottom': price_date_axis,
-            }
+            },
         )
 
         price_plot.showGrid(
@@ -205,35 +206,6 @@ class FinPlotChartWindow(QMainWindow):
 
         graphics_layout_widget.nextRow()
 
-        rsi_plot = graphics_layout_widget.addPlot(
-            title='RSI',
-        )
-
-        rsi_date_axis = DateTimeByTradeIDAxisItem(
-            orientation='bottom',
-            processor=processor,
-        )
-
-        rsi_plot.setAxisItems(
-            {
-                'bottom': rsi_date_axis,
-            }
-        )
-
-        rsi_plot.showGrid(
-            x=True,
-            y=True,
-        )
-
-        rsi_plot.sigXRangeChanged.connect(
-            partial(
-                self.__update_plots_x_range,
-                rsi_plot,
-            ),
-        )
-
-        graphics_layout_widget.nextRow()
-
         candles_plot_by_interval_name_map: dict[str, typing.Any] = {}  # TODO: typing
 
         for interval_name in PlotConstants.IntervalNames:
@@ -249,7 +221,7 @@ class FinPlotChartWindow(QMainWindow):
             candles_plot.setAxisItems(
                 {
                     'bottom': candles_date_axis,
-                }
+                },
             )
 
             candles_plot.showGrid(
@@ -278,6 +250,64 @@ class FinPlotChartWindow(QMainWindow):
             )
 
             graphics_layout_widget.nextRow()
+
+        rsi_plot = graphics_layout_widget.addPlot(
+            title='RSI',
+        )
+
+        rsi_date_axis = DateTimeByTradeIDAxisItem(
+            orientation='bottom',
+            processor=processor,
+        )
+
+        rsi_plot.setAxisItems(
+            {
+                'bottom': rsi_date_axis,
+            },
+        )
+
+        rsi_plot.showGrid(
+            x=True,
+            y=True,
+        )
+
+        rsi_plot.sigXRangeChanged.connect(
+            partial(
+                self.__update_plots_x_range,
+                rsi_plot,
+            ),
+        )
+
+        graphics_layout_widget.nextRow()
+
+        velocity_plot = graphics_layout_widget.addPlot(
+            title=f'Trades per {PlotConstants.VelocityIntervalName}',
+        )
+
+        velocity_date_axis = DateTimeByTradeIDAxisItem(
+            orientation='bottom',
+            processor=processor,
+        )
+
+        velocity_plot.setAxisItems(
+            {
+                'bottom': velocity_date_axis,
+            },
+        )
+
+        velocity_plot.showGrid(
+            x=True,
+            y=True,
+        )
+
+        velocity_plot.sigXRangeChanged.connect(
+            partial(
+                self.__update_plots_x_range,
+                velocity_plot,
+            ),
+        )
+
+        graphics_layout_widget.nextRow()
 
         # Create a linear gradient for any plot background
 
@@ -327,6 +357,16 @@ class FinPlotChartWindow(QMainWindow):
             'Символ',
             self.__on_symbol_name_changed,
             alignment=Qt.AlignmentFlag.AlignLeft,
+        )
+
+        (
+            rsi_interval_name_label,
+            rsi_interval_name_combo_box,
+        ) = QtUtils.create_label_and_combo_box(
+            'RSI timeframe',
+            self.__on_rsi_interval_name_changed,
+            alignment=Qt.AlignmentFlag.AlignLeft,
+            values=PlotConstants.IntervalNames,
         )
 
         self.__graphics_layout_widget = graphics_layout_widget
@@ -399,9 +439,16 @@ class FinPlotChartWindow(QMainWindow):
             name='Test',
         )
 
+        self.__rsi_interval_name_combo_box = rsi_interval_name_combo_box
+        self.__rsi_interval_name_label = rsi_interval_name_label
         self.__symbol_name_combo_box = symbol_name_combo_box
-
         self.__symbol_name_label = symbol_name_label
+        self.__velocity_plot = velocity_plot
+
+        self.__velocity_plot_data_item = velocity_plot.plot(
+            pen=_VELOCITY_LINE_COLOR,
+            name=f'Trades per {PlotConstants.VelocityIntervalName}',
+        )
 
         # self.__volume_plot = (
         #     volume_plot
@@ -410,9 +457,11 @@ class FinPlotChartWindow(QMainWindow):
         # self.__volume_plot = (
         #     volume_plot
         # )
+
+        functionality_layout.addWidget(rsi_interval_name_label, 0, 4, 2, 1)
+        functionality_layout.addWidget(rsi_interval_name_combo_box, 2, 4, 2, 1)
 
         functionality_layout.addWidget(symbol_name_label, 0, 2, 2, 1)
-
         functionality_layout.addWidget(symbol_name_combo_box, 2, 2, 2, 1)
 
         window_layout.addWidget(graphics_layout_widget)
@@ -429,6 +478,7 @@ class FinPlotChartWindow(QMainWindow):
             *self.__candles_plot_by_interval_name_map.values(),
             self.__price_plot,
             self.__rsi_plot,
+            self.__velocity_plot,
         ):
             if plot is current_plot:
                 continue
@@ -492,6 +542,32 @@ class FinPlotChartWindow(QMainWindow):
                         is_need_run_once=False,
                     )
                 )
+
+    @asyncSlot()
+    async def __on_rsi_interval_name_changed(
+        self,
+        # idx: int
+    ) -> None:
+        current_rsi_interval_name = self.__rsi_interval_name_combo_box.currentText()
+
+        processor = self.__processor
+
+        if not current_rsi_interval_name or (
+            current_rsi_interval_name == processor.get_current_rsi_interval_name()
+        ):
+            return
+
+        print(
+            f'Selected RSI interval name: {current_rsi_interval_name!r}'
+            # f' ({idx})'
+        )
+
+        if not await processor.update_current_rsi_interval_name(
+            current_rsi_interval_name,
+        ):
+            # TODO: response to user UI
+
+            return
 
     @asyncSlot()
     async def __on_symbol_name_changed(
@@ -570,14 +646,11 @@ class FinPlotChartWindow(QMainWindow):
 
         if _IS_NEED_SHOW_BOLLINGER_BANDS:
             bollinger_base_line_series = processor.get_bollinger_base_line_series()
-
             bollinger_lower_band_series = processor.get_bollinger_lower_band_series()
-
             bollinger_upper_band_series = processor.get_bollinger_upper_band_series()
 
             if bollinger_base_line_series is not None:
                 assert bollinger_lower_band_series is not None, None
-
                 assert bollinger_upper_band_series is not None, None
 
                 self.__bollinger_base_line_plot_data_item.setData(
@@ -616,7 +689,6 @@ class FinPlotChartWindow(QMainWindow):
                 """
             else:
                 assert bollinger_lower_band_series is None, None
-
                 assert bollinger_upper_band_series is None, None
 
         # plot.reset()
@@ -652,7 +724,7 @@ class FinPlotChartWindow(QMainWindow):
             candle_start_timestamp_ms_set: set[int] = set()
 
             for candle_row_data in candle_dataframe.itertuples():
-                start_timestamp: pandas.Timestamp = candle_row_data.Index
+                start_trade_id: int = candle_row_data.Index
 
                 candle_close_price: float = candle_row_data.close_price
                 candle_high_price: float = candle_row_data.high_price
@@ -662,9 +734,8 @@ class FinPlotChartWindow(QMainWindow):
                 end_timestamp: pandas.Timestamp = candle_row_data.end_timestamp_ms
                 end_trade_id: int = candle_row_data.end_trade_id
 
+                start_timestamp: pandas.Timestamp = candle_row_data.start_timestamp_ms
                 start_timestamp_ms = int(start_timestamp.timestamp() * 1000)
-
-                start_trade_id: int = candle_row_data.start_trade_id
 
                 candle_start_timestamp_ms_set.add(
                     start_timestamp_ms,
@@ -880,6 +951,14 @@ class FinPlotChartWindow(QMainWindow):
             self.__test_plot_data_item.setData(
                 test_series.index,
                 test_series.array,
+            )
+
+        velocity_series = processor.get_velocity_series()
+
+        if velocity_series is not None:
+            self.__velocity_plot_data_item.setData(
+                velocity_series.index,
+                velocity_series.array,
             )
 
     def auto_range_price_plot(
