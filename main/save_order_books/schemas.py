@@ -3,7 +3,7 @@ from sqlalchemy import (
     BigInteger,
     JSON,
     PrimaryKeyConstraint,
-    Text
+    Text,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncAttrs,
@@ -20,12 +20,12 @@ class Base(AsyncAttrs, DeclarativeBase):
 
 
 class OKXOrderBookData(Base):
-    __tablename__ = "okx_order_book_data"
+    __tablename__ = 'okx_order_book_data'
 
     __table_args__ = (
         PrimaryKeyConstraint(  # Explicitly define composite primary key
             'symbol_name',
-            'timestamp_ms'
+            'timestamp_ms',
         ),
     )
 

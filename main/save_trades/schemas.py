@@ -9,7 +9,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     PrimaryKeyConstraint,
-    Text
+    Text,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncAttrs,
@@ -26,7 +26,7 @@ class Base(AsyncAttrs, DeclarativeBase):
 
 
 class OKXTradeData(Base):
-    __tablename__ = "okx_trade_data"
+    __tablename__ = 'okx_trade_data'
     __table_args__ = (
         PrimaryKeyConstraint(  # Explicitly define composite primary key
             'symbol_name',
@@ -50,8 +50,10 @@ class OKXTradeData(Base):
 
     # Indices
 
-    timestamp_ms_idx = Index(
-        'timestamp_ms_idx',
-        "symbol_name",
-        'timestamp_ms'
-    ),
+    timestamp_ms_idx = (
+        Index(
+            'timestamp_ms_idx',
+            'symbol_name',
+            'timestamp_ms',
+        ),
+    )

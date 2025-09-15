@@ -18,43 +18,33 @@ class CommonConstants(object):
         '1s': timedelta(
             seconds=1,
         ),
-
         '5s': timedelta(
             seconds=5,
         ),
-
         '15s': timedelta(
             seconds=15,
         ),
-
         '30s': timedelta(
             seconds=30,
         ),
-
         '1m': timedelta(
             minutes=1,
         ),
-
         '5m': timedelta(
             minutes=5,
         ),
-
         '15m': timedelta(
             minutes=15,
         ),
-
         '30m': timedelta(
             minutes=30,
         ),
-
         '1H': timedelta(
             hours=1,
         ),
-
         '4H': timedelta(
             hours=4,
         ),
-
         '1D': timedelta(
             days=1,
         ),

@@ -9,20 +9,18 @@ import pyqtgraph
 
 if typing.TYPE_CHECKING:
     from main.show_plot.processor import (
-        FinPlotChartProcessor
+        FinPlotChartProcessor,
     )
 
 
 class DateTimeByTradeIDAxisItem(pyqtgraph.AxisItem):
-    __slots__ = (
-        '__processor',
-    )
+    __slots__ = ('__processor',)
 
     def __init__(
-            self,
-            processor,  # type: FinPlotChartProcessor
-            *args,
-            **kwargs
+        self,
+        processor,  # type: FinPlotChartProcessor
+        *args,
+        **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
 
@@ -54,20 +52,20 @@ class DateTimeByTradeIDAxisItem(pyqtgraph.AxisItem):
             tick_string = f'{trade_id}'
 
             if trades_dataframe is not None:
-
                 if trade_id in trades_dataframe.index:
                     row = trades_dataframe.loc[trade_id]
 
                     timestamp: pandas.Timestamp = row.timestamp_ms
 
                     try:
-                        tick_string = '\n'.join((
-                            datetime.fromtimestamp(
-                                timestamp.value /
-                                10 ** 9
-                            ).isoformat(),
-                            tick_string
-                        ))
+                        tick_string = '\n'.join(
+                            (
+                                datetime.fromtimestamp(
+                                    timestamp.value / 10**9,
+                                ).isoformat(),
+                                tick_string,
+                            )
+                        )
                     except ValueError:
                         pass
 

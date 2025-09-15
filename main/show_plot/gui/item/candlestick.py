@@ -13,13 +13,13 @@ from main.show_plot.gui.item.rect import (
 
 
 _CANDLE_BEAR_BODY_COLOR = QColor(
-    0xf2,
+    0xF2,
     0x36,
     0x45,
 )
 
 _CANDLE_BEAR_SHADOW_COLOR = QColor(
-    0xf2,
+    0xF2,
     0x36,
     0x45,
 )
@@ -39,14 +39,13 @@ _CANDLE_BULL_SHADOW_COLOR = QColor(
 
 class CandlestickItem(RectItem):
     def __init__(
-            self,
-
-            close_price: float,
-            end_timestamp_ns: float,
-            high_price: float,
-            low_price: float,
-            open_price: float,
-            start_timestamp_ns: float,
+        self,
+        close_price: float,
+        end_timestamp_ns: float,
+        high_price: float,
+        low_price: float,
+        open_price: float,
+        start_timestamp_ns: float,
     ) -> None:
         (
             body_color,
@@ -88,11 +87,8 @@ class CandlestickItem(RectItem):
         )
 
         timestamp_ms_delta = (
-            (
-                self.__end_timestamp_ns -
-                self.__start_timestamp_ns
-            ) * 0.25
-        )
+            self.__end_timestamp_ns - self.__start_timestamp_ns
+        ) * 0.25
 
         painter.drawLine(
             Point(
@@ -102,7 +98,7 @@ class CandlestickItem(RectItem):
             Point(
                 timestamp_ms_delta,
                 self.__low_price - self.__open_price,
-            )
+            ),
         )
 
         super().paint(
@@ -111,14 +107,13 @@ class CandlestickItem(RectItem):
         )
 
     def update_data(
-            self,
-
-            close_price: float,
-            end_timestamp_ns: float,
-            high_price: float,
-            low_price: float,
-            open_price: float,
-            start_timestamp_ns: float,
+        self,
+        close_price: float,
+        end_timestamp_ns: float,
+        high_price: float,
+        low_price: float,
+        open_price: float,
+        start_timestamp_ns: float,
     ) -> None:
         self.__close_price = close_price
         self.__end_timestamp_ns = end_timestamp_ns
@@ -159,8 +154,8 @@ class CandlestickItem(RectItem):
 
     @staticmethod
     def __generate_body_and_shadow_color_pair(
-            close_price: float,
-            open_price: float,
+        close_price: float,
+        open_price: float,
     ) -> tuple[QColor, QColor]:
         is_bull = close_price >= open_price
 
@@ -169,7 +164,7 @@ class CandlestickItem(RectItem):
 
         if is_bull:
             body_color = _CANDLE_BULL_BODY_COLOR
-            shadow_color =_CANDLE_BULL_SHADOW_COLOR
+            shadow_color = _CANDLE_BULL_SHADOW_COLOR
         else:
             body_color = _CANDLE_BEAR_BODY_COLOR
             shadow_color = _CANDLE_BEAR_SHADOW_COLOR
@@ -178,23 +173,22 @@ class CandlestickItem(RectItem):
 
     @staticmethod
     def __generate_position(
-            end_timestamp_ns: float,
-            open_price: float,
-            start_timestamp_ns: float,
+        end_timestamp_ns: float,
+        open_price: float,
+        start_timestamp_ns: float,
     ) -> Point:
         return Point(
             start_timestamp_ns + (end_timestamp_ns - start_timestamp_ns) * 0.25,
-            open_price
+            open_price,
         )
 
     @staticmethod
     def __generate_size(
-            close_price: float,
-            end_timestamp_ns: float,
-            open_price: float,
-            start_timestamp_ns: float,
+        close_price: float,
+        end_timestamp_ns: float,
+        open_price: float,
+        start_timestamp_ns: float,
     ) -> Point:
         return Point(
-            (end_timestamp_ns - start_timestamp_ns) * 0.5,
-            close_price - open_price
+            (end_timestamp_ns - start_timestamp_ns) * 0.5, close_price - open_price
         )

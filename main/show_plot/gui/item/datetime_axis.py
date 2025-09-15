@@ -25,8 +25,7 @@ class DateTimeAxisItem(pyqtgraph.AxisItem):
         for value in values:
             try:
                 tick_string = datetime.fromtimestamp(
-                    value //
-                    10 ** 9
+                    value // 10**9,
                 ).isoformat()
             except ValueError:
                 tick_string = 'N/A'

@@ -55,7 +55,8 @@ class AsyncEvent(Event):
         self.__async_delegates.clear()
 
     def _get_container(
-        self, delegate: (typing.Union[typing.Callable, CommonConstants.AsyncFunctionType])
+        self,
+        delegate: typing.Callable | CommonConstants.AsyncFunctionType,
     ):
         if inspect.iscoroutinefunction(
             delegate,

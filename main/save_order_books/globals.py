@@ -1,13 +1,12 @@
-__all__ = (
-    'g_globals',
-)
+__all__ = ('g_globals',)
 
 import asyncio
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,
-    create_async_engine, AsyncSession,
+    create_async_engine,
+    AsyncSession,
 )
 
 from constants.common import (
@@ -31,16 +30,14 @@ class Globals(object):
     )
 
     def __init__(
-            self
+        self,
     ) -> None:
         super().__init__()
 
-        self.__okx_web_socket_connection_manager = (
-            OKXWebSocketConnectionManager(
-                process_idx=0,
-                web_socket_connection_idx=0,
-                web_socket_connections_count_per_process=1
-            )
+        self.__okx_web_socket_connection_manager = OKXWebSocketConnectionManager(
+            process_idx=0,
+            web_socket_connection_idx=0,
+            web_socket_connections_count_per_process=1,
         )
 
         self.__postgres_db_engine = postgres_db_engine = create_async_engine(
@@ -63,27 +60,27 @@ class Globals(object):
             expire_on_commit=False,
         )
 
-        self.__postgres_db_task_queue: (
-            asyncio.Queue[CommonConstants.AsyncFunctionType]
-        ) = asyncio.Queue()
+        self.__postgres_db_task_queue: asyncio.Queue[
+            CommonConstants.AsyncFunctionType
+        ] = asyncio.Queue()
 
     def get_okx_web_socket_connection_manager(
-            self,
+        self,
     ) -> OKXWebSocketConnectionManager:
         return self.__okx_web_socket_connection_manager
 
     def get_postgres_db_engine(
-            self
+        self,
     ) -> AsyncEngine:
         return self.__postgres_db_engine
 
     def get_postgres_db_session_maker(
-            self
+        self,
     ) -> async_sessionmaker[AsyncSession]:
         return self.__postgres_db_session_maker
 
     def get_postgres_db_task_queue(
-            self
+        self,
     ) -> asyncio.Queue[CommonConstants.AsyncFunctionType]:
         return self.__postgres_db_task_queue
 

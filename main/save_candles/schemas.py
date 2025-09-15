@@ -9,7 +9,7 @@ from sqlalchemy import (
     Numeric,
     JSON,
     PrimaryKeyConstraint,
-    Text
+    Text,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncAttrs,
@@ -26,11 +26,11 @@ class Base(AsyncAttrs, DeclarativeBase):
 
 
 class OKXCandleData15m(Base):
-    __tablename__ = "okx_candle_data_15m"
+    __tablename__ = 'okx_candle_data_15m'
     __table_args__ = (
         PrimaryKeyConstraint(  # Explicitly define composite primary key
             'symbol_name',
-            'start_timestamp_ms'
+            'start_timestamp_ms',
         ),
     )
 
@@ -54,11 +54,11 @@ class OKXCandleData15m(Base):
 
 
 class OKXCandleData1H(Base):
-    __tablename__ = "okx_candle_data_1H"
+    __tablename__ = 'okx_candle_data_1H'
     __table_args__ = (
         PrimaryKeyConstraint(  # Explicitly define composite primary key
             'symbol_name',
-            'start_timestamp_ms'
+            'start_timestamp_ms',
         ),
     )
 

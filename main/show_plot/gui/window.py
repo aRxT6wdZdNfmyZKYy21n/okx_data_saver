@@ -56,74 +56,60 @@ from utils.qt import (
 
 if typing.TYPE_CHECKING:
     from main.show_plot.processor import (
-        FinPlotChartProcessor
+        FinPlotChartProcessor,
     )
 
 
 _IS_NEED_SHOW_BOLLINGER_BANDS = True
 
-_BOLLINGER_BANDS_FILL_COLOR = (
-    QColor(
-        33,
-        150,
-        243,
-        12
-    )
+_BOLLINGER_BANDS_FILL_COLOR = QColor(
+    33,
+    150,
+    243,
+    12,
 )
 
 _BOLLINGER_BASE_LINE_COLOR = '#2962ff'
 _BOLLINGER_LOWER_BAND_COLOR = '#089981'
 _BOLLINGER_UPPER_BAND_COLOR = '#f23645'
 
-_PLOT_BACKGROUND_UPPER_COLOR = (
-    QColor(
-        126,
-        87,
-        194
-    )
+_PLOT_BACKGROUND_UPPER_COLOR = QColor(
+    126,
+    87,
+    194,
 )
 
-_PLOT_BACKGROUND_LOWER_COLOR = (
-    QColor(
-        67,
-        70,
-        81
-    )
+_PLOT_BACKGROUND_LOWER_COLOR = QColor(
+    67,
+    70,
+    81,
 )
 
-_RSI_PLOT_GRADIENT_UPPER_START_COLOR = (
-    QColor(
-        76,
-        175,
-        80
-    )
+_RSI_PLOT_GRADIENT_UPPER_START_COLOR = QColor(
+    76,
+    175,
+    80,
 )
 
-_RSI_PLOT_GRADIENT_UPPER_END_COLOR = (
-    QColor(
-        76,
-        175,
-        80,
-        0
-    )
+_RSI_PLOT_GRADIENT_UPPER_END_COLOR = QColor(
+    76,
+    175,
+    80,
+    0,
 )
 
-_RSI_PLOT_GRADIENT_LOWER_START_COLOR = (
-    QColor(
-        255,
-        82,
-        82,
-        0
-    )
+_RSI_PLOT_GRADIENT_LOWER_START_COLOR = QColor(
+    255,
+    82,
+    82,
+    0,
 )
 
-_RSI_PLOT_GRADIENT_LOWER_END_COLOR = (
-    QColor(
-        255,
-        82,
-        82,
-        255
-    )
+_RSI_PLOT_GRADIENT_LOWER_END_COLOR = QColor(
+    255,
+    82,
+    82,
+    255,
 )
 
 _RSI_LINE_COLOR = '#7e57c2'
@@ -132,34 +118,24 @@ _TEST_LINE_COLOR = '#ffffff'
 
 class FinPlotChartWindow(QMainWindow):
     def __init__(
-            self,
-
-            processor,  # type: FinPlotChartProcessor
-            parent=None
+        self,
+        processor,  # type: FinPlotChartProcessor
+        parent=None,
     ):
-        super(
-            FinPlotChartWindow,
-            self
-        ).__init__(
-            parent
+        super().__init__(
+            parent,
         )
 
-        functionality_layout = (
-            QGridLayout()
-        )
+        functionality_layout = QGridLayout()
 
-        window_layout_widget = (
-            QWidget()
-        )
+        window_layout_widget = QWidget()
 
-        window_layout = (
-            QVBoxLayout(
-                window_layout_widget
-            )
+        window_layout = QVBoxLayout(
+            window_layout_widget,
         )
 
         self.setCentralWidget(
-            window_layout_widget
+            window_layout_widget,
         )
 
         # self.setLayout(
@@ -168,14 +144,14 @@ class FinPlotChartWindow(QMainWindow):
 
         self.setMinimumSize(
             1366,  # 1920
-            768    # 1080
+            768,  # 1080
         )
 
         self.setWindowFlags(
             Qt.WindowType(
-                Qt.WindowType.WindowMaximizeButtonHint |
-                Qt.WindowType.WindowMinimizeButtonHint |
-                Qt.WindowType.WindowCloseButtonHint
+                Qt.WindowType.WindowMaximizeButtonHint
+                | Qt.WindowType.WindowMinimizeButtonHint
+                | Qt.WindowType.WindowCloseButtonHint,
             )
         )
 
@@ -183,13 +159,15 @@ class FinPlotChartWindow(QMainWindow):
             'Chart',
         )
 
-        graphics_layout_widget: pyqtgraph.GraphicsLayout = pyqtgraph.GraphicsLayoutWidget()  # noqa
+        graphics_layout_widget: pyqtgraph.GraphicsLayout = (
+            pyqtgraph.GraphicsLayoutWidget()
+        )  # noqa
 
         price_plot = graphics_layout_widget.addPlot(
             title='Price',
             pen='w',
             symbolBrush=(127, 0, 0),
-            symbolPen='w'
+            symbolPen='w',
         )
 
         price_date_axis = DateTimeByTradeIDAxisItem(
@@ -197,13 +175,15 @@ class FinPlotChartWindow(QMainWindow):
             processor=processor,
         )
 
-        price_plot.setAxisItems({
-            'bottom': price_date_axis
-        })
+        price_plot.setAxisItems(
+            {
+                'bottom': price_date_axis,
+            }
+        )
 
         price_plot.showGrid(
             x=True,
-            y=True
+            y=True,
         )
 
         price_plot.sigXRangeChanged.connect(
@@ -216,7 +196,7 @@ class FinPlotChartWindow(QMainWindow):
         graphics_layout_widget.nextRow()
 
         rsi_plot = graphics_layout_widget.addPlot(
-            title='RSI'
+            title='RSI',
         )
 
         rsi_date_axis = DateTimeByTradeIDAxisItem(
@@ -224,13 +204,15 @@ class FinPlotChartWindow(QMainWindow):
             processor=processor,
         )
 
-        rsi_plot.setAxisItems({
-            'bottom': rsi_date_axis
-        })
+        rsi_plot.setAxisItems(
+            {
+                'bottom': rsi_date_axis,
+            }
+        )
 
         rsi_plot.showGrid(
             x=True,
-            y=True
+            y=True,
         )
 
         rsi_plot.sigXRangeChanged.connect(
@@ -254,22 +236,22 @@ class FinPlotChartWindow(QMainWindow):
                 processor=processor,
             )
 
-            candles_plot.setAxisItems({
-                'bottom': candles_date_axis
-            })
+            candles_plot.setAxisItems(
+                {
+                    'bottom': candles_date_axis,
+                }
+            )
 
             candles_plot.showGrid(
                 x=True,
-                y=True
+                y=True,
             )
 
             assert interval_name not in candles_plot_by_interval_name_map, (
                 interval_name,
             )
 
-            candles_plot_by_interval_name_map[
-                interval_name
-            ] = candles_plot
+            candles_plot_by_interval_name_map[interval_name] = candles_plot
 
             candles_plot.sigXRangeChanged.connect(
                 partial(
@@ -323,80 +305,54 @@ class FinPlotChartWindow(QMainWindow):
 
         (
             symbol_name_label,
-            symbol_name_combo_box
-        ) = (
-            QtUtils.create_label_and_combo_box(
-                'Символ',
-                self.__on_symbol_name_changed,
-
-                alignment=(
-                    Qt.AlignmentFlag.AlignLeft
-                )
-            )
+            symbol_name_combo_box,
+        ) = QtUtils.create_label_and_combo_box(
+            'Символ',
+            self.__on_symbol_name_changed,
+            alignment=Qt.AlignmentFlag.AlignLeft,
         )
 
         self.__graphics_layout_widget = graphics_layout_widget
 
-        self.__bollinger_base_line_plot_data_item = (
-            price_plot.plot(
-                pen=_BOLLINGER_BASE_LINE_COLOR,
-                name="Bollinger Base Line",
-            )
+        self.__bollinger_base_line_plot_data_item = price_plot.plot(
+            pen=_BOLLINGER_BASE_LINE_COLOR,
+            name='Bollinger Base Line',
         )
 
-        self.__bollinger_lower_band_plot_data_item = (
-            price_plot.plot(
-                pen=_BOLLINGER_LOWER_BAND_COLOR,
-                name="Bollinger Lower Band",
-            )
+        self.__bollinger_lower_band_plot_data_item = price_plot.plot(
+            pen=_BOLLINGER_LOWER_BAND_COLOR,
+            name='Bollinger Lower Band',
         )
 
-        self.__bollinger_upper_band_plot_data_item = (
-            price_plot.plot(
-                pen=_BOLLINGER_UPPER_BAND_COLOR,
-                name="Bollinger Upper Band",
-            )
+        self.__bollinger_upper_band_plot_data_item = price_plot.plot(
+            pen=_BOLLINGER_UPPER_BAND_COLOR,
+            name='Bollinger Upper Band',
         )
 
         # TODO
         """
         self.__bollinger_bands_fill_between_item: (
-            typing.Optional[
-                pyqtgraph.FillBetweenItem
-            ]
+            pyqtgraph.FillBetweenItem | None
         ) = None
         """
 
-        self.__candles_plot_by_interval_name_map = (
-            candles_plot_by_interval_name_map
+        self.__candles_plot_by_interval_name_map = candles_plot_by_interval_name_map
+
+        self.__drawing_lock = asyncio.Lock()
+
+        self.__price_plot = price_plot
+
+        self.__price_plot_data_item = price_plot.plot(
+            name='Price',
         )
 
-        self.__drawing_lock = (
-            asyncio.Lock()
-        )
-
-        self.__price_plot = (
-            price_plot
-        )
-
-        self.__price_plot_data_item = (
-            price_plot.plot(
-                name='Price',
-            )
-        )
-
-        self.__price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map: (
-            defaultdict[
-                str,
-                dict[int, CandlestickItem]
-            ]
-        ) = defaultdict(
+        self.__price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map: defaultdict[
+            str, dict[int, CandlestickItem]
+        ] = defaultdict(
             dict,
         )
 
-        self.__processor = (
-            processor
-        )
+        self.__processor = processor
 
         # self.__quantity_plot = (
         #     quantity_plot
@@ -406,35 +362,29 @@ class FinPlotChartWindow(QMainWindow):
         #     quantity_plot
         # )
 
-        self.__rsi_plot = (
-            rsi_plot
+        self.__rsi_plot = rsi_plot
+
+        self.__rsi_plot_data_item = rsi_plot.plot(
+            pen=_RSI_LINE_COLOR,
+            name='RSI',
         )
 
-        self.__rsi_plot_data_item = (
-            rsi_plot.plot(
-                pen=_RSI_LINE_COLOR,
-                name='RSI',
-            )
+        self.__test_analytics_rect_item_by_start_timestamp_ms_map: dict[
+            int, RectItem
+        ] = {}
+
+        self.__test_plot_data_item = price_plot.plot(
+            pen=(
+                127,
+                127,
+                127,
+            ),
+            name='Test',
         )
 
-        self.__test_analytics_rect_item_by_start_timestamp_ms_map: (
-            dict[int, RectItem]
-        ) = {}
+        self.__symbol_name_combo_box = symbol_name_combo_box
 
-        self.__test_plot_data_item = (
-            price_plot.plot(
-                pen=(127, 127, 127),
-                name='Test',
-            )
-        )
-
-        self.__symbol_name_combo_box = (
-            symbol_name_combo_box
-        )
-
-        self.__symbol_name_label = (
-            symbol_name_label
-        )
+        self.__symbol_name_label = symbol_name_label
 
         # self.__volume_plot = (
         #     volume_plot
@@ -444,27 +394,17 @@ class FinPlotChartWindow(QMainWindow):
         #     volume_plot
         # )
 
-        functionality_layout.addWidget(
-            symbol_name_label,
-            0, 2, 2, 1
-        )
+        functionality_layout.addWidget(symbol_name_label, 0, 2, 2, 1)
 
-        functionality_layout.addWidget(
-            symbol_name_combo_box,
-            2, 2, 2, 1
-        )
+        functionality_layout.addWidget(symbol_name_combo_box, 2, 2, 2, 1)
 
-        window_layout.addWidget(
-            graphics_layout_widget
-        )
+        window_layout.addWidget(graphics_layout_widget)
 
-        window_layout.addLayout(
-            functionality_layout
-        )
+        window_layout.addLayout(functionality_layout)
 
     def __update_plots_x_range(
-            self,
-            current_plot: pyqtgraph.PlotWidget,  # TODO: check typing
+        self,
+        current_plot: pyqtgraph.PlotWidget,  # TODO: check typing
     ):  # TODO: move to method
         x_range = current_plot.getViewBox().viewRange()[0]
 
@@ -478,34 +418,23 @@ class FinPlotChartWindow(QMainWindow):
 
             plot.setXRange(
                 *x_range,
-                padding=0
+                padding=0,
             )
 
     async def plot(
-            self,
-
-            delay: (
-                typing.Optional[
-                    float
-                ]
-            ) = None,
-
-            is_need_run_once: bool = True
+        self,
+        delay: float | None = None,
+        is_need_run_once: bool = True,
     ) -> None:
-        drawing_lock = (
-            self.__drawing_lock
-        )
+        drawing_lock = self.__drawing_lock
 
-        if (
-                is_need_run_once and
-                drawing_lock.locked()
-        ):
+        if is_need_run_once and drawing_lock.locked():
             return
 
         async with drawing_lock:
             if delay is not None:
                 await asyncio.sleep(
-                    delay
+                    delay,
                 )
 
             try:
@@ -520,59 +449,42 @@ class FinPlotChartWindow(QMainWindow):
                 create_task_with_exceptions_logging(
                     self.plot(
                         delay=5.0,  # 5s  # 0.1  # 100ms  # TODO
-                        is_need_run_once=False
+                        is_need_run_once=False,
                     )
                 )
 
     @asyncSlot()
     async def __on_symbol_name_changed(
-            self,
-
-            # idx: int
+        self,
+        # idx: int
     ) -> None:
-        current_symbol_name = (
-            self.__symbol_name_combo_box.currentText()
-        )
+        current_symbol_name = self.__symbol_name_combo_box.currentText()
 
-        processor = (
-            self.__processor
-        )
+        processor = self.__processor
 
-        if (
-                not current_symbol_name or
-
-                (
-                    current_symbol_name ==
-                    processor.get_current_symbol_name()
-                )
+        if not current_symbol_name or (
+            current_symbol_name == processor.get_current_symbol_name()
         ):
             return
 
         print(
-            'Selected symbol name'
-            f': {current_symbol_name!r}'
+            f'Selected symbol name: {current_symbol_name!r}'
             # f' ({idx})'
         )
 
-        if not (
-                await processor.update_current_symbol_name(
-                    current_symbol_name
-                )
+        if not await processor.update_current_symbol_name(
+            current_symbol_name,
         ):
             # TODO: response to user UI
 
             return
 
     async def __plot(
-            self,
+        self,
     ) -> None:
-        candles_plot_by_interval_name_map = (
-            self.__candles_plot_by_interval_name_map
-        )
+        candles_plot_by_interval_name_map = self.__candles_plot_by_interval_name_map
 
-        processor = (
-            self.__processor
-        )
+        processor = self.__processor
 
         current_available_symbol_names = (
             await processor.get_current_available_symbol_names()
@@ -581,12 +493,10 @@ class FinPlotChartWindow(QMainWindow):
         QtUtils.update_combo_box_values(
             self.__symbol_name_combo_box,
             self.__symbol_name_label,
-            current_available_symbol_names
+            current_available_symbol_names,
         )
 
-        trades_dataframe = (
-            processor.get_trades_dataframe()
-        )
+        trades_dataframe = processor.get_trades_dataframe()
 
         price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map = (
             self.__price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map
@@ -596,17 +506,18 @@ class FinPlotChartWindow(QMainWindow):
 
         if trades_dataframe is None:
             print(
-                'trades_dataframe is None'
+                'trades_dataframe is None',
             )
 
-            for interval_name, price_candlestick_item_by_start_timestamp_ms_map in (
-                    price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map.items()
-            ):
-                candles_plot = candles_plot_by_interval_name_map[
-                    interval_name
-                ]
+            for (
+                interval_name,
+                price_candlestick_item_by_start_timestamp_ms_map,
+            ) in price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map.items():
+                candles_plot = candles_plot_by_interval_name_map[interval_name]
 
-                for price_candlestick_item in price_candlestick_item_by_start_timestamp_ms_map.values():
+                for (
+                    price_candlestick_item
+                ) in price_candlestick_item_by_start_timestamp_ms_map.values():
                     candles_plot.removeItem(
                         price_candlestick_item,
                     )
@@ -618,26 +529,16 @@ class FinPlotChartWindow(QMainWindow):
             return
 
         if _IS_NEED_SHOW_BOLLINGER_BANDS:
-            bollinger_base_line_series = (
-                processor.get_bollinger_base_line_series()
-            )
+            bollinger_base_line_series = processor.get_bollinger_base_line_series()
 
-            bollinger_lower_band_series = (
-                processor.get_bollinger_lower_band_series()
-            )
+            bollinger_lower_band_series = processor.get_bollinger_lower_band_series()
 
-            bollinger_upper_band_series = (
-                processor.get_bollinger_upper_band_series()
-            )
+            bollinger_upper_band_series = processor.get_bollinger_upper_band_series()
 
             if bollinger_base_line_series is not None:
-                assert (
-                    bollinger_lower_band_series is not None
-                ), None
+                assert bollinger_lower_band_series is not None, None
 
-                assert (
-                    bollinger_upper_band_series is not None
-                ), None
+                assert bollinger_upper_band_series is not None, None
 
                 self.__bollinger_base_line_plot_data_item.setData(
                     bollinger_base_line_series.index,
@@ -674,13 +575,9 @@ class FinPlotChartWindow(QMainWindow):
                     )
                 """
             else:
-                assert (
-                    bollinger_lower_band_series is None
-                ), None
+                assert bollinger_lower_band_series is None, None
 
-                assert (
-                    bollinger_upper_band_series is None
-                ), None
+                assert bollinger_upper_band_series is None, None
 
         # plot.reset()
         # self.__plot_overlay.reset()
@@ -689,9 +586,7 @@ class FinPlotChartWindow(QMainWindow):
             processor.get_candle_dataframe_by_interval_name_map()
         )
 
-        for interval_name, candles_plot in (
-                candles_plot_by_interval_name_map.items()
-        ):
+        for interval_name, candles_plot in candles_plot_by_interval_name_map.items():
             candle_dataframe = candle_dataframe_by_interval_name_map.get(
                 interval_name,
             )
@@ -703,7 +598,9 @@ class FinPlotChartWindow(QMainWindow):
             )
 
             if candle_dataframe is None:
-                for price_candlestick_item in price_candlestick_item_by_start_timestamp_ms_map.values():
+                for (
+                    price_candlestick_item
+                ) in price_candlestick_item_by_start_timestamp_ms_map.values():
                     candles_plot.removeItem(
                         price_candlestick_item,
                     )
@@ -723,10 +620,7 @@ class FinPlotChartWindow(QMainWindow):
                 end_timestamp: pandas.Timestamp = candle_row_data.end_timestamp_ms
                 end_trade_id: int = candle_row_data.end_trade_id
 
-                start_timestamp_ms = int(
-                    start_timestamp.timestamp() *
-                    1000
-                )
+                start_timestamp_ms = int(start_timestamp.timestamp() * 1000)
 
                 start_trade_id: int = candle_row_data.start_trade_id
 
@@ -734,8 +628,10 @@ class FinPlotChartWindow(QMainWindow):
                     start_timestamp_ms,
                 )
 
-                price_candlestick_item = price_candlestick_item_by_start_timestamp_ms_map.get(
-                    start_timestamp_ms
+                price_candlestick_item = (
+                    price_candlestick_item_by_start_timestamp_ms_map.get(
+                        start_timestamp_ms,
+                    )
                 )
 
                 if price_candlestick_item is not None:
@@ -764,13 +660,11 @@ class FinPlotChartWindow(QMainWindow):
                     )
 
                     candles_plot.addItem(
-                        price_candlestick_item
+                        price_candlestick_item,
                     )
 
-            for start_timestamp_ms in (
-                    tuple(
-                        price_candlestick_item_by_start_timestamp_ms_map
-                    )
+            for start_timestamp_ms in tuple(
+                price_candlestick_item_by_start_timestamp_ms_map,
             ):
                 if start_timestamp_ms not in candle_start_timestamp_ms_set:
                     print(
@@ -795,9 +689,7 @@ class FinPlotChartWindow(QMainWindow):
             price_series.array,
         )
 
-        rsi_series = (
-            processor.get_rsi_series()
-        )
+        rsi_series = processor.get_rsi_series()
 
         if rsi_series is not None:
             self.__rsi_plot_data_item.setData(
@@ -812,7 +704,9 @@ class FinPlotChartWindow(QMainWindow):
         )
 
         if test_analytics_raw_data_list is not None:
-            test_analytics_raw_data_by_start_timestamp_ms_map: dict[int, dict[str, typing.Any]] = {}  # TODO: test_analytics_raw_data_list -> test_analytics_raw_data_by_start_timestamp_ms_map
+            test_analytics_raw_data_by_start_timestamp_ms_map: dict[
+                int, dict[str, typing.Any]
+            ] = {}  # TODO: test_analytics_raw_data_list -> test_analytics_raw_data_by_start_timestamp_ms_map
 
             for test_analytics_raw_data in test_analytics_raw_data_list:
                 start_timestamp: pandas.Timestamp = test_analytics_raw_data[
@@ -820,33 +714,28 @@ class FinPlotChartWindow(QMainWindow):
                 ]
 
                 start_timestamp_ms = int(
-                    start_timestamp.timestamp() *
-                    1000
+                    start_timestamp.timestamp() * 1000  # ms
                 )
 
                 test_analytics_raw_data_by_start_timestamp_ms_map[
                     start_timestamp_ms
                 ] = test_analytics_raw_data
 
-                test_analytics_rect_item = test_analytics_rect_item_by_start_timestamp_ms_map.get(
-                    start_timestamp_ms
+                test_analytics_rect_item = (
+                    test_analytics_rect_item_by_start_timestamp_ms_map.get(
+                        start_timestamp_ms,
+                    )
                 )
 
-                end_price: float = test_analytics_raw_data[
-                    'second_price'
-                ]
+                end_price: float = test_analytics_raw_data['second_price']
 
                 end_timestamp: pandas.Timestamp = test_analytics_raw_data[
                     'second_start_timestamp'
                 ]
 
-                is_bull: bool = test_analytics_raw_data[
-                    'is_bull'
-                ]
+                is_bull: bool = test_analytics_raw_data['is_bull']
 
-                start_price: float = test_analytics_raw_data[
-                    'first_price'
-                ]
+                start_price: float = test_analytics_raw_data['first_price']
 
                 test_analytics_color: QColor
 
@@ -855,22 +744,18 @@ class FinPlotChartWindow(QMainWindow):
                         0,
                         255,
                         0,
-
                         int(
-                            255 *
-                            0.25
-                        )
+                            255 * 0.25,
+                        ),
                     )
                 else:
                     test_analytics_color = QColor(
                         255,
                         0,
                         0,
-
                         int(
-                            255 *
-                            0.25
-                        )
+                            255 * 0.25,
+                        ),
                     )
 
                 test_analytics_rect_item_position = Point(
@@ -879,32 +764,25 @@ class FinPlotChartWindow(QMainWindow):
                 )
 
                 test_analytics_rect_item_size = Point(
-                    (
-                        end_timestamp.value -
-                        start_timestamp.value
-                    ),
-
-                    (
-                        end_price -
-                        start_price
-                    ),
+                    end_timestamp.value - start_timestamp.value,
+                    end_price - start_price,
                 )
 
                 if test_analytics_rect_item is not None:
                     test_analytics_rect_item.set_pen_color(
-                        test_analytics_color
+                        test_analytics_color,
                     )
 
                     test_analytics_rect_item.set_brush_color(
-                        test_analytics_color
+                        test_analytics_color,
                     )
 
                     test_analytics_rect_item.setPos(
-                        test_analytics_rect_item_position
+                        test_analytics_rect_item_position,
                     )
 
                     test_analytics_rect_item.set_size(
-                        test_analytics_rect_item_size
+                        test_analytics_rect_item_size,
                     )
                 else:
                     # Add new rect
@@ -914,53 +792,47 @@ class FinPlotChartWindow(QMainWindow):
                             start_timestamp_ms
                         ]
                     ) = RectItem(
-                        brush_color=(
-                            test_analytics_color
-                        ),
-
-                        pen_color=(
-                            test_analytics_color
-                        ),
-
-                        position=(
-                            test_analytics_rect_item_position
-                        ),
-
-                        size=(
-                            test_analytics_rect_item_size
-                        ),
+                        brush_color=test_analytics_color,
+                        pen_color=test_analytics_color,
+                        position=test_analytics_rect_item_position,
+                        size=test_analytics_rect_item_size,
                     )
 
                     price_plot.addItem(
-                        test_analytics_rect_item
+                        test_analytics_rect_item,
                     )
 
             # Remove other items
 
             for start_timestamp_ms in tuple(
-                    test_analytics_rect_item_by_start_timestamp_ms_map
+                test_analytics_rect_item_by_start_timestamp_ms_map,
             ):
-                if start_timestamp_ms in test_analytics_raw_data_by_start_timestamp_ms_map:
+                if (
+                    start_timestamp_ms
+                    in test_analytics_raw_data_by_start_timestamp_ms_map
+                ):
                     continue
 
-                test_analytics_rect_item = test_analytics_rect_item_by_start_timestamp_ms_map.pop(
-                    start_timestamp_ms
+                test_analytics_rect_item = (
+                    test_analytics_rect_item_by_start_timestamp_ms_map.pop(
+                        start_timestamp_ms,
+                    )
                 )
 
                 price_plot.removeItem(
-                    test_analytics_rect_item
+                    test_analytics_rect_item,
                 )
         else:
-            for test_analytics_rect_item in test_analytics_rect_item_by_start_timestamp_ms_map.values():
+            for (
+                test_analytics_rect_item
+            ) in test_analytics_rect_item_by_start_timestamp_ms_map.values():
                 price_plot.removeItem(
-                    test_analytics_rect_item
+                    test_analytics_rect_item,
                 )
 
             test_analytics_rect_item_by_start_timestamp_ms_map.clear()
 
-        test_series = (
-            processor.get_test_series()
-        )
+        test_series = processor.get_test_series()
 
         if test_series is not None:
             self.__test_plot_data_item.setData(
@@ -969,6 +841,6 @@ class FinPlotChartWindow(QMainWindow):
             )
 
     def auto_range_price_plot(
-            self,
+        self,
     ) -> None:
         self.__price_plot.getViewBox().autoRange()

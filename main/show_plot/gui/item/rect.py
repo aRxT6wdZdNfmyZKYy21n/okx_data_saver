@@ -13,11 +13,11 @@ from PyQt6.QtGui import (
 
 class RectItem(pyqtgraph.GraphicsObject):
     def __init__(
-            self,
-            brush_color: QColor,
-            pen_color: QColor,
-            position: Point,
-            size: Point,
+        self,
+        brush_color: QColor,
+        pen_color: QColor,
+        position: Point,
+        size: Point,
     ) -> None:
         super().__init__()
 
@@ -36,7 +36,7 @@ class RectItem(pyqtgraph.GraphicsObject):
             0,
             0,
             size[0],
-            size[1]
+            size[1],
         ).normalized()
 
     def paint(self, painter, *args):
@@ -61,14 +61,14 @@ class RectItem(pyqtgraph.GraphicsObject):
 
         painter.scale(
             rect.width(),
-            rect.height()
+            rect.height(),
         )
 
         painter.drawRect(
             0,
             0,
             1,
-            1
+            1,
         )
 
     def set_brush_color(self, value: QColor) -> None:
@@ -81,6 +81,6 @@ class RectItem(pyqtgraph.GraphicsObject):
         self.__size = value
 
     def _get_pen_color(
-            self
+        self,
     ) -> QColor:
         return self.__pen_color

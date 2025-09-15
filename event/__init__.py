@@ -27,7 +27,8 @@ class Event(object):
         self.__sync_delegates: list[typing.Callable] = []
 
     def __iadd__(
-        self, delegate: (typing.Union[typing.Callable, CommonConstants.AsyncFunctionType])
+        self,
+        delegate: typing.Callable | CommonConstants.AsyncFunctionType,
     ) -> typing.Self:
         delegates = self._get_container(
             delegate,
@@ -41,7 +42,8 @@ class Event(object):
         return self
 
     def __isub__(
-        self, delegate: (typing.Union[typing.Callable, CommonConstants.AsyncFunctionType])
+        self,
+        delegate: typing.Callable | CommonConstants.AsyncFunctionType,
     ) -> typing.Self:
         delegates = self._get_container(
             delegate,
@@ -77,7 +79,8 @@ class Event(object):
         return self.__name
 
     def _get_container(
-        self, delegate: (typing.Union[typing.Callable, CommonConstants.AsyncFunctionType])
+        self,
+        delegate: typing.Callable | CommonConstants.AsyncFunctionType,
     ):
         if inspect.iscoroutinefunction(
             delegate,
