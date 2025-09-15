@@ -28,7 +28,7 @@ class TelegramUtils(object):
 
     @staticmethod
     def create_aiogram_bot(
-            token: str,
+        token: str,
     ) -> AioGramBot:
         return AioGramBot(
             token,
@@ -39,8 +39,8 @@ class TelegramUtils(object):
 
     @classmethod
     async def send_message_to_channel(
-            cls,
-            message_markdown_text: str,
+        cls,
+        message_markdown_text: str,
     ) -> None:
         aiogram_bot_token = os.getenv(
             'TELEGRAM_BOT_TOKEN',

@@ -8,12 +8,12 @@ import orjson
 class JsonUtils(object):
     @staticmethod
     def read(
-            path: str,
+        path: str,
     ) -> None:
         with codecs.open(
-                path,
-                'r',
-                'utf-8',
+            path,
+            'r',
+            'utf-8',
         ) as json_file:
             return orjson.loads(
                 json_file.read(),
@@ -21,12 +21,12 @@ class JsonUtils(object):
 
     @classmethod
     def read_if_exists(
-            cls,
-            path: str,
-            default: typing.Type,
+        cls,
+        path: str,
+        default: typing.Type,
     ):
         if not os.path.exists(
-                path,
+            path,
         ):
             return default()
 

@@ -3,6 +3,7 @@ from datetime import (
     UTC,
 )
 
+
 class TimeUtils(object):
     __slots__ = ()
 
@@ -14,7 +15,7 @@ class TimeUtils(object):
 
     @classmethod
     def get_aware_current_timestamp_ms(
-            cls,
+        cls,
     ) -> int:
         aware_current_datetime = cls.get_aware_current_datetime()
 

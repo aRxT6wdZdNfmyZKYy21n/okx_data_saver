@@ -43,7 +43,7 @@ def create_task_with_exceptions_logging(
 
 def run_coroutine_threadsafe_with_exceptions_logging(
     coroutine: typing.Coroutine,
-    event_loop: asyncio.AbstractEventLoop
+    event_loop: asyncio.AbstractEventLoop,
 ) -> Future:
     return asyncio.run_coroutine_threadsafe(
         log_exceptions(

@@ -82,7 +82,7 @@ class QtUtils(object):
 
             if not is_need_update_items:
                 for value_idx, value in enumerate(
-                        values,
+                    values,
                 ):
                     item_value = combo_box.itemText(
                         value_idx,
