@@ -1,5 +1,6 @@
 aiogram
 asyncpg
+chrono
 git+https://github.com/aRxT6wdZdNfmyZKYy21n/finplot.git
 httpx
 orjson

@@ -19,6 +19,9 @@ from pandas import (
     Series,
 )
 
+from chrono import (
+    Timer,
+)
 from sqlalchemy import (
     and_,
     select,
@@ -199,7 +202,12 @@ class FinPlotChartProcessor(object):
     ) -> None:
         while True:
             try:
-                await self.__update()
+                with Timer() as timer:
+                    await self.__update()
+
+                logger.info(
+                    f'Processor was updated by {timer.elapsed:.3f}s'
+                )
             except Exception as exception:
                 logger.error(
                     'Could not update processor'
@@ -353,11 +361,13 @@ class FinPlotChartProcessor(object):
             else:
                 min_trade_id = 0
 
-            trade_id: int
+            for row in trades_dataframe.loc[
+                trades_dataframe.index >= min_trade_id
+            ].itertuples():
+                trade_id: int = row.Index
 
-            for trade_id, row in trades_dataframe.iterrows():
-                if trade_id < min_trade_id:
-                    continue
+                # if trade_id < min_trade_id:
+                #     continue
 
                 price: float = row.price
                 quantity: float = row.quantity
@@ -520,7 +530,8 @@ class FinPlotChartProcessor(object):
                     OKXTradeData.trade_id.desc(),
                 )
                 .limit(
-                    50000,
+                    500000,
+                    # 50000,
                     # 10000
                     # 1000
                     # 50
@@ -623,10 +634,33 @@ class FinPlotChartProcessor(object):
 
         self.__trades_dataframe = trades_dataframe
 
-        self.__update_bollinger_series()
-        self.__update_candle_dataframe_by_interval_name_map()
-        self.__update_rsi_series()
-        self.__update_test_series()
+        with Timer() as timer:
+            self.__update_bollinger_series()
+
+        logger.info(
+            f'Bollinger series were updated by {timer.elapsed:.3f}s'
+        )
+
+        with Timer() as timer:
+            self.__update_candle_dataframe_by_interval_name_map()
+
+        logger.info(
+            f'Candle dataframe by interval name map was updated by {timer.elapsed:.3f}s'
+        )
+
+        with Timer() as timer:
+            self.__update_rsi_series()
+
+        logger.info(
+            f'RSI series were updated by {timer.elapsed:.3f}s'
+        )
+
+        with Timer() as timer:
+            self.__update_test_series()
+
+        logger.info(
+            f'Test series were updated by {timer.elapsed:.3f}s'
+        )
 
         await self.__window.plot(
             is_need_run_once=True,
@@ -725,9 +759,9 @@ WHERE symbol_name IS NOT NULL;
         prices: list[float] = []
         start_timestamps: list[pandas.Timestamp] = []
 
-        start_timestamp: pandas.Timestamp
+        for trade_data in trades_dataframe.itertuples():
+            start_timestamp: pandas.Timestamp = trade_data.Index
 
-        for start_timestamp, trade_data in trades_dataframe.iterrows():
             trade_close_price = trade_data.close
             trade_high_price = trade_data.high
             trade_low_price = trade_data.low

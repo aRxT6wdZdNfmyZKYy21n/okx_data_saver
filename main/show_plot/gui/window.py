@@ -10,6 +10,9 @@ from functools import (
 )
 
 import pandas
+from chrono import (
+    Timer,
+)
 from pyqtgraph import (
     Point,
 )
@@ -193,6 +196,13 @@ class FinPlotChartWindow(QMainWindow):
             ),
         )
 
+        price_plot.sigYRangeChanged.connect(
+            partial(
+                self.__update_plots_y_range,
+                price_plot,
+            ),
+        )
+
         graphics_layout_widget.nextRow()
 
         rsi_plot = graphics_layout_widget.addPlot(
@@ -256,6 +266,13 @@ class FinPlotChartWindow(QMainWindow):
             candles_plot.sigXRangeChanged.connect(
                 partial(
                     self.__update_plots_x_range,
+                    candles_plot,
+                ),
+            )
+
+            candles_plot.sigYRangeChanged.connect(
+                partial(
+                    self.__update_plots_y_range,
                     candles_plot,
                 ),
             )
@@ -405,7 +422,7 @@ class FinPlotChartWindow(QMainWindow):
     def __update_plots_x_range(
         self,
         current_plot: pyqtgraph.PlotWidget,  # TODO: check typing
-    ):  # TODO: move to method
+    ):
         x_range = current_plot.getViewBox().viewRange()[0]
 
         for plot in (
@@ -418,6 +435,24 @@ class FinPlotChartWindow(QMainWindow):
 
             plot.setXRange(
                 *x_range,
+                padding=0,
+            )
+
+    def __update_plots_y_range(
+        self,
+        current_plot: pyqtgraph.PlotWidget,  # TODO: check typing
+    ):
+        y_range = current_plot.getViewBox().viewRange()[1]
+
+        for plot in (
+            *self.__candles_plot_by_interval_name_map.values(),
+            self.__price_plot,
+        ):
+            if plot is current_plot:
+                continue
+
+            plot.setYRange(
+                *y_range,
                 padding=0,
             )
 
@@ -438,7 +473,12 @@ class FinPlotChartWindow(QMainWindow):
                 )
 
             try:
-                await self.__plot()
+                with Timer() as timer:
+                    await self.__plot()
+
+                print(
+                    f'Plotted by {timer.elapsed:.3f}s'
+                )
             except Exception as exception:
                 print(
                     'Handled exception'
@@ -611,7 +651,9 @@ class FinPlotChartWindow(QMainWindow):
 
             candle_start_timestamp_ms_set: set[int] = set()
 
-            for start_timestamp, candle_row_data in candle_dataframe.iterrows():
+            for candle_row_data in candle_dataframe.itertuples():
+                start_timestamp: pandas.Timestamp = candle_row_data.Index
+
                 candle_close_price: float = candle_row_data.close_price
                 candle_high_price: float = candle_row_data.high_price
                 candle_low_price: float = candle_row_data.low_price
