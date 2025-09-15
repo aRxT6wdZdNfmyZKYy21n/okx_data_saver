@@ -504,10 +504,8 @@ class FinPlotChartWindow(QMainWindow):
 
         async with drawing_lock:
             if delay is not None:
-                await (
-                    asyncio.sleep(
-                        delay
-                    )
+                await asyncio.sleep(
+                    delay
                 )
 
             try:
@@ -565,7 +563,9 @@ class FinPlotChartWindow(QMainWindow):
 
             return
 
-    async def __plot(self) -> None:
+    async def __plot(
+            self,
+    ) -> None:
         candles_plot_by_interval_name_map = (
             self.__candles_plot_by_interval_name_map
         )

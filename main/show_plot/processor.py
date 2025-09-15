@@ -601,7 +601,6 @@ class FinPlotChartProcessor(object):
             new_candle_dataframe.end_timestamp_ms = (
                 pandas.to_datetime(
                     new_candle_dataframe.end_timestamp_ms,
-
                     unit='ms',
                 )
             )
@@ -609,7 +608,6 @@ class FinPlotChartProcessor(object):
             new_candle_dataframe.start_timestamp_ms = (
                 pandas.to_datetime(
                     new_candle_dataframe.start_timestamp_ms,
-
                     unit='ms',
                 )
             )
@@ -813,10 +811,7 @@ class FinPlotChartProcessor(object):
         new_trades_dataframe.timestamp_ms = (
             pandas.to_datetime(
                 new_trades_dataframe.timestamp_ms,
-
-                unit=(
-                    'ms'
-                )
+                unit='ms',
             )
         )
 
