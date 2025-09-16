@@ -63,7 +63,9 @@ if typing.TYPE_CHECKING:
     )
 
 
-_IS_NEED_SHOW_BOLLINGER_BANDS = True
+_IS_NEED_SHOW_BOLLINGER_BANDS = False
+_IS_NEED_SHOW_RSI = False
+_IS_NEED_SHOW_VELOCITY = False
 
 _BOLLINGER_BANDS_FILL_COLOR = QColor(
     33,
@@ -251,63 +253,65 @@ class FinPlotChartWindow(QMainWindow):
 
             graphics_layout_widget.nextRow()
 
-        rsi_plot = graphics_layout_widget.addPlot(
-            title='RSI',
-        )
+        if _IS_NEED_SHOW_RSI:
+            rsi_plot = graphics_layout_widget.addPlot(
+                title='RSI',
+            )
 
-        rsi_date_axis = DateTimeByTradeIDAxisItem(
-            orientation='bottom',
-            processor=processor,
-        )
+            rsi_date_axis = DateTimeByTradeIDAxisItem(
+                orientation='bottom',
+                processor=processor,
+            )
 
-        rsi_plot.setAxisItems(
-            {
-                'bottom': rsi_date_axis,
-            },
-        )
+            rsi_plot.setAxisItems(
+                {
+                    'bottom': rsi_date_axis,
+                },
+            )
 
-        rsi_plot.showGrid(
-            x=True,
-            y=True,
-        )
+            rsi_plot.showGrid(
+                x=True,
+                y=True,
+            )
 
-        rsi_plot.sigXRangeChanged.connect(
-            partial(
-                self.__update_plots_x_range,
-                rsi_plot,
-            ),
-        )
+            rsi_plot.sigXRangeChanged.connect(
+                partial(
+                    self.__update_plots_x_range,
+                    rsi_plot,
+                ),
+            )
 
-        graphics_layout_widget.nextRow()
+            graphics_layout_widget.nextRow()
 
-        velocity_plot = graphics_layout_widget.addPlot(
-            title=f'Trades per {PlotConstants.VelocityIntervalName}',
-        )
+        if _IS_NEED_SHOW_VELOCITY:
+            velocity_plot = graphics_layout_widget.addPlot(
+                title=f'Trades per {PlotConstants.VelocityIntervalName}',
+            )
 
-        velocity_date_axis = DateTimeByTradeIDAxisItem(
-            orientation='bottom',
-            processor=processor,
-        )
+            velocity_date_axis = DateTimeByTradeIDAxisItem(
+                orientation='bottom',
+                processor=processor,
+            )
 
-        velocity_plot.setAxisItems(
-            {
-                'bottom': velocity_date_axis,
-            },
-        )
+            velocity_plot.setAxisItems(
+                {
+                    'bottom': velocity_date_axis,
+                },
+            )
 
-        velocity_plot.showGrid(
-            x=True,
-            y=True,
-        )
+            velocity_plot.showGrid(
+                x=True,
+                y=True,
+            )
 
-        velocity_plot.sigXRangeChanged.connect(
-            partial(
-                self.__update_plots_x_range,
-                velocity_plot,
-            ),
-        )
+            velocity_plot.sigXRangeChanged.connect(
+                partial(
+                    self.__update_plots_x_range,
+                    velocity_plot,
+                ),
+            )
 
-        graphics_layout_widget.nextRow()
+            graphics_layout_widget.nextRow()
 
         # Create a linear gradient for any plot background
 
@@ -359,15 +363,16 @@ class FinPlotChartWindow(QMainWindow):
             alignment=Qt.AlignmentFlag.AlignLeft,
         )
 
-        (
-            rsi_interval_name_label,
-            rsi_interval_name_combo_box,
-        ) = QtUtils.create_label_and_combo_box(
-            'RSI timeframe',
-            self.__on_rsi_interval_name_changed,
-            alignment=Qt.AlignmentFlag.AlignLeft,
-            values=PlotConstants.IntervalNames,
-        )
+        if _IS_NEED_SHOW_RSI:
+            (
+                rsi_interval_name_label,
+                rsi_interval_name_combo_box,
+            ) = QtUtils.create_label_and_combo_box(
+                'RSI timeframe',
+                self.__on_rsi_interval_name_changed,
+                alignment=Qt.AlignmentFlag.AlignLeft,
+                values=PlotConstants.IntervalNames,
+            )
 
         self.__graphics_layout_widget = graphics_layout_widget
 
@@ -419,12 +424,13 @@ class FinPlotChartWindow(QMainWindow):
         #     quantity_plot
         # )
 
-        self.__rsi_plot = rsi_plot
+        if _IS_NEED_SHOW_RSI:
+            self.__rsi_plot = rsi_plot
 
-        self.__rsi_plot_data_item = rsi_plot.plot(
-            pen=_RSI_LINE_COLOR,
-            name='RSI',
-        )
+            self.__rsi_plot_data_item = rsi_plot.plot(
+                pen=_RSI_LINE_COLOR,
+                name='RSI',
+            )
 
         self.__test_analytics_rect_item_by_start_timestamp_ms_map: dict[
             int, RectItem
@@ -439,27 +445,32 @@ class FinPlotChartWindow(QMainWindow):
             name='Test',
         )
 
-        self.__rsi_interval_name_combo_box = rsi_interval_name_combo_box
-        self.__rsi_interval_name_label = rsi_interval_name_label
+        if _IS_NEED_SHOW_RSI:
+            self.__rsi_interval_name_combo_box = rsi_interval_name_combo_box
+            self.__rsi_interval_name_label = rsi_interval_name_label
+
         self.__symbol_name_combo_box = symbol_name_combo_box
         self.__symbol_name_label = symbol_name_label
-        self.__velocity_plot = velocity_plot
 
-        self.__velocity_plot_data_item = velocity_plot.plot(
-            pen=_VELOCITY_LINE_COLOR,
-            name=f'Trades per {PlotConstants.VelocityIntervalName}',
-        )
+        if _IS_NEED_SHOW_VELOCITY:
+            self.__velocity_plot = velocity_plot
 
-        # self.__volume_plot = (
-        #     volume_plot
-        # )
+            self.__velocity_plot_data_item = velocity_plot.plot(
+                pen=_VELOCITY_LINE_COLOR,
+                name=f'Trades per {PlotConstants.VelocityIntervalName}',
+            )
 
         # self.__volume_plot = (
         #     volume_plot
         # )
 
-        functionality_layout.addWidget(rsi_interval_name_label, 0, 4, 2, 1)
-        functionality_layout.addWidget(rsi_interval_name_combo_box, 2, 4, 2, 1)
+        # self.__volume_plot = (
+        #     volume_plot
+        # )
+
+        if _IS_NEED_SHOW_RSI:
+            functionality_layout.addWidget(rsi_interval_name_label, 0, 4, 2, 1)
+            functionality_layout.addWidget(rsi_interval_name_combo_box, 2, 4, 2, 1)
 
         functionality_layout.addWidget(symbol_name_label, 0, 2, 2, 1)
         functionality_layout.addWidget(symbol_name_combo_box, 2, 2, 2, 1)
@@ -474,12 +485,22 @@ class FinPlotChartWindow(QMainWindow):
     ):
         x_range = current_plot.getViewBox().viewRange()[0]
 
-        for plot in (
+        plots = [
             *self.__candles_plot_by_interval_name_map.values(),
             self.__price_plot,
-            self.__rsi_plot,
-            self.__velocity_plot,
-        ):
+        ]
+
+        if _IS_NEED_SHOW_RSI:
+            plots.append(
+                self.__rsi_plot,
+            )
+
+        if _IS_NEED_SHOW_VELOCITY:
+            plots.append(
+                self.__velocity_plot,
+            )
+
+        for plot in plots:
             if plot is current_plot:
                 continue
 
@@ -802,13 +823,14 @@ class FinPlotChartWindow(QMainWindow):
             price_series.array,
         )
 
-        rsi_series = processor.get_rsi_series()
+        if _IS_NEED_SHOW_RSI:
+            rsi_series = processor.get_rsi_series()
 
-        if rsi_series is not None:
-            self.__rsi_plot_data_item.setData(
-                rsi_series.index,
-                rsi_series.array,
-            )
+            if rsi_series is not None:
+                self.__rsi_plot_data_item.setData(
+                    rsi_series.index,
+                    rsi_series.array,
+                )
 
         test_analytics_raw_data_list = processor.get_test_analytics_raw_data_list()
 
@@ -953,13 +975,14 @@ class FinPlotChartWindow(QMainWindow):
                 test_series.array,
             )
 
-        velocity_series = processor.get_velocity_series()
+        if _IS_NEED_SHOW_VELOCITY:
+            velocity_series = processor.get_velocity_series()
 
-        if velocity_series is not None:
-            self.__velocity_plot_data_item.setData(
-                velocity_series.index,
-                velocity_series.array,
-            )
+            if velocity_series is not None:
+                self.__velocity_plot_data_item.setData(
+                    velocity_series.index,
+                    velocity_series.array,
+                )
 
     def auto_range_price_plot(
         self,
