@@ -62,6 +62,7 @@ class FinPlotChartProcessor(object):
         '__current_rsi_interval_name',
         '__current_symbol_name',
         '__current_trades_smoothing_level',
+        '__line_dataframe_by_level_map',
         '__max_price',
         '__max_trade_price',
         '__min_price',
@@ -88,6 +89,7 @@ class FinPlotChartProcessor(object):
         self.__current_rsi_interval_name: str | None = None
         self.__current_symbol_name: str | None = None
         self.__current_trades_smoothing_level: str | None = None
+        self.__line_dataframe_by_level_map: DataFrame | None = {}
         self.__max_price: Decimal | None = None
         self.__max_trade_price: Decimal | None = None
         self.__min_price: Decimal | None = None
@@ -96,9 +98,7 @@ class FinPlotChartProcessor(object):
         self.__test_analytics_raw_data_list: list[dict[str, typing.Any]] | None = None
         self.__test_series: Series | None = None
         self.__trades_dataframe: DataFrame | None = None
-        self.__trades_smoothed_dataframe_by_level_map: dict[
-            str, DataFrame | None
-        ] = {}
+        self.__trades_smoothed_dataframe_by_level_map: dict[str, DataFrame | None] = {}
         self.__velocity_series: Series | None = None
         self.__window: FinPlotChartWindow | None = None
 
@@ -140,8 +140,9 @@ class FinPlotChartProcessor(object):
         return sorted(
             current_available_symbol_name_set,
         )
+
     def get_current_rsi_interval_name(
-            self,
+        self,
     ) -> str | None:
         return self.__current_rsi_interval_name
 
@@ -151,9 +152,16 @@ class FinPlotChartProcessor(object):
         return self.__current_symbol_name
 
     def get_current_trades_smoothing_level(
-            self,
+        self,
     ) -> str | None:
         return self.__current_trades_smoothing_level
+
+    def get_line_dataframe(
+        self,
+    ) -> DataFrame | None:
+        return self.__line_dataframe_by_level_map.get(
+            self.__current_trades_smoothing_level,
+        )
 
     def get_max_trade_price(
         self,
@@ -196,7 +204,7 @@ class FinPlotChartProcessor(object):
         return self.__trades_dataframe
 
     def get_smoothed_dataframe(
-            self,
+        self,
     ) -> DataFrame | None:
         level = self.__current_trades_smoothing_level
 
@@ -240,7 +248,7 @@ class FinPlotChartProcessor(object):
                     await self.__update()
 
                 logger.info(
-                    f'Processor was updated by {timer.elapsed:.3f}s'
+                    f'Processor was updated by {timer.elapsed:.3f}s',
                 )
             except Exception as exception:
                 logger.error(
@@ -295,6 +303,7 @@ class FinPlotChartProcessor(object):
         self.__bollinger_lower_band_series = None
         self.__bollinger_upper_band_series = None
         self.__candle_dataframe_by_interval_name_map.clear()
+        self.__line_dataframe_by_level_map.clear()
         self.__max_price = None
         self.__max_trade_price = None
         self.__min_price = None
@@ -410,19 +419,19 @@ class FinPlotChartProcessor(object):
             else:
                 min_trade_id = 0
 
-            for row_data in trades_dataframe.loc[
+            for trade_data in trades_dataframe.loc[
                 trades_dataframe.index >= min_trade_id
             ].itertuples():
-                trade_id: int = row_data.Index
+                trade_id: int = trade_data.Index
 
                 # if trade_id < min_trade_id:
                 #     continue
 
-                price: float = row_data.price
-                quantity: float = row_data.quantity
+                price: float = trade_data.price
+                quantity: float = trade_data.quantity
                 volume = price * quantity
 
-                timestamp: pandas.Timestamp = row_data.timestamp_ms
+                timestamp: pandas.Timestamp = trade_data.timestamp_ms
 
                 timestamp_ms = timestamp.value // 10**6
 
@@ -449,7 +458,9 @@ class FinPlotChartProcessor(object):
 
                         last_candle_raw_data.update(
                             {
-                                'trades_count': last_candle_raw_data['trades_count'] + 1,
+                                'trades_count': (
+                                    last_candle_raw_data['trades_count'] + 1
+                                ),
                                 'end_trade_id': trade_id,
                                 'close_price': price,
                                 'volume': last_candle_raw_data['volume'] + volume,
@@ -695,7 +706,7 @@ class FinPlotChartProcessor(object):
             self.__update_bollinger_series()
 
         logger.info(
-            f'Bollinger series were updated by {timer.elapsed:.3f}s'
+            f'Bollinger series were updated by {timer.elapsed:.3f}s',
         )
 
         with Timer() as timer:
@@ -709,14 +720,14 @@ class FinPlotChartProcessor(object):
             self.__update_rsi_series()
 
         logger.info(
-            f'RSI series were updated by {timer.elapsed:.3f}s'
+            f'RSI series were updated by {timer.elapsed:.3f}s',
         )
 
         with Timer() as timer:
             self.__update_test_series()
 
         logger.info(
-            f'Test series were updated by {timer.elapsed:.3f}s'
+            f'Test series were updated by {timer.elapsed:.3f}s',
         )
 
         with Timer() as timer:
@@ -730,7 +741,7 @@ class FinPlotChartProcessor(object):
             self.__update_velocity_series()
 
         logger.info(
-            f'Velocity series were updated by {timer.elapsed:.3f}s'
+            f'Velocity series were updated by {timer.elapsed:.3f}s',
         )
 
         await self.__window.plot(
@@ -738,7 +749,7 @@ class FinPlotChartProcessor(object):
         )
 
     async def __update_current_available_symbol_name_set(
-            self,
+        self,
     ) -> None:
         current_available_symbol_name_set: set[str] | None = None
 
@@ -813,7 +824,9 @@ WHERE symbol_name IS NOT NULL;
         if current_rsi_interval_name is None:
             return
 
-        candle_dataframe_by_interval_name_map = self.__candle_dataframe_by_interval_name_map
+        candle_dataframe_by_interval_name_map = (
+            self.__candle_dataframe_by_interval_name_map
+        )
 
         candle_dataframe = candle_dataframe_by_interval_name_map.get(
             current_rsi_interval_name,
@@ -833,7 +846,7 @@ WHERE symbol_name IS NOT NULL;
         self.__rsi_series = rsi_series
 
     def __update_test_series(
-            self,
+        self,
     ) -> None:
         trades_dataframe = self.__trades_dataframe
 
@@ -1078,9 +1091,7 @@ WHERE symbol_name IS NOT NULL;
 
         self.__test_series = test_series
 
-    def __update_trades_smoothed_dataframe_by_level_map(
-            self
-    ) -> None:
+    def __update_trades_smoothed_dataframe_by_level_map(self) -> None:
         trades_dataframe = self.__trades_dataframe
 
         assert trades_dataframe is not None, None
@@ -1089,7 +1100,7 @@ WHERE symbol_name IS NOT NULL;
             self.__trades_smoothed_dataframe_by_level_map
         )
 
-        previous_smoothed_dataframe: DataFrame | None = None
+        previous_line_dataframe: DataFrame | None = None
 
         for smoothing_level in PlotConstants.TradesSmoothingLevels:
             old_smoothed_dataframe = trades_smoothed_dataframe_by_level_map.get(
@@ -1110,63 +1121,56 @@ WHERE symbol_name IS NOT NULL;
             is_raw_level = smoothing_level == 'Raw (0)'
 
             if is_raw_level:
-                new_smoothed_dataframe = trades_dataframe
-
-                previous_smoothed_dataframe = new_smoothed_dataframe
-
                 continue
-
-            assert previous_smoothed_dataframe is not None, None
 
             is_first_level = smoothing_level == 'Smoothed (1)'
 
-            part_raw_data_list: list[dict[str, typing.Any]] = []
+            line_raw_data: dict[str, typing.Any] | None = None
+            line_raw_data_list: list[dict[str, typing.Any]] = []
 
             if is_first_level:
-                part_raw_data: dict[str, typing.Any] | None = None
-
-                for row_data in previous_smoothed_dataframe.itertuples():
-                    trade_id: int = row_data.Index
+                for trade_data in trades_dataframe.itertuples():
+                    trade_id: int = trade_data.Index
 
                     # if trade_id < min_trade_id:
                     #     continue
 
-                    price: float = row_data.price
-                    quantity: float = row_data.quantity
+                    price: float = trade_data.price
+                    quantity: float = trade_data.quantity
                     volume = price * quantity
 
-                    timestamp: pandas.Timestamp = row_data.timestamp_ms
+                    timestamp: pandas.Timestamp = trade_data.timestamp_ms
 
                     # timestamp_ms = timestamp.value // 10 ** 6
 
-                    if part_raw_data is not None:
-                        old_trading_direction: TradingDirection | None = part_raw_data[
+                    if line_raw_data is not None:
+                        old_trading_direction: TradingDirection | None = line_raw_data[
                             'trading_direction'
                         ]
 
                         if old_trading_direction is None:
-                            start_price: float = part_raw_data[
-                                'start_price'
-                            ]
+                            start_price: float = line_raw_data['start_price']
 
                             end_price = price
 
                             new_trading_direction = TradingUtils.get_direction(
                                 start_price,
-                                end_price
+                                end_price,
                             )
 
-                            part_raw_data.update({
-                                'end_price': end_price,
-                                'end_timestamp': timestamp,
-                                'end_trade_id': trade_id,
-                                'quantity': part_raw_data['quantity'] + quantity,
-                                'trading_direction': new_trading_direction,
-                                'volume': part_raw_data['volume'] + volume,
-                            })
+                            line_raw_data.update(
+                                {
+                                    'end_price': end_price,
+                                    'end_timestamp': timestamp,
+                                    'end_trade_id': trade_id,
+                                    'quantity': (line_raw_data['quantity'] + quantity),
+                                    'trading_direction': new_trading_direction,
+                                    'volume': (line_raw_data['volume'] + volume),
+                                },
+                            )
                         else:
                             new_end_price = price
-                            old_end_price: float = part_raw_data['end_price']
+                            old_end_price: float = line_raw_data['end_price']
 
                             new_trading_direction = TradingUtils.get_direction(
                                 old_end_price,
@@ -1174,24 +1178,27 @@ WHERE symbol_name IS NOT NULL;
                             )
 
                             if old_trading_direction == new_trading_direction:
-                                part_raw_data.update({
-                                    'end_price': new_end_price,
-                                    'end_timestamp': timestamp,
-                                    'end_trade_id': trade_id,
-                                    'quantity': part_raw_data['quantity'] + quantity,
-                                    'volume': part_raw_data['volume'] + volume,
-                                })
+                                line_raw_data.update(
+                                    {
+                                        'end_price': new_end_price,
+                                        'end_timestamp': timestamp,
+                                        'end_trade_id': trade_id,
+                                        'quantity': line_raw_data['quantity']
+                                        + quantity,
+                                        'volume': line_raw_data['volume'] + volume,
+                                    },
+                                )
                             else:
                                 # Flush
 
-                                part_raw_data_list.append(
-                                    part_raw_data,
+                                line_raw_data_list.append(
+                                    line_raw_data,
                                 )
 
-                                part_raw_data = None
+                                line_raw_data = None
 
-                    if part_raw_data is None:
-                        part_raw_data = {
+                    if line_raw_data is None:
+                        line_raw_data = {
                             'start_timestamp': timestamp,
                             'start_trade_id': trade_id,
                             'start_price': price,
@@ -1200,55 +1207,229 @@ WHERE symbol_name IS NOT NULL;
                             'volume': volume,
                         }
 
-                if part_raw_data is not None:
-                    trading_direction: TradingDirection | None = part_raw_data[
+                if line_raw_data is not None:
+                    trading_direction: TradingDirection | None = line_raw_data[
                         'trading_direction'
                     ]
 
                     if trading_direction is not None:
-                        part_raw_data_list.append(
-                            part_raw_data,
+                        # Flush
+
+                        line_raw_data_list.append(
+                            line_raw_data,
                         )
 
-                        part_raw_data = None  # noqa
+                        line_raw_data = None  # noqa
+            else:
+                assert previous_line_dataframe is not None, None
+
+                last_line_raw_data: dict[str, typing.Any] | None = None
+
+                first_line_data: typing.NamedTuple | None = None
+                second_line_data: typing.NamedTuple | None = None
+
+                for line_data in previous_line_dataframe.itertuples():
+                    is_first_line_exists = first_line_data is not None
+
+                    if not is_first_line_exists:
+                        first_line_data = line_data
+
+                    first_price = first_line_data.start_price
+
+                    trading_direction: TradingDirection = (
+                        first_line_data.trading_direction
+                    )
+
+                    if last_line_raw_data is None:
+                        last_line_raw_data = {
+                            'start_timestamp': first_line_data.start_timestamp,
+                            'start_trade_id': first_line_data.start_trade_id,
+                            'start_price': first_price,
+                            'end_timestamp': first_line_data.end_timestamp,
+                            'end_trade_id': first_line_data.end_trade_id,
+                            'end_price': first_line_data.end_price,
+                            'quantity': first_line_data.quantity,
+                            'trading_direction': trading_direction,
+                            'volume': first_line_data.volume,
+                        }
+
+                    if trading_direction == TradingDirection.Cross:
+                        # Flush
+
+                        line_raw_data_list.append(
+                            last_line_raw_data,
+                        )
+
+                        first_line_data = None
+                        last_line_raw_data = None
+
+                        continue
+
+                    if is_first_line_exists and second_line_data is None:
+                        second_line_data = line_data
+
+                    third_price = second_line_data.end_price
+
+                    line_pair_trading_direction = TradingUtils.get_direction(
+                        first_price,
+                        third_price,
+                    )
+
+                    if line_pair_trading_direction == trading_direction:
+                        last_line_raw_data.update(
+                            {
+                                'end_timestamp': second_line_data.end_timestamp,
+                                'end_trade_id': second_line_data.end_trade_id,
+                                'end_price': third_price,
+                                'quantity': (
+                                    last_line_raw_data['quantity']
+                                    + second_line_data.quantity
+                                ),
+                                'volume': (
+                                    last_line_raw_data['volume']
+                                    + second_line_data.volume
+                                ),
+                            },
+                        )
+
+                        first_line_data = None
+                    else:
+                        # Flush
+
+                        line_raw_data_list.append(
+                            last_line_raw_data,
+                        )
+
+                        first_line_data = second_line_data
+                        last_line_raw_data = None
+
+                    second_line_data = None
+
+                assert second_line_data is not None, (second_line_data,)
+
+                if first_line_data is not None:
+                    trading_direction: TradingDirection = (
+                        first_line_data.trading_direction
+                    )
+
+                    assert trading_direction != TradingDirection.Cross, (
+                        trading_direction,
+                    )
+
+                    if last_line_raw_data is None:
+                        last_line_raw_data = {
+                            'start_timestamp': first_line_data.start_timestamp,
+                            'start_trade_id': first_line_data.start_trade_id,
+                            'start_price': first_price,
+                            'quantity': first_line_data.quantity,
+                            'trading_direction': trading_direction,
+                            'volume': first_line_data.volume,
+                        }
+                    else:
+                        assert (
+                            trading_direction == last_line_raw_data['trading_direction']
+                        ), (
+                            first_line_data,
+                            last_line_raw_data,
+                        )
+
+                        last_line_raw_data.update(
+                            {
+                                'quantity': (
+                                    last_line_raw_data['quantity']
+                                    + first_line_data.quantity
+                                ),
+                                'volume': (
+                                    last_line_raw_data['volume']
+                                    + first_line_data.volume
+                                ),
+                            },
+                        )
+
+                    last_line_raw_data.update(
+                        {
+                            'end_timestamp': first_line_data.end_timestamp,
+                            'end_trade_id': first_line_data.end_trade_id,
+                            'end_price': first_line_data.end_price,
+                        },
+                    )
+
+                    first_line_data = None  # noqa
+
+                if last_line_raw_data is not None:
+                    # Flush
+
+                    line_raw_data_list.append(
+                        last_line_raw_data,
+                    )
+
+                    last_line_raw_data = None  # noqa
+
+            new_line_dataframe = DataFrame.from_records(
+                line_raw_data_list,
+                columns=[
+                    'start_timestamp',
+                    'start_trade_id',
+                    'start_price',
+                    'end_timestamp',
+                    'end_trade_id',
+                    'end_price',
+                    'quantity',
+                    'trading_direction',
+                    'volume',
+                ],
+            )
+
+            new_line_dataframe.set_index(
+                'start_trade_id',
+                inplace=True,
+            )
+
+            new_line_dataframe.sort_values(
+                'start_trade_id',
+                inplace=True,
+            )
+
+            self.__line_dataframe_by_level_map[smoothing_level] = new_line_dataframe
+
+            previous_line_dataframe = new_line_dataframe
 
             trades_smoothed_raw_data_list: list[dict[str, typing.Any]] = []
 
-            last_part_raw_data: dict[str, typing.Any] | None = None
+            last_line_data: typing.NamedTuple | None = None
 
-            for part_raw_data in part_raw_data_list:
-                trades_smoothed_raw_data_list.append({
-                    'price': last_part_raw_data['start_price'],
-                    'timestamp': last_part_raw_data['start_timestamp'],
-                    'trade_id': last_part_raw_data['start_trade_id'],
-                })
+            for line_data in new_line_dataframe.itertuples():
+                trades_smoothed_raw_data_list.append(
+                    {
+                        'price': line_data.start_price,
+                        'timestamp': line_data.start_timestamp,
+                        'trade_id': line_data.start_trade_id,
+                    }
+                )
 
-                last_part_raw_data = part_raw_data
+                last_line_data = line_data
 
-            if last_part_raw_data is not None:
-                trades_smoothed_raw_data_list.append({
-                    'price': last_part_raw_data['end_price'],
-                    'timestamp': last_part_raw_data['end_timestamp'],
-                    'trade_id': last_part_raw_data['end_trade_id'],
-                })
+            if last_line_data is not None:
+                trades_smoothed_raw_data_list.append(
+                    {
+                        'price': last_line_data.end_price,
+                        'timestamp': last_line_data.end_timestamp,
+                        'trade_id': last_line_data.end_trade_id,
+                    },
+                )
 
             new_smoothed_dataframe = DataFrame.from_records(
                 trades_smoothed_raw_data_list,
                 columns=[
                     'price',
                     # 'quantity',
-                    'timestamp_ms',
+                    'timestamp',
                     'trade_id',
                     # 'volume',
                 ],
             )
 
             # assert new_smoothed_dataframe.size, None  # TODO
-
-            new_smoothed_dataframe.timestamp_ms = pandas.to_datetime(
-                new_smoothed_dataframe.timestamp_ms,
-                unit='ms',
-            )
 
             new_smoothed_dataframe.set_index(
                 'trade_id',
@@ -1271,16 +1452,16 @@ WHERE symbol_name IS NOT NULL;
             # else:
             #     trades_dataframe = new_trades_smoothed_dataframe
 
-            trades_smoothed_dataframe_by_level_map[
-                smoothing_level
-            ] = new_smoothed_dataframe
-
-            previous_smoothed_dataframe = new_smoothed_dataframe
+            trades_smoothed_dataframe_by_level_map[smoothing_level] = (
+                new_smoothed_dataframe
+            )
 
     def __update_velocity_series(
-            self,
+        self,
     ) -> None:
-        candle_dataframe_by_interval_name_map = self.__candle_dataframe_by_interval_name_map
+        candle_dataframe_by_interval_name_map = (
+            self.__candle_dataframe_by_interval_name_map
+        )
 
         candle_dataframe_1m = candle_dataframe_by_interval_name_map.get(
             PlotConstants.VelocityIntervalName,

@@ -561,7 +561,7 @@ class FinPlotChartWindow(QMainWindow):
                     await self.__plot()
 
                 print(
-                    f'Plotted by {timer.elapsed:.3f}s'
+                    f'Plotted by {timer.elapsed:.3f}s',
                 )
             except Exception as exception:
                 print(
@@ -605,14 +605,17 @@ class FinPlotChartWindow(QMainWindow):
 
     @asyncSlot()
     async def __on_trades_smoothing_level_changed(
-            self,
+        self,
     ) -> None:
-        current_trades_smoothing_level = self.__on_trades_smoothing_level_changed.currentText()
+        current_trades_smoothing_level = (
+            self.__on_trades_smoothing_level_changed.currentText()
+        )
 
         processor = self.__processor
 
         if not current_trades_smoothing_level or (
-            current_trades_smoothing_level == processor.get_current_trades_smoothing_level()
+            current_trades_smoothing_level
+            == processor.get_current_trades_smoothing_level()
         ):
             return
 

@@ -2,7 +2,10 @@ import asyncio
 import logging
 import traceback
 
-import uvloop
+try:
+    import uvloop
+except ImportError:
+    uvloop = asyncio
 
 from main.save_order_books import (
     schemas,

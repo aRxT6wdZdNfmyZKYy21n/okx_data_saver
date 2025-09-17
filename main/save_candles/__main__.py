@@ -6,7 +6,11 @@ from decimal import Decimal
 
 import httpx
 import orjson
-import uvloop
+
+try:
+    import uvloop
+except ImportError:
+    uvloop = asyncio
 
 from sqlalchemy import (
     and_,
