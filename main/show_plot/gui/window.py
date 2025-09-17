@@ -374,6 +374,16 @@ class FinPlotChartWindow(QMainWindow):
                 values=PlotConstants.IntervalNames,
             )
 
+        (
+            trades_smoothing_level_label,
+            trades_smoothing_level_combo_box,
+        ) = QtUtils.create_label_and_combo_box(
+            'Trades smoothing level',
+            self.__on_trades_smoothing_level_changed,
+            alignment=Qt.AlignmentFlag.AlignLeft,
+            values=PlotConstants.TradesSmoothingLevels,
+        )
+
         self.__graphics_layout_widget = graphics_layout_widget
 
         self.__bollinger_base_line_plot_data_item = price_plot.plot(
@@ -448,6 +458,9 @@ class FinPlotChartWindow(QMainWindow):
         if _IS_NEED_SHOW_RSI:
             self.__rsi_interval_name_combo_box = rsi_interval_name_combo_box
             self.__rsi_interval_name_label = rsi_interval_name_label
+
+        self.__trades_smoothing_level_combo_box = trades_smoothing_level_combo_box
+        self.__trades_smoothing_level_label = trades_smoothing_level_label
 
         self.__symbol_name_combo_box = symbol_name_combo_box
         self.__symbol_name_label = symbol_name_label
@@ -591,6 +604,31 @@ class FinPlotChartWindow(QMainWindow):
             return
 
     @asyncSlot()
+    async def __on_trades_smoothing_level_changed(
+            self,
+    ) -> None:
+        current_trades_smoothing_level = self.__on_trades_smoothing_level_changed.currentText()
+
+        processor = self.__processor
+
+        if not current_trades_smoothing_level or (
+            current_trades_smoothing_level == processor.get_current_trades_smoothing_level()
+        ):
+            return
+
+        print(
+            f'Selected trades smoothing level: {current_trades_smoothing_level!r}'
+            # f' ({idx})'
+        )
+
+        if not await processor.update_current_trades_smoothing_level(
+            current_trades_smoothing_level,
+        ):
+            # TODO: response to user UI
+
+            return
+
+    @asyncSlot()
     async def __on_symbol_name_changed(
         self,
         # idx: int
@@ -633,7 +671,7 @@ class FinPlotChartWindow(QMainWindow):
             current_available_symbol_names,
         )
 
-        trades_dataframe = processor.get_trades_dataframe()
+        trades_smoothed_dataframe = processor.get_smoothed_dataframe()
 
         price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map = (
             self.__price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map
@@ -641,9 +679,9 @@ class FinPlotChartWindow(QMainWindow):
 
         price_plot = self.__price_plot
 
-        if trades_dataframe is None:
+        if trades_smoothed_dataframe is None:
             print(
-                'trades_dataframe is None',
+                'trades_smoothed_dataframe is None',
             )
 
             for (
@@ -816,7 +854,7 @@ class FinPlotChartWindow(QMainWindow):
                         price_candlestick_item,
                     )
 
-        price_series: pandas.Series = trades_dataframe.price
+        price_series: pandas.Series = trades_smoothed_dataframe.price
 
         self.__price_plot_data_item.setData(
             price_series.index,

@@ -90,7 +90,9 @@ async def save_trades(
                 select(
                     db_schema,
                 )
-                .where(db_schema.symbol_name == symbol_name)
+                .where(
+                    db_schema.symbol_name == symbol_name,
+                )
                 .order_by(
                     db_schema.trade_id.desc(),
                 )

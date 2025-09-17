@@ -12,4 +12,11 @@ class PlotConstants(object):
         # '1D'
     ]
 
+    TradesSmoothingLevels = [
+        'Raw (0)',
+        'Smoothed (1)',
+        'Smoothed (2)',
+        'Smoothed (3)',
+    ]
+
     VelocityIntervalName = '1m'

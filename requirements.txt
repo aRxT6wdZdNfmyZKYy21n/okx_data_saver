@@ -13,4 +13,3 @@ qasync
 SQLAlchemy[asyncio]
 TA-Lib
 websockets
-uvloop

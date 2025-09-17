@@ -2,11 +2,9 @@ import asyncio
 import logging
 import traceback
 import typing
-
 from datetime import (
     timedelta,
 )
-
 from decimal import (
     Decimal,
 )
@@ -28,8 +26,15 @@ from sqlalchemy import (
     text,
 )
 
-from constants.common import CommonConstants
-from constants.plot import PlotConstants
+from constants.common import (
+    CommonConstants,
+)
+from constants.plot import (
+    PlotConstants,
+)
+from enumerations import (
+    TradingDirection,
+)
 from main.save_trades.schemas import (
     OKXTradeData,
 )
@@ -40,7 +45,7 @@ from main.show_plot.globals import (
 from main.show_plot.gui.window import (
     FinPlotChartWindow,
 )
-
+from utils.trading import TradingUtils
 
 logger = logging.getLogger(
     __name__,
@@ -56,6 +61,7 @@ class FinPlotChartProcessor(object):
         '__current_available_symbol_name_set',
         '__current_rsi_interval_name',
         '__current_symbol_name',
+        '__current_trades_smoothing_level',
         '__max_price',
         '__max_trade_price',
         '__min_price',
@@ -64,6 +70,7 @@ class FinPlotChartProcessor(object):
         '__test_analytics_raw_data_list',
         '__test_series',
         '__trades_dataframe',
+        '__trades_smoothed_dataframe_by_level_map',
         '__velocity_series',
         '__window',
     )
@@ -80,6 +87,7 @@ class FinPlotChartProcessor(object):
         self.__current_available_symbol_name_set: set[str] | None = None
         self.__current_rsi_interval_name: str | None = None
         self.__current_symbol_name: str | None = None
+        self.__current_trades_smoothing_level: str | None = None
         self.__max_price: Decimal | None = None
         self.__max_trade_price: Decimal | None = None
         self.__min_price: Decimal | None = None
@@ -88,6 +96,9 @@ class FinPlotChartProcessor(object):
         self.__test_analytics_raw_data_list: list[dict[str, typing.Any]] | None = None
         self.__test_series: Series | None = None
         self.__trades_dataframe: DataFrame | None = None
+        self.__trades_smoothed_dataframe_by_level_map: dict[
+            str, DataFrame | None
+        ] = {}
         self.__velocity_series: Series | None = None
         self.__window: FinPlotChartWindow | None = None
 
@@ -121,8 +132,14 @@ class FinPlotChartProcessor(object):
     async def get_current_available_symbol_names(
         self,
     ) -> list[str] | None:
-        return await self.__get_current_available_symbol_names()
+        current_available_symbol_name_set = self.__current_available_symbol_name_set
 
+        if current_available_symbol_name_set is None:
+            return None
+
+        return sorted(
+            current_available_symbol_name_set,
+        )
     def get_current_rsi_interval_name(
             self,
     ) -> str | None:
@@ -132,6 +149,11 @@ class FinPlotChartProcessor(object):
         self,
     ) -> str | None:
         return self.__current_symbol_name
+
+    def get_current_trades_smoothing_level(
+            self,
+    ) -> str | None:
+        return self.__current_trades_smoothing_level
 
     def get_max_trade_price(
         self,
@@ -172,6 +194,18 @@ class FinPlotChartProcessor(object):
         self,
     ) -> DataFrame | None:
         return self.__trades_dataframe
+
+    def get_smoothed_dataframe(
+            self,
+    ) -> DataFrame | None:
+        level = self.__current_trades_smoothing_level
+
+        if level == 'Raw (0)':
+            return self.__trades_dataframe
+
+        return self.__trades_smoothed_dataframe_by_level_map.get(
+            level,
+        )
 
     def get_velocity_series(
         self,
@@ -238,8 +272,6 @@ class FinPlotChartProcessor(object):
             is_need_run_once=True,
         )
 
-        window.auto_range_price_plot()
-
         return True
 
     async def update_current_symbol_name(
@@ -271,6 +303,7 @@ class FinPlotChartProcessor(object):
         self.__test_analytics_raw_data_list = None
         self.__test_series = None
         self.__trades_dataframe = None
+        self.__trades_smoothed_dataframe_by_level_map.clear()
         self.__velocity_series = None
 
         await self.__update_trades_dataframe()
@@ -285,17 +318,22 @@ class FinPlotChartProcessor(object):
 
         return True
 
-    async def __get_current_available_symbol_names(
+    async def update_current_trades_smoothing_level(
         self,
-    ) -> list[str] | None:
-        current_available_symbol_name_set = self.__current_available_symbol_name_set
+        value: str,
+    ) -> bool:
+        if value == self.__current_trades_smoothing_level:
+            return False
 
-        if current_available_symbol_name_set is None:
-            return None
+        self.__current_trades_smoothing_level = value
 
-        return sorted(
-            current_available_symbol_name_set,
+        window = self.__window
+
+        await window.plot(
+            is_need_run_once=True,
         )
+
+        return True
 
     async def __update(
         self,
@@ -372,19 +410,19 @@ class FinPlotChartProcessor(object):
             else:
                 min_trade_id = 0
 
-            for row in trades_dataframe.loc[
+            for row_data in trades_dataframe.loc[
                 trades_dataframe.index >= min_trade_id
             ].itertuples():
-                trade_id: int = row.Index
+                trade_id: int = row_data.Index
 
                 # if trade_id < min_trade_id:
                 #     continue
 
-                price: float = row.price
-                quantity: float = row.quantity
+                price: float = row_data.price
+                quantity: float = row_data.quantity
                 volume = price * quantity
 
-                timestamp: pandas.Timestamp = row.timestamp_ms
+                timestamp: pandas.Timestamp = row_data.timestamp_ms
 
                 timestamp_ms = timestamp.value // 10**6
 
@@ -682,6 +720,13 @@ class FinPlotChartProcessor(object):
         )
 
         with Timer() as timer:
+            self.__update_trades_smoothed_dataframe_by_level_map()
+
+        logger.info(
+            f'Trades smoothed dataframe by level map was updated by {timer.elapsed:.3f}s'
+        )
+
+        with Timer() as timer:
             self.__update_velocity_series()
 
         logger.info(
@@ -692,7 +737,9 @@ class FinPlotChartProcessor(object):
             is_need_run_once=True,
         )
 
-    async def __update_current_available_symbol_name_set(self) -> None:
+    async def __update_current_available_symbol_name_set(
+            self,
+    ) -> None:
         current_available_symbol_name_set: set[str] | None = None
 
         postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
@@ -785,7 +832,9 @@ WHERE symbol_name IS NOT NULL;
 
         self.__rsi_series = rsi_series
 
-    def __update_test_series(self) -> None:
+    def __update_test_series(
+            self,
+    ) -> None:
         trades_dataframe = self.__trades_dataframe
 
         assert trades_dataframe is not None, None
@@ -1029,7 +1078,208 @@ WHERE symbol_name IS NOT NULL;
 
         self.__test_series = test_series
 
-    def __update_velocity_series(self) -> None:
+    def __update_trades_smoothed_dataframe_by_level_map(
+            self
+    ) -> None:
+        trades_dataframe = self.__trades_dataframe
+
+        assert trades_dataframe is not None, None
+
+        trades_smoothed_dataframe_by_level_map = (
+            self.__trades_smoothed_dataframe_by_level_map
+        )
+
+        previous_smoothed_dataframe: DataFrame | None = None
+
+        for smoothing_level in PlotConstants.TradesSmoothingLevels:
+            old_smoothed_dataframe = trades_smoothed_dataframe_by_level_map.get(
+                smoothing_level,
+            )
+
+            # min_trade_id: int
+            #
+            # if old_smoothed_dataframe is not None:
+            #     min_pandas_trade_id = old_smoothed_dataframe.index.max()
+            #
+            #     min_trade_id = int(
+            #         min_pandas_trade_id,
+            #     )
+            # else:
+            #     min_trade_id = 0
+
+            is_raw_level = smoothing_level == 'Raw (0)'
+
+            if is_raw_level:
+                new_smoothed_dataframe = trades_dataframe
+
+                previous_smoothed_dataframe = new_smoothed_dataframe
+
+                continue
+
+            assert previous_smoothed_dataframe is not None, None
+
+            is_first_level = smoothing_level == 'Smoothed (1)'
+
+            part_raw_data_list: list[dict[str, typing.Any]] = []
+
+            if is_first_level:
+                part_raw_data: dict[str, typing.Any] | None = None
+
+                for row_data in previous_smoothed_dataframe.itertuples():
+                    trade_id: int = row_data.Index
+
+                    # if trade_id < min_trade_id:
+                    #     continue
+
+                    price: float = row_data.price
+                    quantity: float = row_data.quantity
+                    volume = price * quantity
+
+                    timestamp: pandas.Timestamp = row_data.timestamp_ms
+
+                    # timestamp_ms = timestamp.value // 10 ** 6
+
+                    if part_raw_data is not None:
+                        old_trading_direction: TradingDirection | None = part_raw_data[
+                            'trading_direction'
+                        ]
+
+                        if old_trading_direction is None:
+                            start_price: float = part_raw_data[
+                                'start_price'
+                            ]
+
+                            end_price = price
+
+                            new_trading_direction = TradingUtils.get_direction(
+                                start_price,
+                                end_price
+                            )
+
+                            part_raw_data.update({
+                                'end_price': end_price,
+                                'end_timestamp': timestamp,
+                                'end_trade_id': trade_id,
+                                'quantity': part_raw_data['quantity'] + quantity,
+                                'trading_direction': new_trading_direction,
+                                'volume': part_raw_data['volume'] + volume,
+                            })
+                        else:
+                            new_end_price = price
+                            old_end_price: float = part_raw_data['end_price']
+
+                            new_trading_direction = TradingUtils.get_direction(
+                                old_end_price,
+                                new_end_price,
+                            )
+
+                            if old_trading_direction == new_trading_direction:
+                                part_raw_data.update({
+                                    'end_price': new_end_price,
+                                    'end_timestamp': timestamp,
+                                    'end_trade_id': trade_id,
+                                    'quantity': part_raw_data['quantity'] + quantity,
+                                    'volume': part_raw_data['volume'] + volume,
+                                })
+                            else:
+                                # Flush
+
+                                part_raw_data_list.append(
+                                    part_raw_data,
+                                )
+
+                                part_raw_data = None
+
+                    if part_raw_data is None:
+                        part_raw_data = {
+                            'start_timestamp': timestamp,
+                            'start_trade_id': trade_id,
+                            'start_price': price,
+                            'quantity': quantity,
+                            'trading_direction': None,
+                            'volume': volume,
+                        }
+
+                if part_raw_data is not None:
+                    trading_direction: TradingDirection | None = part_raw_data[
+                        'trading_direction'
+                    ]
+
+                    if trading_direction is not None:
+                        part_raw_data_list.append(
+                            part_raw_data,
+                        )
+
+                        part_raw_data = None  # noqa
+
+            trades_smoothed_raw_data_list: list[dict[str, typing.Any]] = []
+
+            last_part_raw_data: dict[str, typing.Any] | None = None
+
+            for part_raw_data in part_raw_data_list:
+                trades_smoothed_raw_data_list.append({
+                    'price': last_part_raw_data['start_price'],
+                    'timestamp': last_part_raw_data['start_timestamp'],
+                    'trade_id': last_part_raw_data['start_trade_id'],
+                })
+
+                last_part_raw_data = part_raw_data
+
+            if last_part_raw_data is not None:
+                trades_smoothed_raw_data_list.append({
+                    'price': last_part_raw_data['end_price'],
+                    'timestamp': last_part_raw_data['end_timestamp'],
+                    'trade_id': last_part_raw_data['end_trade_id'],
+                })
+
+            new_smoothed_dataframe = DataFrame.from_records(
+                trades_smoothed_raw_data_list,
+                columns=[
+                    'price',
+                    # 'quantity',
+                    'timestamp_ms',
+                    'trade_id',
+                    # 'volume',
+                ],
+            )
+
+            # assert new_smoothed_dataframe.size, None  # TODO
+
+            new_smoothed_dataframe.timestamp_ms = pandas.to_datetime(
+                new_smoothed_dataframe.timestamp_ms,
+                unit='ms',
+            )
+
+            new_smoothed_dataframe.set_index(
+                'trade_id',
+                inplace=True,
+            )
+
+            new_smoothed_dataframe.sort_values(
+                'trade_id',
+                inplace=True,
+            )
+
+            # if trades_dataframe is not None:
+            #     trades_dataframe.update(
+            #         new_trades_dataframe,
+            #     )
+            #
+            #     trades_dataframe = trades_dataframe.combine_first(
+            #         new_trades_dataframe,
+            #     )
+            # else:
+            #     trades_dataframe = new_trades_smoothed_dataframe
+
+            trades_smoothed_dataframe_by_level_map[
+                smoothing_level
+            ] = new_smoothed_dataframe
+
+            previous_smoothed_dataframe = new_smoothed_dataframe
+
+    def __update_velocity_series(
+            self,
+    ) -> None:
         candle_dataframe_by_interval_name_map = self.__candle_dataframe_by_interval_name_map
 
         candle_dataframe_1m = candle_dataframe_by_interval_name_map.get(
