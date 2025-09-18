@@ -171,9 +171,6 @@ class FinPlotChartWindow(QMainWindow):
 
         price_plot = graphics_layout_widget.addPlot(
             title='Price',
-            pen='w',
-            symbolBrush=(127, 0, 0),
-            symbolPen='w',
         )
 
         price_date_axis = DateTimeByTradeIDAxisItem(
@@ -416,6 +413,17 @@ class FinPlotChartWindow(QMainWindow):
 
         self.__price_plot_data_item = price_plot.plot(
             name='Price',
+            pen=(
+                200,
+                200,
+                200,
+            ),
+            symbolBrush=(
+                127,
+                0,
+                0,
+            ),
+            symbolPen='w',
         )
 
         self.__price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map: defaultdict[
@@ -487,6 +495,9 @@ class FinPlotChartWindow(QMainWindow):
 
         functionality_layout.addWidget(symbol_name_label, 0, 2, 2, 1)
         functionality_layout.addWidget(symbol_name_combo_box, 2, 2, 2, 1)
+
+        functionality_layout.addWidget(trades_smoothing_level_label, 0, 6, 2, 1)
+        functionality_layout.addWidget(trades_smoothing_level_combo_box, 2, 6, 2, 1)
 
         window_layout.addWidget(graphics_layout_widget)
 
@@ -608,7 +619,7 @@ class FinPlotChartWindow(QMainWindow):
         self,
     ) -> None:
         current_trades_smoothing_level = (
-            self.__on_trades_smoothing_level_changed.currentText()
+            self.__trades_smoothing_level_combo_box.currentText()
         )
 
         processor = self.__processor

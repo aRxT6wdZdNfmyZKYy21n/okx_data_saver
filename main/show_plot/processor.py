@@ -41,6 +41,7 @@ from main.save_trades.schemas import (
 from main.show_plot.globals import (
     g_globals,
 )
+from main.show_plot.gui.item.datetime_by_trade_id_axis import DateTimeByTradeIDAxisItem
 
 from main.show_plot.gui.window import (
     FinPlotChartWindow,
@@ -71,6 +72,7 @@ class FinPlotChartProcessor(object):
         '__test_analytics_raw_data_list',
         '__test_series',
         '__trades_dataframe',
+        '__trades_dataframe_update_lock',
         '__trades_smoothed_dataframe_by_level_map',
         '__velocity_series',
         '__window',
@@ -98,6 +100,7 @@ class FinPlotChartProcessor(object):
         self.__test_analytics_raw_data_list: list[dict[str, typing.Any]] | None = None
         self.__test_series: Series | None = None
         self.__trades_dataframe: DataFrame | None = None
+        self.__trades_dataframe_update_lock = asyncio.Lock()
         self.__trades_smoothed_dataframe_by_level_map: dict[str, DataFrame | None] = {}
         self.__velocity_series: Series | None = None
         self.__window: FinPlotChartWindow | None = None
@@ -258,7 +261,8 @@ class FinPlotChartProcessor(object):
                 )
 
             await asyncio.sleep(
-                1.0  # s
+                # 1.0  # s
+                60.0  # s
             )
 
     async def update_current_rsi_interval_name(
@@ -562,145 +566,312 @@ class FinPlotChartProcessor(object):
         if current_symbol_name is None:
             return
 
-        trades_dataframe = self.__trades_dataframe
+        async with self.__trades_dataframe_update_lock:
+            trades_dataframe = self.__trades_dataframe
 
-        min_trade_id: int  # TODO: min_trade_id
+            min_trade_id: int  # TODO: min_trade_id
 
-        if trades_dataframe is not None:
-            min_pandas_trade_id = trades_dataframe.index.max()
+            if trades_dataframe is not None:
+                min_pandas_trade_id = trades_dataframe.index.max()
 
-            min_trade_id = int(
-                min_pandas_trade_id,
-            )
-        else:
-            min_trade_id = 0
-
-        new_trade_raw_data_list: list[dict] | None = None
-        new_max_trade_price: Decimal | None = None
-        new_min_trade_price: Decimal | None = None
-
-        postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
-
-        async with postgres_db_session_maker() as session:
-            result = await session.execute(
-                select(
-                    OKXTradeData,
+                min_trade_id = int(
+                    min_pandas_trade_id,
                 )
-                .where(
-                    and_(
-                        OKXTradeData.symbol_name == current_symbol_name,
-                        OKXTradeData.trade_id >= min_trade_id,
+            else:
+                min_trade_id = 0
+
+            new_trade_raw_data_list: list[dict] | None = None
+            new_max_trade_price: Decimal | None = None
+            new_min_trade_price: Decimal | None = None
+
+            postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
+
+            async with postgres_db_session_maker() as session:
+                result = await session.execute(
+                    select(
+                        OKXTradeData,
+                    )
+                    .where(
+                        and_(
+                            OKXTradeData.symbol_name == current_symbol_name,
+                            OKXTradeData.trade_id >= min_trade_id,
+                        )
+                    )
+                    .order_by(
+                        OKXTradeData.symbol_name.asc(),
+                        OKXTradeData.trade_id.desc(),
+                    )
+                    .limit(
+                        # 1_000_000,
+                        500_000,
+                        # 50_000,
+                        # 10_000
+                        # 1_000
+                        # 50
                     )
                 )
-                .order_by(
-                    OKXTradeData.symbol_name.asc(),
-                    OKXTradeData.trade_id.desc(),
-                )
-                .limit(
-                    # 1_000_000,
-                    500_000,
-                    # 50_000,
-                    # 10_000
-                    # 1_000
-                    # 50
-                )
+
+                for row in result:
+                    new_trade_data: OKXTradeData = row[0]
+
+                    new_trade_price = new_trade_data.price
+
+                    if new_max_trade_price is None or (
+                        new_max_trade_price < new_trade_price
+                    ):
+                        new_max_trade_price = new_trade_price
+
+                    if new_min_trade_price is None or (
+                        new_min_trade_price > new_trade_price
+                    ):
+                        new_min_trade_price = new_trade_price
+
+                    new_trade_raw_data = {
+                        'price': float(
+                            new_trade_price,
+                        ),
+                        'quantity': float(
+                            new_trade_data.quantity,
+                        ),
+                        'timestamp_ms': new_trade_data.timestamp_ms,
+                        'trade_id': new_trade_data.trade_id,
+                    }
+
+                    if new_trade_raw_data_list is None:
+                        new_trade_raw_data_list = []
+
+                    new_trade_raw_data_list.append(
+                        new_trade_raw_data,
+                    )
+
+            if new_max_trade_price is not None:
+                max_trade_price = self.__max_trade_price
+
+                if max_trade_price is None or (max_trade_price < new_max_trade_price):
+                    self.__max_trade_price = (
+                        max_trade_price  # noqa
+                    ) = new_max_trade_price
+
+                    self.__update_max_price()
+
+            if new_min_trade_price is not None:
+                min_trade_price = self.__min_trade_price
+
+                if min_trade_price is None or (min_trade_price > new_min_trade_price):
+                    self.__min_trade_price = (
+                        min_trade_price  # noqa
+                    ) = new_min_trade_price
+
+                    self.__update_min_price()
+
+            if new_trade_raw_data_list is None:
+                return
+
+            new_trades_dataframe = DataFrame.from_records(
+                new_trade_raw_data_list,
+                # [
+                #     {
+                #         'price': 100000.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533919,
+                #         'trade_id': 1,
+                #     },
+                #     {
+                #         'price': 99900.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533920,
+                #         'trade_id': 2,
+                #     },
+                #     {
+                #         'price': 99900.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533921,
+                #         'trade_id': 3,
+                #     },
+                #     {
+                #         'price': 99800.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533922,
+                #         'trade_id': 4,
+                #     },
+                #     {
+                #         'price': 99800.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533923,
+                #         'trade_id': 5,
+                #     },
+                #     {
+                #         'price': 99800.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533924,
+                #         'trade_id': 6,
+                #     },
+                #     {
+                #         'price': 99700.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533925,
+                #         'trade_id': 7,
+                #     },
+                #     {
+                #         'price': 99700.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533926,
+                #         'trade_id': 8,
+                #     },
+                #     {
+                #         'price': 99600.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533927,
+                #         'trade_id': 9,
+                #     },
+                #     {
+                #         'price': 99600.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533928,
+                #         'trade_id': 10,
+                #     },
+                #     {
+                #         'price': 99500.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533929,
+                #         'trade_id': 11,
+                #     },
+                #     {
+                #         'price': 99600.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533930,
+                #         'trade_id': 12,
+                #     },
+                # ],
+                # [
+                #     {
+                #         'price': 115924.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533919,
+                #         'trade_id': 1,
+                #     },
+                #     {
+                #         'price': 115922.33,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533920,
+                #         'trade_id': 2,
+                #     },
+                #     {
+                #         'price': 115922.33,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533921,
+                #         'trade_id': 3,
+                #     },
+                #     {
+                #         'price': 115922.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533922,
+                #         'trade_id': 4,
+                #     },
+                #     {
+                #         'price': 115922.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533923,
+                #         'trade_id': 5,
+                #     },
+                #     {
+                #         'price': 115940.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533924,
+                #         'trade_id': 6,
+                #     },
+                #     {
+                #         'price': 115940.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533925,
+                #         'trade_id': 7,
+                #     },
+                #     {
+                #         'price': 115944.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533926,
+                #         'trade_id': 8,
+                #     },
+                #     {
+                #         'price': 115944.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533927,
+                #         'trade_id': 9,
+                #     },
+                #     {
+                #         'price': 115948.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533928,
+                #         'trade_id': 10,
+                #     },
+                #     {
+                #         'price': 115948.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533929,
+                #         'trade_id': 11,
+                #     },
+                #     {
+                #         'price': 115952.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533930,
+                #         'trade_id': 12,
+                #     },
+                #     {
+                #         'price': 115952.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533931,
+                #         'trade_id': 13,
+                #     },
+                #     {
+                #         'price': 115954.9,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533932,
+                #         'trade_id': 14,
+                #     },
+                #     {
+                #         'price': 115952.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533933,
+                #         'trade_id': 15,
+                #     },
+                # ],
+                columns=[
+                    'price',
+                    'quantity',
+                    'timestamp_ms',
+                    'trade_id',
+                ],
             )
 
-            for row in result:
-                new_trade_data: OKXTradeData = row[0]
+            assert new_trades_dataframe.size, None
 
-                new_trade_price = new_trade_data.price
+            new_trades_dataframe.timestamp_ms = pandas.to_datetime(
+                new_trades_dataframe.timestamp_ms,
+                unit='ms',
+            )
 
-                if new_max_trade_price is None or (
-                    new_max_trade_price < new_trade_price
-                ):
-                    new_max_trade_price = new_trade_price
-
-                if new_min_trade_price is None or (
-                    new_min_trade_price > new_trade_price
-                ):
-                    new_min_trade_price = new_trade_price
-
-                new_trade_raw_data = {
-                    'price': float(
-                        new_trade_price,
-                    ),
-                    'quantity': float(
-                        new_trade_data.quantity,
-                    ),
-                    'timestamp_ms': new_trade_data.timestamp_ms,
-                    'trade_id': new_trade_data.trade_id,
-                }
-
-                if new_trade_raw_data_list is None:
-                    new_trade_raw_data_list = []
-
-                new_trade_raw_data_list.append(
-                    new_trade_raw_data,
-                )
-
-        if new_max_trade_price is not None:
-            max_trade_price = self.__max_trade_price
-
-            if max_trade_price is None or (max_trade_price < new_max_trade_price):
-                self.__max_trade_price = (
-                    max_trade_price  # noqa
-                ) = new_max_trade_price
-
-                self.__update_max_price()
-
-        if new_min_trade_price is not None:
-            min_trade_price = self.__min_trade_price
-
-            if min_trade_price is None or (min_trade_price > new_min_trade_price):
-                self.__min_trade_price = (
-                    min_trade_price  # noqa
-                ) = new_min_trade_price
-
-                self.__update_min_price()
-
-        if new_trade_raw_data_list is None:
-            return
-
-        new_trades_dataframe = DataFrame.from_records(
-            new_trade_raw_data_list,
-            columns=[
-                'price',
-                'quantity',
-                'timestamp_ms',
+            new_trades_dataframe.set_index(
                 'trade_id',
-            ],
-        )
-
-        assert new_trades_dataframe.size, None
-
-        new_trades_dataframe.timestamp_ms = pandas.to_datetime(
-            new_trades_dataframe.timestamp_ms,
-            unit='ms',
-        )
-
-        new_trades_dataframe.set_index(
-            'trade_id',
-            inplace=True,
-        )
-
-        new_trades_dataframe.sort_values(
-            'trade_id',
-            inplace=True,
-        )
-
-        if trades_dataframe is not None:
-            trades_dataframe.update(
-                new_trades_dataframe,
+                inplace=True,
             )
 
-            trades_dataframe = trades_dataframe.combine_first(
-                new_trades_dataframe,
+            new_trades_dataframe.sort_values(
+                'trade_id',
+                inplace=True,
             )
-        else:
-            trades_dataframe = new_trades_dataframe
 
-        self.__trades_dataframe = trades_dataframe
+            if trades_dataframe is not None:
+                trades_dataframe.update(
+                    new_trades_dataframe,
+                )
+
+                trades_dataframe = trades_dataframe.combine_first(
+                    new_trades_dataframe,
+                )
+            else:
+                trades_dataframe = new_trades_dataframe
+
+            self.__trades_dataframe = trades_dataframe
 
         with Timer() as timer:
             self.__update_bollinger_series()
@@ -1143,14 +1314,22 @@ WHERE symbol_name IS NOT NULL;
 
                     # timestamp_ms = timestamp.value // 10 ** 6
 
-                    if line_raw_data is not None:
+                    if line_raw_data is None:
+                        line_raw_data = {
+                            'start_timestamp': timestamp,
+                            'start_trade_id': trade_id,
+                            'start_price': price,
+                            'quantity': quantity,
+                            'trading_direction': None,
+                            'volume': volume,
+                        }
+                    else:
                         old_trading_direction: TradingDirection | None = line_raw_data[
                             'trading_direction'
                         ]
 
                         if old_trading_direction is None:
                             start_price: float = line_raw_data['start_price']
-
                             end_price = price
 
                             new_trading_direction = TradingUtils.get_direction(
@@ -1180,11 +1359,9 @@ WHERE symbol_name IS NOT NULL;
                             if old_trading_direction == new_trading_direction:
                                 line_raw_data.update(
                                     {
-                                        'end_price': new_end_price,
-                                        'end_timestamp': timestamp,
-                                        'end_trade_id': trade_id,
-                                        'quantity': line_raw_data['quantity']
-                                        + quantity,
+                                        'quantity': (
+                                            line_raw_data['quantity'] + quantity
+                                        ),
                                         'volume': line_raw_data['volume'] + volume,
                                     },
                                 )
@@ -1195,17 +1372,20 @@ WHERE symbol_name IS NOT NULL;
                                     line_raw_data,
                                 )
 
-                                line_raw_data = None
+                                line_raw_data = {
+                                    'start_timestamp': line_raw_data['end_timestamp'],
+                                    'start_trade_id': line_raw_data['end_trade_id'],
+                                    'start_price': old_end_price,
+                                    'quantity': quantity,
+                                    'trading_direction': new_trading_direction,
+                                    'volume': volume,
+                                }
 
-                    if line_raw_data is None:
-                        line_raw_data = {
-                            'start_timestamp': timestamp,
-                            'start_trade_id': trade_id,
-                            'start_price': price,
-                            'quantity': quantity,
-                            'trading_direction': None,
-                            'volume': volume,
-                        }
+                            line_raw_data.update({
+                                'end_price': new_end_price,
+                                'end_timestamp': timestamp,
+                                'end_trade_id': trade_id,
+                            })
 
                 if line_raw_data is not None:
                     trading_direction: TradingDirection | None = line_raw_data[
@@ -1223,147 +1403,213 @@ WHERE symbol_name IS NOT NULL;
             else:
                 assert previous_line_dataframe is not None, None
 
-                last_line_raw_data: dict[str, typing.Any] | None = None
-
-                first_line_data: typing.NamedTuple | None = None
-                second_line_data: typing.NamedTuple | None = None
+                line_raw_data_1: dict[str, typing.Any] | None = None
+                line_raw_data_list_1: list[dict[str, typing.Any]] = []
 
                 for line_data in previous_line_dataframe.itertuples():
-                    is_first_line_exists = first_line_data is not None
+                    high_price: float
+                    trading_direction: TradingDirection
+                    low_price: float
 
-                    if not is_first_line_exists:
-                        first_line_data = line_data
+                    if line_raw_data_1 is None:
+                        end_price: float = line_data.end_price
+                        high_price = end_price
+                        start_price: float = line_data.start_price
+                        low_price: float = start_price
 
-                    first_price = first_line_data.start_price
+                        trading_direction: TradingDirection = line_data.trading_direction
 
-                    trading_direction: TradingDirection = (
-                        first_line_data.trading_direction
-                    )
-
-                    if last_line_raw_data is None:
-                        last_line_raw_data = {
-                            'start_timestamp': first_line_data.start_timestamp,
-                            'start_trade_id': first_line_data.start_trade_id,
-                            'start_price': first_price,
-                            'end_timestamp': first_line_data.end_timestamp,
-                            'end_trade_id': first_line_data.end_trade_id,
-                            'end_price': first_line_data.end_price,
-                            'quantity': first_line_data.quantity,
+                        line_raw_data_1 = {
+                            'end_timestamp': line_data.end_timestamp,
+                            'end_trade_id': line_data.end_trade_id,
+                            'end_price': end_price,
+                            'high_price': high_price,
+                            'low_price': low_price,
+                            'start_timestamp': line_data.start_timestamp,
+                            'start_trade_id': line_data.Index,
+                            'start_price': start_price,
+                            'quantity': line_data.quantity,
                             'trading_direction': trading_direction,
-                            'volume': first_line_data.volume,
+                            'volume': line_data.volume,
                         }
 
-                    if trading_direction == TradingDirection.Cross:
-                        # Flush
+                        if trading_direction == TradingDirection.Cross:
+                            # Flush
 
-                        line_raw_data_list.append(
-                            last_line_raw_data,
-                        )
+                            if smoothing_level == 'Smoothed (3)':
+                                print(
+                                    'Flushing 1',
+                                    line_raw_data_1,
+                                )
 
-                        first_line_data = None
-                        last_line_raw_data = None
+                            line_raw_data_list_1.append(
+                                line_raw_data_1,
+                            )
+
+                            line_raw_data_1 = None
 
                         continue
 
-                    if is_first_line_exists and second_line_data is None:
-                        second_line_data = line_data
+                    high_price: float = line_raw_data_1['high_price']
+                    low_price: float = line_raw_data_1['low_price']
 
-                    third_price = second_line_data.end_price
+                    trading_direction: TradingDirection = line_raw_data_1[
+                        'trading_direction'
+                    ]
 
-                    line_pair_trading_direction = TradingUtils.get_direction(
-                        first_price,
-                        third_price,
-                    )
+                    if line_data.trading_direction == trading_direction:
+                        # Check high price update direction
 
-                    if line_pair_trading_direction == trading_direction:
-                        last_line_raw_data.update(
-                            {
-                                'end_timestamp': second_line_data.end_timestamp,
-                                'end_trade_id': second_line_data.end_trade_id,
-                                'end_price': third_price,
-                                'quantity': (
-                                    last_line_raw_data['quantity']
-                                    + second_line_data.quantity
-                                ),
-                                'volume': (
-                                    last_line_raw_data['volume']
-                                    + second_line_data.volume
-                                ),
-                            },
+                        new_high_price = line_data.end_price
+
+                        high_price_direction = TradingUtils.get_direction(
+                            high_price,
+                            new_high_price,
                         )
 
-                        first_line_data = None
+                        if (
+                                high_price_direction == TradingDirection.Cross or
+                                high_price_direction != trading_direction
+                        ):
+                            # Flush
+
+                            line_raw_data_list_1.append(
+                                line_raw_data_1,
+                            )
+
+                            end_price: float = line_data.end_price
+                            high_price = end_price
+                            start_price: float = line_data.start_price
+                            low_price: float = start_price
+
+                            trading_direction: TradingDirection = line_data.trading_direction
+
+                            line_raw_data_1 = {
+                                'end_timestamp': line_data.end_timestamp,
+                                'end_trade_id': line_data.end_trade_id,
+                                'end_price': end_price,
+                                'high_price': high_price,
+                                'low_price': low_price,
+                                'start_timestamp': line_data.start_timestamp,
+                                'start_trade_id': line_data.Index,
+                                'start_price': start_price,
+                                'quantity': line_data.quantity,
+                                'trading_direction': trading_direction,
+                                'volume': line_data.volume,
+                            }
+
+                            continue
+
+                        # Update high price
+
+                        line_raw_data_1.update({
+                            'high_price': line_data.end_price,
+                        })
+                    else:
+                        # Check low price update direction
+
+                        new_low_price = line_data.end_price
+
+                        low_price_direction = TradingUtils.get_direction(
+                            low_price,
+                            new_low_price,
+                        )
+
+                        if (
+                                low_price_direction == TradingDirection.Cross or
+                                low_price_direction != trading_direction
+                        ):
+                            # Flush
+
+                            line_raw_data_list_1.append(
+                                line_raw_data_1,
+                            )
+
+                            end_price: float = line_data.end_price
+                            high_price = end_price
+                            start_price: float = line_data.start_price
+                            low_price: float = start_price
+
+                            trading_direction: TradingDirection = line_data.trading_direction
+
+                            line_raw_data_1 = {
+                                'end_timestamp': line_data.end_timestamp,
+                                'end_trade_id': line_data.end_trade_id,
+                                'end_price': end_price,
+                                'high_price': high_price,
+                                'low_price': low_price,
+                                'start_timestamp': line_data.start_timestamp,
+                                'start_trade_id': line_data.Index,
+                                'start_price': start_price,
+                                'quantity': line_data.quantity,
+                                'trading_direction': trading_direction,
+                                'volume': line_data.volume,
+                            }
+
+                            continue
+
+                        # Update low price && combine line data
+
+                        line_raw_data_1.update({
+                            'low_price': new_low_price,
+                        })
+
+                    # Combine line data
+
+                    line_raw_data_1.update({
+                        'end_timestamp': line_data.end_timestamp,
+                        'end_trade_id': line_data.end_trade_id,
+                        'end_price': line_data.end_price,
+                        'quantity': line_raw_data_1['quantity'] + line_data.quantity,
+                        'volume': line_raw_data_1['quantity'] + line_data.volume,
+                    })
+
+                if line_raw_data_1 is not None:
+                    # Flush
+
+                    if smoothing_level == 'Smoothed (3)':
+                        print('Flushing 4', line_raw_data_1)
+
+                    line_raw_data_list_1.append(
+                        line_raw_data_1,
+                    )
+
+                    line_raw_data_1 = None  # noqa
+
+                for line_raw_data_1 in line_raw_data_list_1:
+                    if line_raw_data is None:
+                        line_raw_data = line_raw_data_1
+
+                        continue
+
+                    old_trading_direction: TradingDirection = line_raw_data['trading_direction']
+                    new_trading_direction: TradingDirection = line_raw_data_1['trading_direction']
+
+                    if old_trading_direction == new_trading_direction:
+                        line_raw_data.update({
+                            'end_timestamp': line_raw_data_1['end_timestamp'],
+                            'end_trade_id': line_raw_data_1['end_trade_id'],
+                            'end_price': line_raw_data_1['end_price'],
+                            'quantity': line_raw_data['quantity'] + line_raw_data_1['quantity'],
+                            'volume': line_raw_data['volume'] + line_raw_data_1['volume'],
+                        })
                     else:
                         # Flush
 
                         line_raw_data_list.append(
-                            last_line_raw_data,
+                            line_raw_data
                         )
 
-                        first_line_data = second_line_data
-                        last_line_raw_data = None
+                        line_raw_data = line_raw_data_1
 
-                    second_line_data = None
-
-                assert second_line_data is not None, (second_line_data,)
-
-                if first_line_data is not None:
-                    trading_direction: TradingDirection = (
-                        first_line_data.trading_direction
-                    )
-
-                    assert trading_direction != TradingDirection.Cross, (
-                        trading_direction,
-                    )
-
-                    if last_line_raw_data is None:
-                        last_line_raw_data = {
-                            'start_timestamp': first_line_data.start_timestamp,
-                            'start_trade_id': first_line_data.start_trade_id,
-                            'start_price': first_price,
-                            'quantity': first_line_data.quantity,
-                            'trading_direction': trading_direction,
-                            'volume': first_line_data.volume,
-                        }
-                    else:
-                        assert (
-                            trading_direction == last_line_raw_data['trading_direction']
-                        ), (
-                            first_line_data,
-                            last_line_raw_data,
-                        )
-
-                        last_line_raw_data.update(
-                            {
-                                'quantity': (
-                                    last_line_raw_data['quantity']
-                                    + first_line_data.quantity
-                                ),
-                                'volume': (
-                                    last_line_raw_data['volume']
-                                    + first_line_data.volume
-                                ),
-                            },
-                        )
-
-                    last_line_raw_data.update(
-                        {
-                            'end_timestamp': first_line_data.end_timestamp,
-                            'end_trade_id': first_line_data.end_trade_id,
-                            'end_price': first_line_data.end_price,
-                        },
-                    )
-
-                    first_line_data = None  # noqa
-
-                if last_line_raw_data is not None:
+                if line_raw_data is not None:
                     # Flush
 
                     line_raw_data_list.append(
-                        last_line_raw_data,
+                        line_raw_data
                     )
 
-                    last_line_raw_data = None  # noqa
+                    line_raw_data = None
 
             new_line_dataframe = DataFrame.from_records(
                 line_raw_data_list,
@@ -1403,7 +1649,7 @@ WHERE symbol_name IS NOT NULL;
                     {
                         'price': line_data.start_price,
                         'timestamp': line_data.start_timestamp,
-                        'trade_id': line_data.start_trade_id,
+                        'trade_id': line_data.Index,
                     }
                 )
 
