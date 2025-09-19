@@ -132,6 +132,8 @@ class DatabaseMigrator:
             result = await session.stream(
                 select(
                     OKXTradeData,
+                ).execution_options(
+                    yield_per=1000,
                 ),
             )
 
@@ -186,6 +188,8 @@ class DatabaseMigrator:
             result = await session.stream(
                 select(
                     OKXOrderBookData,
+                ).execution_options(
+                    yield_per=1000,
                 ),
             )
 
@@ -241,6 +245,8 @@ class DatabaseMigrator:
             result = await session.stream(
                 select(
                     OKXCandleData15m,
+                ).execution_options(
+                    yield_per=1000,
                 ),
             )
 
@@ -300,6 +306,8 @@ class DatabaseMigrator:
             result = await session.stream(
                 select(
                     OKXCandleData1H,
+                ).execution_options(
+                    yield_per=1000,
                 ),
             )
 
