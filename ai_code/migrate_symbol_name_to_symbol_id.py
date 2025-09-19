@@ -17,7 +17,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
-    async_sessionmaker
+    async_sessionmaker,
+    AsyncSession,
 )
 
 try:
@@ -93,6 +94,8 @@ class DatabaseMigrator:
 
     async def get_table_row_count(self, model_class) -> int:
         """Получение количества строк в таблице."""
+        session: AsyncSession
+
         async with self.session_factory() as session:
             result = await session.execute(
                 select(
@@ -101,6 +104,7 @@ class DatabaseMigrator:
                     model_class,
                 )
             )
+
             return result.scalar()
 
     async def create_new_tables(self):
@@ -140,6 +144,8 @@ class DatabaseMigrator:
             return
 
         migrated_count = 0
+        session: AsyncSession
+
         async with self.session_factory() as session:
             result = await session.stream(
                 select(
@@ -150,6 +156,9 @@ class DatabaseMigrator:
             )
 
             async for trade in result.scalars():
+                if not session.in_transaction():
+                    await session.begin()
+
                 # Находим соответствующий symbol_id
                 symbol_id = SymbolConstants.IdByName[trade.symbol_name]
 
@@ -196,6 +205,8 @@ class DatabaseMigrator:
             return
 
         migrated_count = 0
+        session: AsyncSession
+
         async with self.session_factory() as session:
             result = await session.stream(
                 select(
@@ -206,6 +217,9 @@ class DatabaseMigrator:
             )
 
             async for order_book in result.scalars():
+                if not session.in_transaction():
+                    await session.begin()
+
                 action_id = OKXConstants.OrderBookActionIdByName[order_book.action]
 
                 # Находим соответствующий symbol_id
@@ -253,6 +267,8 @@ class DatabaseMigrator:
             return
 
         migrated_count = 0
+        session: AsyncSession
+
         async with self.session_factory() as session:
             result = await session.stream(
                 select(
@@ -263,6 +279,9 @@ class DatabaseMigrator:
             )
 
             async for candle in result.scalars():
+                if not session.in_transaction():
+                    await session.begin()
+
                 # Находим соответствующий symbol_id
                 symbol_id = SymbolConstants.IdByName[candle.symbol_name]
 
@@ -314,6 +333,8 @@ class DatabaseMigrator:
             return
 
         migrated_count = 0
+        session: AsyncSession
+
         async with self.session_factory() as session:
             result = await session.stream(
                 select(
@@ -324,6 +345,9 @@ class DatabaseMigrator:
             )
 
             async for candle in result.scalars():
+                if not session.in_transaction():
+                    await session.begin()
+
                 # Находим соответствующий symbol_id
                 symbol_id = SymbolConstants.IdByName[candle.symbol_name]
 
