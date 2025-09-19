@@ -30,17 +30,19 @@ from constants.symbol import (
     SymbolConstants,
 )
 from main.save_candles.schemas import (
-    Base,
+    Base as BaseOKXCandleData,
     OKXCandleData15m,
     OKXCandleData15m2,
     OKXCandleData1H,
     OKXCandleData1H2,
 )
 from main.save_order_books.schemas import (
+    Base as BaseOKXOrderBookData,
     OKXOrderBookData,
     OKXOrderBookData2,
 )
 from main.save_trades.schemas import (
+    Base as BaseOKXTradeData,
     OKXTradeData,
     OKXTradeData2,
 )
@@ -105,7 +107,17 @@ class DatabaseMigrator:
         """Создание новых таблиц с symbol_id."""
         try:
             async with self.engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
+                await conn.run_sync(
+                    BaseOKXCandleData.metadata.create_all,
+                )
+
+                await conn.run_sync(
+                    BaseOKXOrderBookData.metadata.create_all,
+                )
+
+                await conn.run_sync(
+                    BaseOKXTradeData.metadata.create_all,
+                )
 
             logger.info('Созданы все новые таблицы с symbol_id')
         except Exception as exception:
