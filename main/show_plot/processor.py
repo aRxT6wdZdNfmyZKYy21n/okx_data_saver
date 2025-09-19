@@ -606,7 +606,8 @@ class FinPlotChartProcessor(object):
                         OKXTradeData.trade_id.desc(),
                     )
                     .limit(
-                        1_000_000,
+                        2_000_000,
+                        # 1_000_000,
                         # 500_000,
                         # 50_000,
                         # 10_000
@@ -1536,6 +1537,23 @@ WHERE symbol_name IS NOT NULL;
                         #     )
                         #
                         #     line_raw_data_1 = None
+
+                        continue
+
+                    if line_data.trading_direction == TradingDirection.Cross:
+                        # Combine
+
+                        line_raw_data_1.update(
+                            {
+                                'end_timestamp': line_data.end_timestamp,
+                                'end_trade_id': line_data.end_trade_id,
+                                'end_price': line_data.end_price,
+                                # 'high_price': high_price,
+                                # 'low_price': low_price,
+                                'quantity': line_raw_data_1['quantity'] + line_data.quantity,
+                                'volume': line_raw_data_1['volume'] + line_data.volume,
+                            },
+                        )
 
                         continue
 
