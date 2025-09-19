@@ -156,9 +156,6 @@ class DatabaseMigrator:
             )
 
             async for trade in result.scalars():
-                if not session.in_transaction():
-                    await session.begin()
-
                 # Находим соответствующий symbol_id
                 symbol_id = SymbolConstants.IdByName[trade.symbol_name]
 
@@ -184,6 +181,7 @@ class DatabaseMigrator:
                 if migrated_count % 100 == 0:
                     await session.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
+                    await session.begin()
 
             # Коммитим оставшиеся записи
             await session.commit()
@@ -217,9 +215,6 @@ class DatabaseMigrator:
             )
 
             async for order_book in result.scalars():
-                if not session.in_transaction():
-                    await session.begin()
-
                 action_id = OKXConstants.OrderBookActionIdByName[order_book.action]
 
                 # Находим соответствующий symbol_id
@@ -246,6 +241,7 @@ class DatabaseMigrator:
                 if migrated_count % 100 == 0:
                     await session.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
+                    await session.begin()
 
             # Коммитим оставшиеся записи
             await session.commit()
@@ -279,9 +275,6 @@ class DatabaseMigrator:
             )
 
             async for candle in result.scalars():
-                if not session.in_transaction():
-                    await session.begin()
-
                 # Находим соответствующий symbol_id
                 symbol_id = SymbolConstants.IdByName[candle.symbol_name]
 
@@ -312,6 +305,7 @@ class DatabaseMigrator:
                 if migrated_count % 100 == 0:
                     await session.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
+                    await session.begin()
 
             # Коммитим оставшиеся записи
             await session.commit()
@@ -345,9 +339,6 @@ class DatabaseMigrator:
             )
 
             async for candle in result.scalars():
-                if not session.in_transaction():
-                    await session.begin()
-
                 # Находим соответствующий symbol_id
                 symbol_id = SymbolConstants.IdByName[candle.symbol_name]
 
@@ -378,6 +369,7 @@ class DatabaseMigrator:
                 if migrated_count % 100 == 0:
                     await session.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
+                    await session.begin()
 
             # Коммитим оставшиеся записи
             await session.commit()
