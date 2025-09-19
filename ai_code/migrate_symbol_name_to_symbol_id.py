@@ -11,8 +11,14 @@ import logging
 import sys
 import traceback
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import (
+    func,
+    select,
+)
+from sqlalchemy.ext.asyncio import (
+    create_async_engine,
+    async_sessionmaker
+)
 
 try:
     import uvloop
@@ -23,7 +29,6 @@ from constants.okx import OKXConstants
 from constants.symbol import (
     SymbolConstants,
 )
-from enumerations import SymbolId
 from main.save_candles.schemas import (
     Base,
     OKXCandleData15m,
@@ -61,10 +66,15 @@ class DatabaseMigrator:
     async def connect(self):
         """Подключение к базе данных."""
         try:
-            self.engine = create_async_engine(self.database_url)
+            self.engine = create_async_engine(
+                self.database_url,
+                echo=True,
+            )
+
             self.session_factory = async_sessionmaker(
                 self.engine, expire_on_commit=False
             )
+
             logger.info('Успешно подключились к базе данных')
         except Exception as exception:
             logger.error(
@@ -82,8 +92,14 @@ class DatabaseMigrator:
     async def get_table_row_count(self, model_class) -> int:
         """Получение количества строк в таблице."""
         async with self.session_factory() as session:
-            result = await session.execute(select(model_class))
-            return len(result.scalars().all())
+            result = await session.execute(
+                select(
+                    func.count(),
+                ).select_from(
+                    model_class,
+                )
+            )
+            return result.scalar()
 
     async def create_new_tables(self):
         """Создание новых таблиц с symbol_id."""
