@@ -144,10 +144,11 @@ class DatabaseMigrator:
             return
 
         migrated_count = 0
-        session: AsyncSession
+        session_read: AsyncSession
+        session_write: AsyncSession
 
-        async with self.session_factory() as session:
-            result = await session.stream(
+        async with self.session_factory() as session_read, self.session_factory() as session_write:
+            result = await session_read.stream(
                 select(
                     OKXTradeData,
                 ).execution_options(
@@ -169,7 +170,10 @@ class DatabaseMigrator:
                     timestamp_ms=trade.timestamp_ms,
                 )
 
-                session.add(new_trade)
+                session_write.add(
+                    new_trade,
+                )
+
                 migrated_count += 1
 
                 logger.info(
@@ -179,12 +183,11 @@ class DatabaseMigrator:
 
                 # Коммитим каждые 100 записей для производительности
                 if migrated_count % 100 == 0:
-                    await session.commit()
+                    await session_write.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
-                    await session.begin()
 
             # Коммитим оставшиеся записи
-            await session.commit()
+            await session_write.commit()
 
         logger.info(
             f'Миграция торгов завершена. Всего мигрировано: {migrated_count} записей'
@@ -203,10 +206,11 @@ class DatabaseMigrator:
             return
 
         migrated_count = 0
-        session: AsyncSession
+        session_read: AsyncSession
+        session_write: AsyncSession
 
-        async with self.session_factory() as session:
-            result = await session.stream(
+        async with self.session_factory() as session_read, self.session_factory() as session_write:
+            result = await session_read.stream(
                 select(
                     OKXOrderBookData,
                 ).execution_options(
@@ -229,7 +233,10 @@ class DatabaseMigrator:
                     bids=order_book.bids,
                 )
 
-                session.add(new_order_book)
+                session_write.add(
+                    new_order_book,
+                )
+
                 migrated_count += 1
 
                 logger.info(
@@ -239,12 +246,11 @@ class DatabaseMigrator:
 
                 # Коммитим каждые 100 записей для производительности
                 if migrated_count % 100 == 0:
-                    await session.commit()
+                    await session_write.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
-                    await session.begin()
 
             # Коммитим оставшиеся записи
-            await session.commit()
+            await session_write.commit()
 
         logger.info(
             f'Миграция order book завершена. Всего мигрировано: {migrated_count} записей'
@@ -263,10 +269,11 @@ class DatabaseMigrator:
             return
 
         migrated_count = 0
-        session: AsyncSession
+        session_read: AsyncSession
+        session_write: AsyncSession
 
-        async with self.session_factory() as session:
-            result = await session.stream(
+        async with self.session_factory() as session_read, self.session_factory() as session_write:
+            result = await session_read.stream(
                 select(
                     OKXCandleData15m,
                 ).execution_options(
@@ -292,7 +299,10 @@ class DatabaseMigrator:
                     volume_quote_currency=candle.volume_quote_currency,
                 )
 
-                session.add(new_candle)
+                session_write.add(
+                    new_candle,
+                )
+
                 migrated_count += 1
 
                 logger.info(
@@ -303,12 +313,11 @@ class DatabaseMigrator:
 
                 # Коммитим каждые 100 записей для производительности
                 if migrated_count % 100 == 0:
-                    await session.commit()
+                    await session_write.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
-                    await session.begin()
 
             # Коммитим оставшиеся записи
-            await session.commit()
+            await session_write.commit()
 
         logger.info(
             f'Миграция свечей 15m завершена. Всего мигрировано: {migrated_count} записей'
@@ -327,10 +336,11 @@ class DatabaseMigrator:
             return
 
         migrated_count = 0
-        session: AsyncSession
+        session_read: AsyncSession
+        session_write: AsyncSession
 
-        async with self.session_factory() as session:
-            result = await session.stream(
+        async with self.session_factory() as session_read, self.session_factory() as session_write:
+            result = await session_read.stream(
                 select(
                     OKXCandleData1H,
                 ).execution_options(
@@ -356,7 +366,10 @@ class DatabaseMigrator:
                     volume_quote_currency=candle.volume_quote_currency,
                 )
 
-                session.add(new_candle)
+                session_write.add(
+                    new_candle,
+                )
+
                 migrated_count += 1
 
                 logger.info(
@@ -367,12 +380,11 @@ class DatabaseMigrator:
 
                 # Коммитим каждые 100 записей для производительности
                 if migrated_count % 100 == 0:
-                    await session.commit()
+                    await session_write.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
-                    await session.begin()
 
             # Коммитим оставшиеся записи
-            await session.commit()
+            await session_write.commit()
 
         logger.info(
             f'Миграция свечей 1H завершена. Всего мигрировано: {migrated_count} записей'
