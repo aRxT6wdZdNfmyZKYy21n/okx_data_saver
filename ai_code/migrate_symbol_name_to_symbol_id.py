@@ -129,7 +129,13 @@ class DatabaseMigrator:
 
         migrated_count = 0
         async with self.session_factory() as session:
-            async for trade in session.stream(select(OKXTradeData)).scalars():
+            result = await session.stream(
+                select(
+                    OKXTradeData,
+                ),
+            )
+
+            async for trade in result.scalars():
                 # Находим соответствующий symbol_id
                 symbol_id = SymbolConstants.IdByName[trade.symbol_name]
 
@@ -177,7 +183,13 @@ class DatabaseMigrator:
 
         migrated_count = 0
         async with self.session_factory() as session:
-            async for order_book in session.stream(select(OKXOrderBookData)).scalars():
+            result = await session.stream(
+                select(
+                    OKXOrderBookData,
+                ),
+            )
+
+            async for order_book in result.scalars():
                 action_id = OKXConstants.OrderBookActionIdByName[order_book.action]
 
                 # Находим соответствующий symbol_id
@@ -226,7 +238,13 @@ class DatabaseMigrator:
 
         migrated_count = 0
         async with self.session_factory() as session:
-            async for candle in session.stream(select(OKXCandleData15m)).scalars():
+            result = await session.stream(
+                select(
+                    OKXCandleData15m,
+                ),
+            )
+
+            async for candle in result.scalars():
                 # Находим соответствующий symbol_id
                 symbol_id = SymbolConstants.IdByName[candle.symbol_name]
 
@@ -279,7 +297,13 @@ class DatabaseMigrator:
 
         migrated_count = 0
         async with self.session_factory() as session:
-            async for candle in session.stream(select(OKXCandleData1H)).scalars():
+            result = await session.stream(
+                select(
+                    OKXCandleData1H,
+                ),
+            )
+
+            async for candle in result.scalars():
                 # Находим соответствующий symbol_id
                 symbol_id = SymbolConstants.IdByName[candle.symbol_name]
 
