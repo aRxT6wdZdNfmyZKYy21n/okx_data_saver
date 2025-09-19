@@ -52,6 +52,10 @@ logger = logging.getLogger(
     __name__,
 )
 
+_DEBUG_SMOOTHING_LEVEL = None
+# _DEBUG_SMOOTHING_LEVEL = 'Smoothed (2)'
+
+
 
 class FinPlotChartProcessor(object):
     __slots__ = (
@@ -262,7 +266,7 @@ class FinPlotChartProcessor(object):
 
             await asyncio.sleep(
                 # 1.0  # s
-                15.0  # s
+                60.0  # s
             )
 
     async def update_current_rsi_interval_name(
@@ -602,8 +606,8 @@ class FinPlotChartProcessor(object):
                         OKXTradeData.trade_id.desc(),
                     )
                     .limit(
-                        # 1_000_000,
-                        500_000,
+                        1_000_000,
+                        # 500_000,
                         # 50_000,
                         # 10_000
                         # 1_000
@@ -833,6 +837,68 @@ class FinPlotChartProcessor(object):
                 #         'quantity': 1.0,
                 #         'timestamp_ms': 1758136533933,
                 #         'trade_id': 15,
+                #     },
+                # ],
+                # [
+                #     {
+                #         'price': 115430.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533919,
+                #         'trade_id': 1,
+                #     },
+                #     {
+                #         'price': 116150.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533920,
+                #         'trade_id': 2,
+                #     },
+                #     {
+                #         'price': 115800.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533921,
+                #         'trade_id': 3,
+                #     },
+                #     {
+                #         'price': 116300.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533922,
+                #         'trade_id': 4,
+                #     },
+                #     {
+                #         'price': 115000.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533923,
+                #         'trade_id': 5,
+                #     },
+                #     {
+                #         'price': 115600.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533924,
+                #         'trade_id': 6,
+                #     },
+                #     {
+                #         'price': 115050.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533925,
+                #         'trade_id': 7,
+                #     },
+                #     {
+                #         'price': 115700.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533926,
+                #         'trade_id': 8,
+                #     },
+                #     {
+                #         'price': 115500.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533927,
+                #         'trade_id': 9,
+                #     },
+                #     {
+                #         'price': 115735.0,
+                #         'quantity': 1.0,
+                #         'timestamp_ms': 1758136533928,
+                #         'trade_id': 10,
                 #     },
                 # ],
                 columns=[
@@ -1363,7 +1429,10 @@ WHERE symbol_name IS NOT NULL;
                                 new_end_price,
                             )
 
-                            if old_trading_direction == new_trading_direction:
+                            if (
+                                    old_trading_direction == new_trading_direction or
+                                    new_trading_direction == TradingDirection.Cross
+                            ):
                                 line_raw_data.update(
                                     {
                                         'quantity': (
@@ -1415,6 +1484,9 @@ WHERE symbol_name IS NOT NULL;
                 line_raw_data_1: dict[str, typing.Any] | None = None
                 line_raw_data_list_1: list[dict[str, typing.Any]] = []
 
+                first_line_data: typing.NamedTuple | None = None
+                second_line_data: typing.NamedTuple | None = None
+
                 # for line_data in previous_line_dataframe.loc[
                 #     previous_line_dataframe.index >= min_start_trade_id
                 # ].itertuples():
@@ -1445,22 +1517,34 @@ WHERE symbol_name IS NOT NULL;
                             'volume': line_data.volume,
                         }
 
-                        if trading_direction == TradingDirection.Cross:
-                            # Flush
-
-                            if smoothing_level == 'Smoothed (3)':
-                                print(
-                                    'Flushing 1',
-                                    line_raw_data_1,
-                                )
-
-                            line_raw_data_list_1.append(
-                                line_raw_data_1,
+                        if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                            print(
+                                'Line raw data init', line_raw_data_1
                             )
 
-                            line_raw_data_1 = None
+                        # if trading_direction == TradingDirection.Cross:
+                        #     # Flush
+                        #
+                        #     if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                        #         print(
+                        #             'Flushing 1',
+                        #             line_raw_data_1,
+                        #         )
+                        #
+                        #     line_raw_data_list_1.append(
+                        #         line_raw_data_1,
+                        #     )
+                        #
+                        #     line_raw_data_1 = None
 
                         continue
+
+                    if first_line_data is None:
+                        first_line_data = line_data
+
+                        continue
+                    elif second_line_data is None:
+                        second_line_data = line_data
 
                     high_price: float = line_raw_data_1['high_price']
                     low_price: float = line_raw_data_1['low_price']
@@ -1469,123 +1553,284 @@ WHERE symbol_name IS NOT NULL;
                         'trading_direction'
                     ]
 
-                    if line_data.trading_direction == trading_direction:
-                        # Check high price update direction
-
-                        new_high_price = line_data.end_price
-
-                        high_price_direction = TradingUtils.get_direction(
-                            high_price,
-                            new_high_price,
+                    if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                        print(
+                            'Line data:', line_data
                         )
 
-                        if (
-                                high_price_direction != trading_direction and
-                                high_price_direction != TradingDirection.Cross
-                        ):
-                            # Flush
+                    assert first_line_data.trading_direction != trading_direction, (
+                        first_line_data,
+                        line_raw_data_1,
+                        second_line_data,
+                        smoothing_level,
+                    )
 
-                            line_raw_data_list_1.append(
-                                line_raw_data_1,
-                            )
+                    if second_line_data.trading_direction != trading_direction:
+                        # Flush
 
-                            end_price: float = line_data.end_price
-                            high_price = end_price
-                            start_price: float = line_data.start_price
-                            low_price: float = start_price
+                        if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                            print('Flushing 2', line_raw_data_1)
 
-                            trading_direction: TradingDirection = line_data.trading_direction
-
-                            line_raw_data_1 = {
-                                'end_timestamp': line_data.end_timestamp,
-                                'end_trade_id': line_data.end_trade_id,
-                                'end_price': end_price,
-                                'high_price': high_price,
-                                'low_price': low_price,
-                                'start_timestamp': line_data.start_timestamp,
-                                'start_trade_id': line_data.Index,
-                                'start_price': start_price,
-                                'quantity': line_data.quantity,
-                                'trading_direction': trading_direction,
-                                'volume': line_data.volume,
-                            }
-
-                            continue
-
-                        # Update high price
-
-                        line_raw_data_1.update({
-                            'high_price': line_data.end_price,
-                        })
-                    else:
-                        # Check low price update direction
-
-                        new_low_price = line_data.end_price
-
-                        low_price_direction = TradingUtils.get_direction(
-                            low_price,
-                            new_low_price,
+                        line_raw_data_list_1.append(
+                            line_raw_data_1,
                         )
 
-                        if (
-                                low_price_direction != trading_direction and
-                                low_price_direction != TradingDirection.Cross
-                        ):
-                            # Flush
+                        end_price: float = first_line_data.end_price
+                        high_price = end_price
+                        start_price: float = first_line_data.start_price
+                        low_price: float = start_price
 
-                            line_raw_data_list_1.append(
-                                line_raw_data_1,
-                            )
+                        trading_direction: TradingDirection = first_line_data.trading_direction
 
-                            end_price: float = line_data.end_price
-                            high_price = end_price
-                            start_price: float = line_data.start_price
-                            low_price: float = start_price
+                        line_raw_data_1 = {
+                            'end_timestamp': first_line_data.end_timestamp,
+                            'end_trade_id': first_line_data.end_trade_id,
+                            'end_price': end_price,
+                            'high_price': high_price,
+                            'low_price': low_price,
+                            'start_timestamp': first_line_data.start_timestamp,
+                            'start_trade_id': first_line_data.Index,
+                            'start_price': start_price,
+                            'quantity': first_line_data.quantity,
+                            'trading_direction': trading_direction,
+                            'volume': first_line_data.volume,
+                        }
 
-                            trading_direction: TradingDirection = line_data.trading_direction
+                        # if trading_direction == TradingDirection.Cross:
+                        #     # Flush
+                        #
+                        #     if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                        #         print(
+                        #             'Flushing 3',
+                        #             line_raw_data_1,
+                        #         )
+                        #
+                        #     line_raw_data_list_1.append(
+                        #         line_raw_data_1,
+                        #     )
+                        #
+                        #     line_raw_data_1 = None
 
-                            line_raw_data_1 = {
-                                'end_timestamp': line_data.end_timestamp,
-                                'end_trade_id': line_data.end_trade_id,
-                                'end_price': end_price,
-                                'high_price': high_price,
-                                'low_price': low_price,
-                                'start_timestamp': line_data.start_timestamp,
-                                'start_trade_id': line_data.Index,
-                                'start_price': start_price,
-                                'quantity': line_data.quantity,
-                                'trading_direction': trading_direction,
-                                'volume': line_data.volume,
-                            }
+                        first_line_data = second_line_data
+                        second_line_data = None
 
-                            continue
+                        continue
 
-                        # Update low price && combine line data
+                    # Check low price update direction
 
-                        line_raw_data_1.update({
-                            'low_price': new_low_price,
-                        })
+                    new_low_price = first_line_data.end_price
+
+                    low_price_direction = TradingUtils.get_direction(
+                        low_price,
+                        new_low_price,
+                    )
+
+                    if (
+                            low_price_direction != trading_direction and
+                            low_price_direction != TradingDirection.Cross
+                    ):
+                        # Flush
+
+                        if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                            print('Flushing 4', line_raw_data_1)
+
+                        line_raw_data_list_1.append(
+                            line_raw_data_1,
+                        )
+
+                        end_price: float = first_line_data.end_price
+                        high_price = end_price
+                        start_price: float = first_line_data.start_price
+                        low_price: float = start_price
+
+                        trading_direction: TradingDirection = first_line_data.trading_direction
+
+                        line_raw_data_1 = {
+                            'end_timestamp': first_line_data.end_timestamp,
+                            'end_trade_id': first_line_data.end_trade_id,
+                            'end_price': end_price,
+                            'high_price': high_price,
+                            'low_price': low_price,
+                            'start_timestamp': first_line_data.start_timestamp,
+                            'start_trade_id': first_line_data.Index,
+                            'start_price': start_price,
+                            'quantity': first_line_data.quantity,
+                            'trading_direction': trading_direction,
+                            'volume': first_line_data.volume,
+                        }
+
+                        # if trading_direction == TradingDirection.Cross:
+                        #     # Flush
+                        #
+                        #     if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                        #         print(
+                        #             'Flushing 5',
+                        #             line_raw_data_1,
+                        #         )
+                        #
+                        #     line_raw_data_list_1.append(
+                        #         line_raw_data_1,
+                        #     )
+                        #
+                        #     line_raw_data_1 = None
+
+                        first_line_data = second_line_data
+                        second_line_data = None
+
+                        continue
+
+                    # Check high price update direction
+
+                    new_high_price = second_line_data.end_price
+
+                    high_price_direction = TradingUtils.get_direction(
+                        high_price,
+                        new_high_price,
+                    )
+
+                    if (
+                            high_price_direction != trading_direction and
+                            high_price_direction != TradingDirection.Cross
+                    ):
+                        # Flush
+
+                        if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                            print('Flushing 6', line_raw_data_1)
+
+                        line_raw_data_list_1.append(
+                            line_raw_data_1,
+                        )
+
+                        end_price: float = first_line_data.end_price
+                        high_price = end_price
+                        start_price: float = first_line_data.start_price
+                        low_price: float = start_price
+
+                        trading_direction: TradingDirection = first_line_data.trading_direction
+
+                        line_raw_data_1 = {
+                            'end_timestamp': first_line_data.end_timestamp,
+                            'end_trade_id': first_line_data.end_trade_id,
+                            'end_price': end_price,
+                            'high_price': high_price,
+                            'low_price': low_price,
+                            'start_timestamp': first_line_data.start_timestamp,
+                            'start_trade_id': first_line_data.Index,
+                            'start_price': start_price,
+                            'quantity': first_line_data.quantity,
+                            'trading_direction': trading_direction,
+                            'volume': first_line_data.volume,
+                        }
+
+                        # if trading_direction == TradingDirection.Cross:
+                        #     # Flush
+                        #
+                        #     if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                        #         print(
+                        #             'Flushing 7',
+                        #             line_raw_data_1,
+                        #         )
+                        #
+                        #     line_raw_data_list_1.append(
+                        #         line_raw_data_1,
+                        #     )
+                        #
+                        #     line_raw_data_1 = None
+
+                        first_line_data = second_line_data
+                        second_line_data = None
+
+                        continue
+
+                    # Update low price
+
+                    if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                        print(
+                            'Update low price to', new_low_price
+                        )
+
+                    line_raw_data_1.update({
+                        'low_price': new_low_price,
+                    })
 
                     # Combine line data
 
                     line_raw_data_1.update({
-                        'end_timestamp': line_data.end_timestamp,
-                        'end_trade_id': line_data.end_trade_id,
-                        'end_price': line_data.end_price,
-                        'quantity': line_raw_data_1['quantity'] + line_data.quantity,
-                        'volume': line_raw_data_1['quantity'] + line_data.volume,
+                        'end_timestamp': first_line_data.end_timestamp,
+                        'end_trade_id': first_line_data.end_trade_id,
+                        'end_price': first_line_data.end_price,
+                        'quantity': line_raw_data_1['quantity'] + first_line_data.quantity,
+                        'volume': line_raw_data_1['quantity'] + first_line_data.volume,
                     })
+
+                    # Update high price
+
+                    if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                        print(
+                            'Update high price to', new_high_price
+                        )
+
+                    line_raw_data_1.update({
+                        'high_price': new_high_price,
+                    })
+
+                    # Combine line data
+
+                    line_raw_data_1.update({
+                        'end_timestamp': second_line_data.end_timestamp,
+                        'end_trade_id': second_line_data.end_trade_id,
+                        'end_price': second_line_data.end_price,
+                        'quantity': line_raw_data_1['quantity'] + second_line_data.quantity,
+                        'volume': line_raw_data_1['quantity'] + second_line_data.volume,
+                    })
+
+                    first_line_data = None
+                    second_line_data = None
 
                 if line_raw_data_1 is not None:
                     # Flush
 
-                    if smoothing_level == 'Smoothed (3)':
-                        print('Flushing 4', line_raw_data_1)
+                    if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                        print('Flushing 8', line_raw_data_1)
 
                     line_raw_data_list_1.append(
                         line_raw_data_1,
                     )
 
+                    line_raw_data_1 = None  # noqa
+
+                if first_line_data is not None:
+                    end_price: float = first_line_data.end_price
+                    high_price = end_price
+                    start_price: float = first_line_data.start_price
+                    low_price: float = start_price
+
+                    trading_direction: TradingDirection = first_line_data.trading_direction
+
+                    line_raw_data_1 = {
+                        'end_timestamp': first_line_data.end_timestamp,
+                        'end_trade_id': first_line_data.end_trade_id,
+                        'end_price': end_price,
+                        'high_price': high_price,
+                        'low_price': low_price,
+                        'start_timestamp': first_line_data.start_timestamp,
+                        'start_trade_id': first_line_data.Index,
+                        'start_price': start_price,
+                        'quantity': first_line_data.quantity,
+                        'trading_direction': trading_direction,
+                        'volume': first_line_data.volume,
+                    }
+
+                    # Flush
+
+                    if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
+                        print('Flushing 9', line_raw_data_1)
+
+                    line_raw_data_list_1.append(
+                        line_raw_data_1,
+                    )
+
+                    first_line_data = None  # noqa
                     line_raw_data_1 = None  # noqa
 
                 for line_raw_data_1 in line_raw_data_list_1:
@@ -1747,21 +1992,6 @@ WHERE symbol_name IS NOT NULL;
                     )
                 else:
                     smoothed_dataframe = new_smoothed_dataframe
-
-                import numpy
-
-                try:
-                    numpy.isfinite(new_smoothed_dataframe.price.array)
-                except TypeError:
-                    print(
-                        777777, line_raw_data_list
-                    )
-                    print(
-                        888888,
-                        trades_smoothed_raw_data_list,
-                        smoothing_level,
-                    )
-                    raise
 
                 trades_smoothed_dataframe_by_level_map[smoothing_level] = (
                     smoothed_dataframe
