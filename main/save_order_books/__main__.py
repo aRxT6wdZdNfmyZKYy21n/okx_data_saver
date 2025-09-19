@@ -2,6 +2,9 @@ import asyncio
 import logging
 import traceback
 
+from constants.okx import OKXConstants
+from constants.symbol import SymbolConstants
+
 try:
     import uvloop
 except ImportError:
@@ -41,7 +44,7 @@ async def init_db_models():
 
 
 async def on_new_order_book_data(
-    action: str,
+    action_name: str,
     asks: list[list[str, str, str, str]],
     bids: list[list[str, str, str, str]],
     symbol_name: str,
@@ -49,7 +52,7 @@ async def on_new_order_book_data(
 ) -> None:
     logger.info(
         'Got new order book data'
-        f': action {action!r}, asks {len(asks)}, bids {len(bids)}'
+        f': action {action_name!r}, asks {len(asks)}, bids {len(bids)}'
         f', symbol name {symbol_name!r}, timestamp (ms) {timestamp_ms}'
     )
 
@@ -57,7 +60,7 @@ async def on_new_order_book_data(
 
     postgres_db_task_queue.put_nowait(
         save_order_book_data(
-            action,
+            action_name,
             asks,
             bids,
             symbol_name,
@@ -67,23 +70,25 @@ async def on_new_order_book_data(
 
 
 async def save_order_book_data(
-    action: str,
+    action_name: str,
     asks: list[list[str, str, str, str]],
     bids: list[list[str, str, str, str]],
     symbol_name: str,
     timestamp_ms: int,
 ) -> None:
+    action_id = OKXConstants.OrderBookActionIdByName[action_name]
     postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
+    symbol_id = SymbolConstants.IdByName[symbol_name]
 
     async with postgres_db_session_maker() as session:
         async with session.begin():
             session.add(
-                schemas.OKXOrderBookData(
+                schemas.OKXOrderBookData2(
                     # Primary key fields
-                    symbol_name=symbol_name,
+                    symbol_id=symbol_id,
                     timestamp_ms=timestamp_ms,
                     # Attribute fields
-                    action=action,
+                    action_id=action_id,
                     asks=asks,
                     bids=bids,
                 ),

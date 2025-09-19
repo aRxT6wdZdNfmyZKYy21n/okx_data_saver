@@ -13,6 +13,14 @@ from sqlalchemy.orm import (
     Mapped,
     # mapped_column,
 )
+from sqlalchemy.types import (
+    Enum,
+)
+
+from enumerations import (
+    OKXOrderBookActionId,
+    SymbolId,
+)
 
 
 class Base(AsyncAttrs, DeclarativeBase):
@@ -37,6 +45,38 @@ class OKXOrderBookData(Base):
     # Attribute fields
 
     action: Mapped[str] = Column(Text)
+
+    asks: list[list[str, str, str, str]] = Column(JSON)
+    bids: list[list[str, str, str, str]] = Column(JSON)
+
+
+class OKXOrderBookData2(Base):
+    __tablename__ = 'okx_order_book_data_2'
+
+    __table_args__ = (
+        PrimaryKeyConstraint(  # Explicitly define composite primary key
+            'symbol_id',
+            'timestamp_ms',
+        ),
+    )
+
+    # Primary key fields
+
+    symbol_id: Mapped[SymbolId] = Column(
+        Enum(
+            SymbolId,
+        ),
+    )
+
+    timestamp_ms: Mapped[int] = Column(BigInteger)
+
+    # Attribute fields
+
+    action_id: OKXOrderBookActionId = Column(
+        Enum(
+            OKXOrderBookActionId,
+        ),
+    )
 
     asks: list[list[str, str, str, str]] = Column(JSON)
     bids: list[list[str, str, str, str]] = Column(JSON)

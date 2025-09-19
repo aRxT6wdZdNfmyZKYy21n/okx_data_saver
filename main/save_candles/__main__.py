@@ -7,6 +7,8 @@ from decimal import Decimal
 import httpx
 import orjson
 
+from constants.symbol import SymbolConstants
+
 try:
     import uvloop
 except ImportError:
@@ -80,6 +82,8 @@ async def save_candles(
     api_session: httpx.AsyncClient,
 ) -> None:
     for symbol_name in _SYMBOL_NAMES:
+        symbol_id = SymbolConstants.IdByName[symbol_name]
+
         for interval_name, interval_duration_ms in (
             (
                 '15m',
@@ -104,10 +108,10 @@ async def save_candles(
             postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
 
             db_schema: (
-                type[schemas.OKXCandleData15m] | type[schemas.OKXCandleData1H]
+                type[schemas.OKXCandleData15m2] | type[schemas.OKXCandleData1H2]
             ) = getattr(
                 schemas,
-                f'OKXCandleData{interval_name}',
+                f'OKXCandleData{interval_name}2',
             )
 
             async with postgres_db_session_maker() as session:
@@ -116,7 +120,7 @@ async def save_candles(
                         db_schema,
                     )
                     .where(
-                        db_schema.symbol_name == symbol_name,
+                        db_schema.symbol_id == symbol_id,
                     )
                     .order_by(
                         db_schema.start_timestamp_ms.desc(),
@@ -254,7 +258,9 @@ async def save_candles(
 
                 candle_raw_data = dict(
                     # Primary key fields
-                    symbol_name=symbol_name,
+                    symbol_id=int(
+                        symbol_id.value,
+                    ),
                     start_timestamp_ms=candle_start_timestamp_ms,
                     # Attribute fields
                     is_closed=is_candle_closed,
@@ -297,7 +303,7 @@ async def save_candles(
                         # Remove primary key
 
                         candle_raw_data_to_update.pop(
-                            'symbol_name',
+                            'symbol_id',
                         )
 
                         start_timestamp_ms: int = candle_raw_data_to_update.pop(
@@ -313,7 +319,7 @@ async def save_candles(
                             )
                             .where(
                                 and_(
-                                    db_schema.symbol_name == symbol_name,
+                                    db_schema.symbol_id == symbol_id,
                                     (
                                         db_schema.start_timestamp_ms
                                         == start_timestamp_ms

@@ -10,6 +10,8 @@ from decimal import (
 import httpx
 import orjson
 
+from constants.symbol import SymbolConstants
+
 try:
     import uvloop
 except ImportError:
@@ -83,11 +85,13 @@ async def save_trades(
     api_session: httpx.AsyncClient,
 ) -> None:
     for symbol_name in _SYMBOL_NAMES:
+        symbol_id = SymbolConstants.IdByName[symbol_name]
+
         # Get last trade data
 
         postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
 
-        db_schema = schemas.OKXTradeData
+        db_schema = schemas.OKXTradeData2
 
         async with postgres_db_session_maker() as session:
             result = await session.execute(
@@ -95,7 +99,7 @@ async def save_trades(
                     db_schema,
                 )
                 .where(
-                    db_schema.symbol_name == symbol_name,
+                    db_schema.symbol_id == symbol_id,
                 )
                 .order_by(
                     db_schema.trade_id.desc(),
@@ -218,7 +222,9 @@ async def save_trades(
 
             trade_raw_data = dict(
                 # Primary key fields
-                symbol_name=symbol_name,
+                symbol_id=int(
+                    symbol_id.value,
+                ),
                 trade_id=trade_id,
                 # Attribute fields
                 is_buy=is_buy,
@@ -248,7 +254,7 @@ async def save_trades(
                     # Remove primary key
 
                     trade_raw_data_to_update.pop(
-                        'symbol_name',
+                        'symbol_id',
                     )
 
                     trade_id: int = trade_raw_data_to_update.pop(
@@ -264,7 +270,7 @@ async def save_trades(
                         )
                         .where(
                             and_(
-                                db_schema.symbol_name == symbol_name,
+                                db_schema.symbol_id == symbol_id,
                                 db_schema.trade_id == trade_id,
                             ),
                         ),

@@ -480,7 +480,7 @@ class OKXWebSocketConnectionManager(object):
 
                 continue
 
-            action: str = message_raw_data.pop(
+            action_name: str = message_raw_data.pop(
                 'action',
             )
 
@@ -576,9 +576,9 @@ class OKXWebSocketConnectionManager(object):
                 server_timestamp_ms_raw,
             )
 
-            if action == 'snapshot':
+            if action_name == 'snapshot':
                 assert previous_sequence_id == -1, (previous_sequence_id,)
-            elif action == 'update':
+            elif action_name == 'update':
                 assert old_sequence_id is not None, None
 
                 if previous_sequence_id != old_sequence_id:
@@ -594,7 +594,7 @@ class OKXWebSocketConnectionManager(object):
                     )
             else:
                 raise NotImplementedError(
-                    action,
+                    action_name,
                 )
 
             order_book_sequence_id_by_symbol_name_map[symbol_name] = new_sequence_id
@@ -605,7 +605,7 @@ class OKXWebSocketConnectionManager(object):
             )
 
             on_new_order_book_data_event(
-                action=action,
+                action_name=action_name,
                 asks=asks,
                 bids=bids,
                 symbol_name=symbol_name,

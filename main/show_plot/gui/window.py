@@ -432,8 +432,7 @@ class FinPlotChartWindow(QMainWindow):
             )
 
         self.__price_plot_data_item = price_plot.plot(
-            name='Price',
-            **price_plot_data_item_kwargs
+            name='Price', **price_plot_data_item_kwargs
         )
 
         self.__price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map: defaultdict[
