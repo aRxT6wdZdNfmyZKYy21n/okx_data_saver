@@ -262,7 +262,7 @@ class FinPlotChartProcessor(object):
 
             await asyncio.sleep(
                 # 1.0  # s
-                60.0  # s
+                15.0  # s
             )
 
     async def update_current_rsi_interval_name(
@@ -1263,6 +1263,8 @@ WHERE symbol_name IS NOT NULL;
         self.__test_series = test_series
 
     def __update_trades_smoothed_dataframe_by_level_map(self) -> None:
+        line_dataframe_by_level_map = self.__line_dataframe_by_level_map
+
         trades_dataframe = self.__trades_dataframe
 
         assert trades_dataframe is not None, None
@@ -1274,21 +1276,6 @@ WHERE symbol_name IS NOT NULL;
         previous_line_dataframe: DataFrame | None = None
 
         for smoothing_level in PlotConstants.TradesSmoothingLevels:
-            old_smoothed_dataframe = trades_smoothed_dataframe_by_level_map.get(
-                smoothing_level,
-            )
-
-            # min_trade_id: int
-            #
-            # if old_smoothed_dataframe is not None:
-            #     min_pandas_trade_id = old_smoothed_dataframe.index.max()
-            #
-            #     min_trade_id = int(
-            #         min_pandas_trade_id,
-            #     )
-            # else:
-            #     min_trade_id = 0
-
             is_raw_level = smoothing_level == 'Raw (0)'
 
             if is_raw_level:
@@ -1296,11 +1283,31 @@ WHERE symbol_name IS NOT NULL;
 
             is_first_level = smoothing_level == 'Smoothed (1)'
 
+            line_dataframe: DataFrame
             line_raw_data: dict[str, typing.Any] | None = None
             line_raw_data_list: list[dict[str, typing.Any]] = []
 
+            old_line_dataframe: DataFrame | None
+
             if is_first_level:
-                for trade_data in trades_dataframe.itertuples():
+                old_line_dataframe = line_dataframe_by_level_map.get(
+                    smoothing_level,
+                )
+
+                min_start_trade_id: int
+
+                if old_line_dataframe is not None:
+                    min_pandas_start_trade_id = old_line_dataframe.index.max()
+
+                    min_start_trade_id = int(
+                        min_pandas_start_trade_id,
+                    )
+                else:
+                    min_start_trade_id = 0
+
+                for trade_data in trades_dataframe.loc[
+                    trades_dataframe.index >= min_start_trade_id
+                ].itertuples():
                     trade_id: int = trade_data.Index
 
                     # if trade_id < min_trade_id:
@@ -1401,11 +1408,16 @@ WHERE symbol_name IS NOT NULL;
 
                         line_raw_data = None  # noqa
             else:
+                old_line_dataframe = None
+
                 assert previous_line_dataframe is not None, None
 
                 line_raw_data_1: dict[str, typing.Any] | None = None
                 line_raw_data_list_1: list[dict[str, typing.Any]] = []
 
+                # for line_data in previous_line_dataframe.loc[
+                #     previous_line_dataframe.index >= min_start_trade_id
+                # ].itertuples():
                 for line_data in previous_line_dataframe.itertuples():
                     high_price: float
                     trading_direction: TradingDirection
@@ -1468,8 +1480,8 @@ WHERE symbol_name IS NOT NULL;
                         )
 
                         if (
-                                high_price_direction == TradingDirection.Cross or
-                                high_price_direction != trading_direction
+                                high_price_direction != trading_direction and
+                                high_price_direction != TradingDirection.Cross
                         ):
                             # Flush
 
@@ -1516,8 +1528,8 @@ WHERE symbol_name IS NOT NULL;
                         )
 
                         if (
-                                low_price_direction == TradingDirection.Cross or
-                                low_price_direction != trading_direction
+                                low_price_direction != trading_direction and
+                                low_price_direction != TradingDirection.Cross
                         ):
                             # Flush
 
@@ -1609,42 +1621,77 @@ WHERE symbol_name IS NOT NULL;
                         line_raw_data
                     )
 
-                    line_raw_data = None
+                    line_raw_data = None  # noqa
 
-            new_line_dataframe = DataFrame.from_records(
-                line_raw_data_list,
-                columns=[
-                    'start_timestamp',
+            if line_raw_data_list:
+                new_line_dataframe = DataFrame.from_records(
+                    line_raw_data_list,
+                    columns=[
+                        'start_timestamp',
+                        'start_trade_id',
+                        'start_price',
+                        'end_timestamp',
+                        'end_trade_id',
+                        'end_price',
+                        'quantity',
+                        'trading_direction',
+                        'volume',
+                    ],
+                )
+
+                assert new_line_dataframe.size, None
+
+                new_line_dataframe.set_index(
                     'start_trade_id',
-                    'start_price',
-                    'end_timestamp',
-                    'end_trade_id',
-                    'end_price',
-                    'quantity',
-                    'trading_direction',
-                    'volume',
-                ],
+                    inplace=True,
+                )
+
+                new_line_dataframe.sort_values(
+                    'start_trade_id',
+                    inplace=True,
+                )
+
+                if old_line_dataframe is not None:
+                    old_line_dataframe.update(
+                        new_line_dataframe,
+                    )
+
+                    line_dataframe = old_line_dataframe.combine_first(
+                        new_line_dataframe,
+                    )
+                else:
+                    line_dataframe = new_line_dataframe
+
+                line_dataframe_by_level_map[smoothing_level] = line_dataframe
+            else:
+                line_dataframe = line_dataframe_by_level_map[smoothing_level]
+
+            previous_line_dataframe = line_dataframe
+
+            # Smoothed dataframe updating
+
+            old_smoothed_dataframe = trades_smoothed_dataframe_by_level_map.get(
+                smoothing_level,
             )
 
-            new_line_dataframe.set_index(
-                'start_trade_id',
-                inplace=True,
-            )
-
-            new_line_dataframe.sort_values(
-                'start_trade_id',
-                inplace=True,
-            )
-
-            self.__line_dataframe_by_level_map[smoothing_level] = new_line_dataframe
-
-            previous_line_dataframe = new_line_dataframe
+            # min_trade_id: int
+            #
+            # if old_line_dataframe is not None:
+            #     min_pandas_trade_id = old_smoothed_dataframe.index.max()
+            #
+            #     min_trade_id = int(
+            #         min_pandas_trade_id,
+            #     )
+            # else:
+            #     min_trade_id = 0
 
             trades_smoothed_raw_data_list: list[dict[str, typing.Any]] = []
 
             last_line_data: typing.NamedTuple | None = None
 
-            for line_data in new_line_dataframe.itertuples():
+            for line_data in line_dataframe.loc[
+                line_dataframe.index >= min_start_trade_id  # min_trade_id
+            ].itertuples():  # TODO
                 trades_smoothed_raw_data_list.append(
                     {
                         'price': line_data.start_price,
@@ -1664,43 +1711,61 @@ WHERE symbol_name IS NOT NULL;
                     },
                 )
 
-            new_smoothed_dataframe = DataFrame.from_records(
-                trades_smoothed_raw_data_list,
-                columns=[
-                    'price',
-                    # 'quantity',
-                    'timestamp',
+            if trades_smoothed_raw_data_list:
+                new_smoothed_dataframe = DataFrame.from_records(
+                    trades_smoothed_raw_data_list,
+                    columns=[
+                        'price',
+                        # 'quantity',
+                        'timestamp',
+                        'trade_id',
+                        # 'volume',
+                    ],
+                )
+
+                assert new_smoothed_dataframe.size, None
+
+                new_smoothed_dataframe.set_index(
                     'trade_id',
-                    # 'volume',
-                ],
-            )
+                    inplace=True,
+                )
 
-            # assert new_smoothed_dataframe.size, None  # TODO
+                new_smoothed_dataframe.sort_values(
+                    'trade_id',
+                    inplace=True,
+                )
 
-            new_smoothed_dataframe.set_index(
-                'trade_id',
-                inplace=True,
-            )
+                smoothed_dataframe: DataFrame
 
-            new_smoothed_dataframe.sort_values(
-                'trade_id',
-                inplace=True,
-            )
+                if old_smoothed_dataframe is not None:
+                    old_smoothed_dataframe.update(
+                        new_smoothed_dataframe,
+                    )
 
-            # if trades_dataframe is not None:
-            #     trades_dataframe.update(
-            #         new_trades_dataframe,
-            #     )
-            #
-            #     trades_dataframe = trades_dataframe.combine_first(
-            #         new_trades_dataframe,
-            #     )
-            # else:
-            #     trades_dataframe = new_trades_smoothed_dataframe
+                    smoothed_dataframe = old_smoothed_dataframe.combine_first(
+                        new_smoothed_dataframe,
+                    )
+                else:
+                    smoothed_dataframe = new_smoothed_dataframe
 
-            trades_smoothed_dataframe_by_level_map[smoothing_level] = (
-                new_smoothed_dataframe
-            )
+                import numpy
+
+                try:
+                    numpy.isfinite(new_smoothed_dataframe.price.array)
+                except TypeError:
+                    print(
+                        777777, line_raw_data_list
+                    )
+                    print(
+                        888888,
+                        trades_smoothed_raw_data_list,
+                        smoothing_level,
+                    )
+                    raise
+
+                trades_smoothed_dataframe_by_level_map[smoothing_level] = (
+                    smoothed_dataframe
+                )
 
     def __update_velocity_series(
         self,

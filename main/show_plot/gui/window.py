@@ -63,6 +63,7 @@ if typing.TYPE_CHECKING:
     )
 
 
+_IS_NEED_DRAW_PRICE_PLOT_WITH_POINTS = False
 _IS_NEED_SHOW_BOLLINGER_BANDS = False
 _IS_NEED_SHOW_RSI = False
 _IS_NEED_SHOW_VELOCITY = False
@@ -411,19 +412,28 @@ class FinPlotChartWindow(QMainWindow):
 
         self.__price_plot = price_plot
 
+        price_plot_data_item_kwargs = {}
+
+        if _IS_NEED_DRAW_PRICE_PLOT_WITH_POINTS:
+            price_plot_data_item_kwargs.update(
+                dict(
+                    pen=(
+                        200,
+                        200,
+                        200,
+                    ),
+                    symbolBrush=(
+                        127,
+                        0,
+                        0,
+                    ),
+                    symbolPen='w',
+                ),
+            )
+
         self.__price_plot_data_item = price_plot.plot(
             name='Price',
-            pen=(
-                200,
-                200,
-                200,
-            ),
-            symbolBrush=(
-                127,
-                0,
-                0,
-            ),
-            symbolPen='w',
+            **price_plot_data_item_kwargs
         )
 
         self.__price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map: defaultdict[
