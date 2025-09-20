@@ -71,6 +71,7 @@ def migrate_trade_data_batch(args):
     """Миграция батча данных торгов в отдельном процессе."""
     database_url, offset, limit = args
 
+    import os
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
     from constants.symbol import SymbolConstants
@@ -124,6 +125,7 @@ def migrate_trade_data_batch(args):
                 
                 if migrated_count % _COMMIT_COUNT == 0:
                     await session_write.commit()
+                    print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей order book...')
 
             await session_write.commit()
         
@@ -139,8 +141,8 @@ def migrate_trade_data_batch(args):
 def migrate_order_book_data_batch(args):
     """Миграция батча данных order book в отдельном процессе."""
     database_url, offset, limit = args
-    
-    import asyncio
+
+    import os
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
     from constants.okx import OKXConstants
@@ -195,6 +197,7 @@ def migrate_order_book_data_batch(args):
                 
                 if migrated_count % _COMMIT_COUNT == 0:
                     await session_write.commit()
+                    print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей order book...')
             
             await session_write.commit()
         
@@ -210,8 +213,8 @@ def migrate_order_book_data_batch(args):
 def migrate_candle_data_15m_batch(args):
     """Миграция батча данных свечей 15m в отдельном процессе."""
     database_url, offset, limit = args
-    
-    import asyncio
+
+    import os
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
     from constants.symbol import SymbolConstants
@@ -269,6 +272,7 @@ def migrate_candle_data_15m_batch(args):
                 
                 if migrated_count % _COMMIT_COUNT == 0:
                     await session_write.commit()
+                    print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей свечей 15m...')
             
             await session_write.commit()
         
@@ -284,8 +288,8 @@ def migrate_candle_data_15m_batch(args):
 def migrate_candle_data_1h_batch(args):
     """Миграция батча данных свечей 1H в отдельном процессе."""
     database_url, offset, limit = args
-    
-    import asyncio
+
+    import os
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
     from constants.symbol import SymbolConstants
@@ -343,6 +347,7 @@ def migrate_candle_data_1h_batch(args):
                 
                 if migrated_count % _COMMIT_COUNT == 0:
                     await session_write.commit()
+                    print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей свечей 1H...')
             
             await session_write.commit()
         
