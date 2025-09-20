@@ -9,11 +9,13 @@
 import asyncio
 import logging
 import multiprocessing as mp
+import os
 import sys
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 
 from sqlalchemy import (
+    and_,
     func,
     select,
 )
@@ -69,13 +71,7 @@ _BATCH_SIZE = 100_000  # Размер батча для каждого проц�
 
 def migrate_trade_data_batch(args):
     """Миграция батча данных торгов в отдельном процессе."""
-    database_url, offset, limit = args
-
-    import os
-    from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-    from constants.symbol import SymbolConstants
-    from main.save_trades.schemas import OKXTradeData, OKXTradeData2
+    database_url, = args
     
     async def _migrate_batch():
         engine = create_async_engine(
@@ -90,39 +86,52 @@ def migrate_trade_data_batch(args):
         
         migrated_count = 0
         session_read: AsyncSession
+        session_read_2: AsyncSession
         session_write: AsyncSession
 
-        async with session_factory() as session_read, session_factory() as session_write:
+        async with session_factory() as session_read, session_factory() as session_read_2, session_factory() as session_write:
             result = await session_read.stream(
                 select(
                     OKXTradeData,
-                ).offset(
-                    offset,
-                ).limit(
-                    limit,
                 ).execution_options(
                     yield_per=_YIELD_PER,
                 )
             )
             
-            async for trade in result.scalars():
-                symbol_id = SymbolConstants.IdByName[trade.symbol_name]
-                
-                new_trade = OKXTradeData2(
-                    symbol_id=symbol_id,
-                    trade_id=trade.trade_id,
-                    is_buy=trade.is_buy,
-                    price=trade.price,
-                    quantity=trade.quantity,
-                    timestamp_ms=trade.timestamp_ms,
+            async for trade_data in result.scalars():
+                symbol_id = SymbolConstants.IdByName[trade_data.symbol_name]
+                trade_id = trade_data.trade_id
+
+                result_2 = await session_read_2.execute(
+                    select(
+                        OKXTradeData2
+                    ).where(
+                        and_(
+                            OKXTradeData2.symbol_id == symbol_id,
+                            OKXTradeData2.trade_id == trade_id,
+                        ),
+                    )
                 )
-                
+
+                new_trade_data = result_2.scalar_one_or_none()
+                if new_trade_data is not None:
+                    continue
+
+                new_trade_data = OKXTradeData2(
+                    symbol_id=symbol_id,
+                    trade_id=trade_data.trade_id,
+                    is_buy=trade_data.is_buy,
+                    price=trade_data.price,
+                    quantity=trade_data.quantity,
+                    timestamp_ms=trade_data.timestamp_ms,
+                )
+
                 session_write.add(
-                    new_trade,
+                    new_trade_data,
                 )
 
                 migrated_count += 1
-                
+
                 if migrated_count % _COMMIT_COUNT == 0:
                     await session_write.commit()
                     print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей order book...')
@@ -140,14 +149,7 @@ def migrate_trade_data_batch(args):
 
 def migrate_order_book_data_batch(args):
     """Миграция батча данных order book в отдельном процессе."""
-    database_url, offset, limit = args
-
-    import os
-    from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-    from constants.okx import OKXConstants
-    from constants.symbol import SymbolConstants
-    from main.save_order_books.schemas import OKXOrderBookData, OKXOrderBookData2
+    database_url, = args
     
     async def _migrate_batch():
         engine = create_async_engine(
@@ -168,10 +170,6 @@ def migrate_order_book_data_batch(args):
             result = await session_read.stream(
                 select(
                     OKXOrderBookData,
-                ).offset(
-                    offset,
-                ).limit(
-                    limit,
                 ).execution_options(
                     yield_per=_YIELD_PER,
                 )
@@ -213,12 +211,6 @@ def migrate_order_book_data_batch(args):
 def migrate_candle_data_15m_batch(args):
     """Миграция батча данных свечей 15m в отдельном процессе."""
     database_url, offset, limit = args
-
-    import os
-    from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-    from constants.symbol import SymbolConstants
-    from main.save_candles.schemas import OKXCandleData15m, OKXCandleData15m2
     
     async def _migrate_batch():
         engine = create_async_engine(
@@ -288,12 +280,6 @@ def migrate_candle_data_15m_batch(args):
 def migrate_candle_data_1h_batch(args):
     """Миграция батча данных свечей 1H в отдельном процессе."""
     database_url, offset, limit = args
-
-    import os
-    from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-    from constants.symbol import SymbolConstants
-    from main.save_candles.schemas import OKXCandleData1H, OKXCandleData1H2
     
     async def _migrate_batch():
         engine = create_async_engine(
@@ -453,12 +439,8 @@ class DatabaseMigrator:
             logger.info('Таблица okx_trade_data пуста, пропускаем миграцию')
             return
 
-        # Создаем батчи для многопроцессной обработки
-        batches = self._create_batches(total_rows)
-        logger.info(f'Создано {len(batches)} батчей для обработки в {_MAX_WORKERS} процессах')
-
-        # Подготавливаем аргументы для каждого процесса
-        args_list = [(self.database_url, offset, limit) for offset, limit in batches]
+        # Подготавливаем аргументы для процесса
+        args_list = [(self.database_url,)]
 
         # Запускаем многопроцессную миграцию
         with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
@@ -484,12 +466,8 @@ class DatabaseMigrator:
             logger.info('Таблица okx_order_book_data пуста, пропускаем миграцию')
             return
 
-        # Создаем батчи для многопроцессной обработки
-        batches = self._create_batches(total_rows)
-        logger.info(f'Создано {len(batches)} батчей для обработки в {_MAX_WORKERS} процессах')
-
-        # Подготавливаем аргументы для каждого процесса
-        args_list = [(self.database_url, offset, limit) for offset, limit in batches]
+        # Подготавливаем аргументы для процесса
+        args_list = [(self.database_url,)]
 
         # Запускаем многопроцессную миграцию
         with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
