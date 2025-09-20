@@ -85,61 +85,114 @@ def migrate_trade_data_batch(args):
         )
         
         migrated_count = 0
+        skipped_count = 0
+        error_count = 0
         session_read: AsyncSession
         session_read_2: AsyncSession
         session_write: AsyncSession
 
         async with session_factory() as session_read, session_factory() as session_read_2, session_factory() as session_write:
-            result = await session_read.stream(
+            # Получаем общее количество записей
+            total_result = await session_read.execute(
                 select(
+                    func.count(),
+                ).select_from(
                     OKXTradeData,
-                ).execution_options(
-                    yield_per=_YIELD_PER,
                 )
             )
+
+            total_rows = total_result.scalar()
             
-            async for trade_data in result.scalars():
-                symbol_id = SymbolConstants.IdByName[trade_data.symbol_name]
-                trade_id = trade_data.trade_id
-
-                result_2 = await session_read_2.execute(
-                    select(
-                        OKXTradeData2
-                    ).where(
-                        and_(
-                            OKXTradeData2.symbol_id == symbol_id,
-                            OKXTradeData2.trade_id == trade_id,
-                        ),
+            print(f'[PID {os.getpid()}] Начинаем обработку {total_rows} записей торгов...')
+            
+            # Обрабатываем записи батчами для избежания проблем с памятью
+            batch_size = 1
+            for offset in range(
+                    0,
+                    total_rows,
+                    batch_size,
+            ):
+                try:
+                    # Получаем батч записей
+                    result = await session_read.execute(
+                        select(
+                            OKXTradeData,
+                        ).offset(
+                            offset,
+                        ).limit(
+                            batch_size,
+                        )
                     )
-                )
+                    
+                    trade_records = result.scalars().all()
+                    
+                    for trade_data in trade_records:
+                        try:
+                            # Проверяем, что symbol_name существует в константах
+                            if trade_data.symbol_name not in SymbolConstants.IdByName:
+                                print(f'[PID {os.getpid()}] Пропускаем запись с неизвестным symbol_name: {trade_data.symbol_name!r}')
+                                skipped_count += 1
 
-                new_trade_data = result_2.scalar_one_or_none()
-                if new_trade_data is not None:
-                    continue
+                                continue
+                                
+                            symbol_id = SymbolConstants.IdByName[trade_data.symbol_name]
+                            trade_id = trade_data.trade_id
 
-                new_trade_data = OKXTradeData2(
-                    symbol_id=symbol_id,
-                    trade_id=trade_data.trade_id,
-                    is_buy=trade_data.is_buy,
-                    price=trade_data.price,
-                    quantity=trade_data.quantity,
-                    timestamp_ms=trade_data.timestamp_ms,
-                )
+                            # Проверяем, не существует ли уже такая запись
+                            result_2 = await session_read_2.execute(
+                                select(
+                                    OKXTradeData2
+                                ).where(
+                                    and_(
+                                        OKXTradeData2.symbol_id == symbol_id,
+                                        OKXTradeData2.trade_id == trade_id,
+                                    ),
+                                )
+                            )
 
-                session_write.add(
-                    new_trade_data,
-                )
+                            existing_trade = result_2.scalar_one_or_none()
+                            if existing_trade is not None:
+                                print(
+                                    f'Trade already exists: {existing_trade}',
+                                )
 
-                migrated_count += 1
+                                continue
 
-                if migrated_count % _COMMIT_COUNT == 0:
+                            # Создаем новую запись
+                            new_trade_data = OKXTradeData2(
+                                symbol_id=symbol_id,
+                                trade_id=trade_data.trade_id,
+                                is_buy=trade_data.is_buy,
+                                price=trade_data.price,
+                                quantity=trade_data.quantity,
+                                timestamp_ms=trade_data.timestamp_ms,
+                            )
+
+                            session_write.add(
+                                new_trade_data,
+                            )
+
+                            migrated_count += 1
+
+                            if migrated_count % _COMMIT_COUNT == 0:
+                                await session_write.commit()
+                                print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей торгов...')
+                        except Exception as e:
+                            error_count += 1
+                            print(f'[PID {os.getpid()}] Ошибка при обработке записи trade_id={getattr(trade_data, "trade_id", "unknown")}: {str(e)}')
+                            continue
+                    
+                    # Коммитим оставшиеся записи в батче
                     await session_write.commit()
-                    print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей order book...')
-
-            await session_write.commit()
+                        
+                except Exception as e:
+                    print(f'[PID {os.getpid()}] Ошибка при получении батча offset={offset}: {str(e)}')
+                    error_count += 1
+                    continue
         
         await engine.dispose()
-
+        
+        print(f'[PID {os.getpid()}] Миграция торгов завершена. Мигрировано: {migrated_count}, пропущено: {skipped_count}, ошибок: {error_count}')
         return migrated_count
     
     return uvloop.run(
@@ -163,44 +216,120 @@ def migrate_order_book_data_batch(args):
         )
         
         migrated_count = 0
+        skipped_count = 0
+        error_count = 0
         session_read: AsyncSession
+        session_read_2: AsyncSession
         session_write: AsyncSession
 
-        async with session_factory() as session_read, session_factory() as session_write:
-            result = await session_read.stream(
+        async with session_factory() as session_read, session_factory() as session_read_2, session_factory() as session_write:
+            # Получаем общее количество записей
+            total_result = await session_read.execute(
                 select(
+                    func.count(),
+                ).select_from(
                     OKXOrderBookData,
-                ).execution_options(
-                    yield_per=_YIELD_PER,
                 )
             )
-            
-            async for order_book in result.scalars():
-                action_id = OKXConstants.OrderBookActionIdByName[order_book.action]
-                symbol_id = SymbolConstants.IdByName[order_book.symbol_name]
-                
-                new_order_book = OKXOrderBookData2(
-                    symbol_id=symbol_id,
-                    timestamp_ms=order_book.timestamp_ms,
-                    action_id=action_id,
-                    asks=order_book.asks,
-                    bids=order_book.bids,
-                )
-                
-                session_write.add(
-                    new_order_book,
-                )
 
-                migrated_count += 1
-                
-                if migrated_count % _COMMIT_COUNT == 0:
-                    await session_write.commit()
-                    print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей order book...')
+            total_rows = total_result.scalar()
             
-            await session_write.commit()
+            print(f'[PID {os.getpid()}] Начинаем обработку {total_rows} записей order book...')
+            
+            # Обрабатываем записи батчами для избежания проблем с памятью
+            batch_size = 1
+
+            for offset in range(
+                    0,
+                    total_rows,
+                    batch_size,
+            ):
+                try:
+                    # Получаем батч записей
+                    result = await session_read.execute(
+                        select(
+                            OKXOrderBookData,
+                        ).offset(
+                            offset,
+                        ).limit(
+                            batch_size,
+                        ),
+                    )
+                    
+                    order_book_records = result.scalars().all()
+                    
+                    for order_book in order_book_records:
+                        try:
+                            # Проверяем, что action существует в константах
+                            if order_book.action not in OKXConstants.OrderBookActionIdByName:
+                                print(f'[PID {os.getpid()}] Пропускаем запись с неизвестным action: {order_book.action}')
+                                skipped_count += 1
+                                continue
+                                
+                            # Проверяем, что symbol_name существует в константах
+                            if order_book.symbol_name not in SymbolConstants.IdByName:
+                                print(f'[PID {os.getpid()}] Пропускаем запись с неизвестным symbol_name: {order_book.symbol_name}')
+                                skipped_count += 1
+                                continue
+                                
+                            action_id = OKXConstants.OrderBookActionIdByName[order_book.action]
+                            symbol_id = SymbolConstants.IdByName[order_book.symbol_name]
+
+                            timestamp_ms = order_book.timestamp_ms
+
+                            # Проверяем, не существует ли уже такая запись
+                            result_2 = await session_read_2.execute(
+                                select(
+                                    OKXOrderBookData2
+                                ).where(
+                                    and_(
+                                        OKXOrderBookData2.symbol_id == symbol_id,
+                                        OKXOrderBookData2.timestamp_ms == timestamp_ms,
+                                    ),
+                                )
+                            )
+
+                            existing_order_book = result_2.scalar_one_or_none()
+                            if existing_order_book is not None:
+                                print(
+                                    f'Order book already exists: {existing_order_book}',
+                                )
+
+                                continue
+
+                            new_order_book = OKXOrderBookData2(
+                                symbol_id=symbol_id,
+                                timestamp_ms=timestamp_ms,
+                                action_id=action_id,
+                                asks=order_book.asks,
+                                bids=order_book.bids,
+                            )
+                            
+                            session_write.add(
+                                new_order_book,
+                            )
+                            migrated_count += 1
+                            
+                            if migrated_count % _COMMIT_COUNT == 0:
+                                await session_write.commit()
+                                print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей order book...')
+
+                        except Exception as e:
+                            error_count += 1
+                            print(f'[PID {os.getpid()}] Ошибка при обработке записи order book timestamp_ms={getattr(order_book, "timestamp_ms", "unknown")}: {str(e)}')
+                            continue
+                    
+                    # Коммитим оставшиеся записи в батче
+                    await session_write.commit()
+                        
+                except Exception as e:
+                    print(f'[PID {os.getpid()}] Ошибка при получении батча offset={offset}: {str(e)}')
+                    error_count += 1
+                    continue
         
         await engine.dispose()
-
+        
+        print(f'[PID {os.getpid()}] Миграция order book завершена. Мигрировано: {migrated_count}, пропущено: {skipped_count}, ошибок: {error_count}')
         return migrated_count
     
     return uvloop.run(
@@ -431,50 +560,58 @@ class DatabaseMigrator:
         """Миграция данных из okx_trade_data в okx_trade_data_2."""
         logger.info('Начинаем миграцию данных торгов...')
 
-        # Получаем количество записей для миграции
-        total_rows = await self.get_table_row_count(OKXTradeData)
-        logger.info(f'Найдено {total_rows} записей в okx_trade_data')
+        try:
+            # Получаем количество записей для миграции
+            total_rows = await self.get_table_row_count(OKXTradeData)
+            logger.info(f'Найдено {total_rows} записей в okx_trade_data')
 
-        if total_rows == 0:
-            logger.info('Таблица okx_trade_data пуста, пропускаем миграцию')
-            return
+            if total_rows == 0:
+                logger.info('Таблица okx_trade_data пуста, пропускаем миграцию')
+                return
 
-        # Подготавливаем аргументы для процесса
-        args_list = [(self.database_url,)]
+            # Подготавливаем аргументы для процесса
+            args_list = [(self.database_url,)]
 
-        # Запускаем многопроцессную миграцию
-        with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
-            results = list(
-                executor.map(
-                    migrate_trade_data_batch,
-                    args_list,
-                ),
-            )
+            # Запускаем многопроцессную миграцию
+            with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+                results = list(
+                    executor.map(
+                        migrate_trade_data_batch,
+                        args_list,
+                    ),
+                )
 
-        total_migrated = sum(results)
-        logger.info(f'Миграция торгов завершена. Всего мигрировано: {total_migrated} записей')
+            total_migrated = sum(results)
+            logger.info(f'Миграция торгов завершена. Всего мигрировано: {total_migrated} записей')
+        except Exception as e:
+            logger.error(f'Ошибка при миграции данных торгов: {str(e)}')
+            raise
 
     async def migrate_order_book_data(self):
         """Миграция данных из okx_order_book_data в okx_order_book_data_2."""
         logger.info('Начинаем миграцию данных order book...')
 
-        # Получаем количество записей для миграции
-        total_rows = await self.get_table_row_count(OKXOrderBookData)
-        logger.info(f'Найдено {total_rows} записей в okx_order_book_data')
+        try:
+            # Получаем количество записей для миграции
+            total_rows = await self.get_table_row_count(OKXOrderBookData)
+            logger.info(f'Найдено {total_rows} записей в okx_order_book_data')
 
-        if total_rows == 0:
-            logger.info('Таблица okx_order_book_data пуста, пропускаем миграцию')
-            return
+            if total_rows == 0:
+                logger.info('Таблица okx_order_book_data пуста, пропускаем миграцию')
+                return
 
-        # Подготавливаем аргументы для процесса
-        args_list = [(self.database_url,)]
+            # Подготавливаем аргументы для процесса
+            args_list = [(self.database_url,)]
 
-        # Запускаем многопроцессную миграцию
-        with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
-            results = list(executor.map(migrate_order_book_data_batch, args_list))
+            # Запускаем многопроцессную миграцию
+            with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+                results = list(executor.map(migrate_order_book_data_batch, args_list))
 
-        total_migrated = sum(results)
-        logger.info(f'Миграция order book завершена. Всего мигрировано: {total_migrated} записей')
+            total_migrated = sum(results)
+            logger.info(f'Миграция order book завершена. Всего мигрировано: {total_migrated} записей')
+        except Exception as e:
+            logger.error(f'Ошибка при миграции данных order book: {str(e)}')
+            raise
 
     async def migrate_candle_data_15m(self):
         """Миграция данных из okx_candle_data_15m в okx_candle_data_15m_2."""
