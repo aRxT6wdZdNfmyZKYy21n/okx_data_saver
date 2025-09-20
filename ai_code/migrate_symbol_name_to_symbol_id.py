@@ -232,7 +232,7 @@ class DatabaseMigrator:
                 new_order_book = OKXOrderBookData2(
                     symbol_id=symbol_id.value,
                     timestamp_ms=order_book.timestamp_ms,
-                    action=action_id,
+                    action_id=action_id,
                     asks=order_book.asks,
                     bids=order_book.bids,
                 )
