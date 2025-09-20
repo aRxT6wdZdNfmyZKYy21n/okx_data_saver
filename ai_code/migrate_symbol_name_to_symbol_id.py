@@ -149,7 +149,7 @@ def migrate_trade_data_batch(args):
 
 def migrate_order_book_data_batch(args):
     """Миграция батча данных order book в отдельном процессе."""
-    database_url, offset, limit = args
+    database_url, = args
     
     async def _migrate_batch():
         engine = create_async_engine(
@@ -170,10 +170,6 @@ def migrate_order_book_data_batch(args):
             result = await session_read.stream(
                 select(
                     OKXOrderBookData,
-                ).offset(
-                    offset,
-                ).limit(
-                    limit,
                 ).execution_options(
                     yield_per=_YIELD_PER,
                 )
@@ -470,12 +466,8 @@ class DatabaseMigrator:
             logger.info('Таблица okx_order_book_data пуста, пропускаем миграцию')
             return
 
-        # Создаем батчи для многопроцессной обработки
-        batches = self._create_batches(total_rows)
-        logger.info(f'Создано {len(batches)} батчей для обработки в {_MAX_WORKERS} процессах')
-
-        # Подготавливаем аргументы для каждого процесса
-        args_list = [(self.database_url, offset, limit) for offset, limit in batches]
+        # Подготавливаем аргументы для процесса
+        args_list = [(self.database_url,)]
 
         # Запускаем многопроцессную миграцию
         with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
