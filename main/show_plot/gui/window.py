@@ -23,6 +23,7 @@ from qasync import (
 import pyqtgraph
 
 from PyQt6.QtCore import (
+    QPointF,
     Qt,
 )
 
@@ -170,6 +171,8 @@ class FinPlotChartWindow(QMainWindow):
             pyqtgraph.GraphicsLayoutWidget()
         )
 
+        order_book_image_item = pyqtgraph.ImageItem()
+
         price_plot = graphics_layout_widget.addPlot(
             title='Price',
         )
@@ -202,6 +205,10 @@ class FinPlotChartWindow(QMainWindow):
                 self.__update_plots_y_range,
                 price_plot,
             ),
+        )
+
+        price_plot.addItem(
+            order_book_image_item,
         )
 
         graphics_layout_widget.nextRow()
@@ -410,6 +417,7 @@ class FinPlotChartWindow(QMainWindow):
 
         self.__drawing_lock = asyncio.Lock()
 
+        self.__order_book_image_item = order_book_image_item
         self.__price_plot = price_plot
 
         price_plot_data_item_kwargs = {}
@@ -876,6 +884,26 @@ class FinPlotChartWindow(QMainWindow):
                     candles_plot.removeItem(
                         price_candlestick_item,
                     )
+
+        order_book_volume_array = (
+            processor.get_order_book_volume_array()
+        )
+
+        order_book_volume_position = (
+            processor.get_order_book_volume_position()
+        )
+
+        order_book_image_item = self.__order_book_image_item
+
+        order_book_image_item.setPos(
+            QPointF(
+                *order_book_volume_position,
+            ),
+        )
+
+        order_book_image_item.setImage(
+            order_book_volume_array,
+        )
 
         price_series: pandas.Series = trades_smoothed_dataframe.price
 

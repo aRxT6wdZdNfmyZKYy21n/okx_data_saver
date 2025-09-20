@@ -9,6 +9,7 @@ from decimal import (
     Decimal,
 )
 
+import numpy
 import pandas
 import talib
 
@@ -67,10 +68,10 @@ class FinPlotChartProcessor(object):
         '__current_symbol_name',
         '__current_trades_smoothing_level',
         '__line_dataframe_by_level_map',
-        '__max_price',
         '__max_trade_price',
-        '__min_price',
         '__min_trade_price',
+        '__order_book_volume_array',
+        '__order_book_volume_position',
         '__rsi_series',
         '__test_analytics_raw_data_list',
         '__test_series',
@@ -95,10 +96,10 @@ class FinPlotChartProcessor(object):
         self.__current_symbol_name: str | None = None
         self.__current_trades_smoothing_level: str | None = None
         self.__line_dataframe_by_level_map: DataFrame | None = {}
-        self.__max_price: Decimal | None = None
         self.__max_trade_price: Decimal | None = None
-        self.__min_price: Decimal | None = None
         self.__min_trade_price: Decimal | None = None
+        self.__order_book_volume_array: numpy.ndarray | None = None
+        self.__order_book_volume_position: tuple[float, float] | None = None
         self.__rsi_series: Series | None = None
         self.__test_analytics_raw_data_list: list[dict[str, typing.Any]] | None = None
         self.__test_series: Series | None = None
@@ -174,20 +175,20 @@ class FinPlotChartProcessor(object):
     ) -> Decimal | None:
         return self.__max_trade_price
 
-    def get_max_price(
-        self,
-    ) -> Decimal | None:
-        return self.__max_price
-
     def get_min_trade_price(
         self,
     ) -> Decimal | None:
         return self.__min_trade_price
 
-    def get_min_price(
-        self,
-    ) -> Decimal | None:
-        return self.__min_price
+    def get_order_book_volume_array(
+            self,
+    ) -> numpy.ndarray | None:
+        return self.__order_book_volume_array
+
+    def get_order_book_volume_position(
+            self,
+    ) -> tuple[float, float] | None:
+        return self.__order_book_volume_position
 
     def get_rsi_series(
         self,
@@ -311,10 +312,10 @@ class FinPlotChartProcessor(object):
         self.__bollinger_upper_band_series = None
         self.__candle_dataframe_by_interval_name_map.clear()
         self.__line_dataframe_by_level_map.clear()
-        self.__max_price = None
         self.__max_trade_price = None
-        self.__min_price = None
         self.__min_trade_price = None
+        self.__order_book_volume_array = None
+        self.__order_book_volume_position = None
         self.__rsi_series = None
         self.__test_analytics_raw_data_list = None
         self.__test_series = None
@@ -656,8 +657,6 @@ class FinPlotChartProcessor(object):
                         max_trade_price  # noqa
                     ) = new_max_trade_price
 
-                    self.__update_max_price()
-
             if new_min_trade_price is not None:
                 min_trade_price = self.__min_trade_price
 
@@ -665,8 +664,6 @@ class FinPlotChartProcessor(object):
                     self.__min_trade_price = (
                         min_trade_price  # noqa
                     ) = new_min_trade_price
-
-                    self.__update_min_price()
 
             if new_trade_raw_data_list is None:
                 return
@@ -954,6 +951,13 @@ class FinPlotChartProcessor(object):
         )
 
         with Timer() as timer:
+            self.__update_order_book_volume()
+
+        logger.info(
+            f'Order book volume array was updated by {timer.elapsed:.3f}s'
+        )
+
+        with Timer() as timer:
             self.__update_rsi_series()
 
         logger.info(
@@ -1043,15 +1047,62 @@ WHERE symbol_name IS NOT NULL;
 
         # window.auto_range_price_plot()
 
-    def __update_max_price(
-        self,
+    def __update_order_book_volume(
+            self,
     ) -> None:
-        self.__max_price = self.__max_trade_price
+        trades_dataframe = self.__trades_dataframe
 
-    def __update_min_price(
-        self,
-    ) -> None:
-        self.__min_price = self.__min_trade_price
+        assert trades_dataframe is not None, None
+
+        price_series = trades_dataframe.price
+        trade_id_series = trades_dataframe.index
+
+        max_price = price_series.max()
+        max_trade_id = trade_id_series.max()
+
+        min_price = price_series.min()
+        min_trade_id = trade_id_series.min()
+
+        delta_price = max_price - min_price
+
+        if not delta_price:
+            return
+
+        delta_trade_id = max_trade_id - min_trade_id
+
+        if not delta_trade_id:
+            return
+
+        # delta_price / delta_trade_id = width / height;
+        # width = height * (delta_price / delta_trade_id);
+
+        aspect_ratio = delta_price / delta_trade_id
+
+        height = 1000
+
+        width = int(
+            height * aspect_ratio,
+        )
+
+        order_book_volume_array = numpy.zeros((
+            width,
+            height,
+        ))
+
+        for x in range(width):
+            for y in range(height):
+                order_book_volume_array[x][y] = x * y
+
+        self.__order_book_volume_array = order_book_volume_array
+
+        self.__order_book_volume_position = (
+            float(
+                min_trade_id,
+            ),
+            float(
+                min_price,
+            )
+        )
 
     def __update_rsi_series(
         self,

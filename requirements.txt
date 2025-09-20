@@ -3,6 +3,7 @@ asyncpg
 chrono
 git+https://github.com/aRxT6wdZdNfmyZKYy21n/finplot.git
 httpx
+numpy
 orjson
 pandas
 pydantic
