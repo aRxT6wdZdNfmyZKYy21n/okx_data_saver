@@ -58,6 +58,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+_COMMIT_COUNT = 10_000
+_YIELD_PER = 10_000
+
+
 class DatabaseMigrator:
     """Класс для миграции базы данных."""
 
@@ -152,7 +156,7 @@ class DatabaseMigrator:
                 select(
                     OKXTradeData,
                 ).execution_options(
-                    yield_per=1000,
+                    yield_per=_YIELD_PER,
                 ),
             )
 
@@ -181,8 +185,8 @@ class DatabaseMigrator:
                     f'trade_id={trade.trade_id}, timestamp={trade.timestamp_ms}'
                 )
 
-                # Коммитим каждые 100 записей для производительности
-                if migrated_count % 100 == 0:
+                # Коммитим каждые _COMMIT_COUNT записей для производительности
+                if not migrated_count % _COMMIT_COUNT:
                     await session_write.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
 
@@ -214,7 +218,7 @@ class DatabaseMigrator:
                 select(
                     OKXOrderBookData,
                 ).execution_options(
-                    yield_per=1000,
+                    yield_per=_YIELD_PER,
                 ),
             )
 
@@ -244,8 +248,8 @@ class DatabaseMigrator:
                     f'timestamp={order_book.timestamp_ms}, action={order_book.action}'
                 )
 
-                # Коммитим каждые 100 записей для производительности
-                if migrated_count % 100 == 0:
+                # Коммитим каждые _COMMIT_COUNT записей для производительности
+                if not migrated_count % _COMMIT_COUNT:
                     await session_write.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
 
@@ -277,7 +281,7 @@ class DatabaseMigrator:
                 select(
                     OKXCandleData15m,
                 ).execution_options(
-                    yield_per=1000,
+                    yield_per=_YIELD_PER,
                 ),
             )
 
@@ -311,8 +315,8 @@ class DatabaseMigrator:
                     f'is_closed={candle.is_closed}'
                 )
 
-                # Коммитим каждые 100 записей для производительности
-                if migrated_count % 100 == 0:
+                # Коммитим каждые _COMMIT_COUNT записей для производительности
+                if not migrated_count % _COMMIT_COUNT:
                     await session_write.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
 
@@ -344,7 +348,7 @@ class DatabaseMigrator:
                 select(
                     OKXCandleData1H,
                 ).execution_options(
-                    yield_per=1000,
+                    yield_per=_YIELD_PER,
                 ),
             )
 
@@ -378,8 +382,8 @@ class DatabaseMigrator:
                     f'is_closed={candle.is_closed}'
                 )
 
-                # Коммитим каждые 100 записей для производительности
-                if migrated_count % 100 == 0:
+                # Коммитим каждые _COMMIT_COUNT записей для производительности
+                if not migrated_count % _COMMIT_COUNT:
                     await session_write.commit()
                     logger.info(f'Зафиксировано {migrated_count} записей...')
 
@@ -424,10 +428,12 @@ class DatabaseMigrator:
             await self.create_new_tables()
 
             logger.info('Миграция данных...')
-            await self.migrate_trade_data()
-            await self.migrate_order_book_data()
-            await self.migrate_candle_data_15m()
-            await self.migrate_candle_data_1h()
+            await asyncio.gather(
+                self.migrate_trade_data(),
+                self.migrate_order_book_data(),
+                self.migrate_candle_data_15m(),
+                self.migrate_candle_data_1h(),
+            )
 
             logger.info('Проверка результатов...')
             await self.verify_migration()
