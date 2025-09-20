@@ -8,8 +8,10 @@
 
 import asyncio
 import logging
+import multiprocessing as mp
 import sys
 import traceback
+from concurrent.futures import ProcessPoolExecutor
 
 from sqlalchemy import (
     func,
@@ -55,11 +57,302 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     stream=sys.stdout,
 )
+
 logger = logging.getLogger(__name__)
 
 
 _COMMIT_COUNT = 10_000
 _YIELD_PER = 10_000
+_MAX_WORKERS = mp.cpu_count() - 2
+_BATCH_SIZE = 100_000  # Размер батча для каждого процесса
+
+
+def migrate_trade_data_batch(args):
+    """Миграция батча данных торгов в отдельном процессе."""
+    database_url, offset, limit = args
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from constants.symbol import SymbolConstants
+    from main.save_trades.schemas import OKXTradeData, OKXTradeData2
+    
+    async def _migrate_batch():
+        engine = create_async_engine(
+            database_url,
+            echo=True,
+        )
+
+        session_factory = async_sessionmaker(
+            engine,
+            expire_on_commit=False,
+        )
+        
+        migrated_count = 0
+        session_read: AsyncSession
+        session_write: AsyncSession
+
+        async with session_factory() as session_read, session_factory() as session_write:
+            result = await session_read.stream(
+                select(
+                    OKXTradeData,
+                ).offset(
+                    offset,
+                ).limit(
+                    limit,
+                ).execution_options(
+                    yield_per=_YIELD_PER,
+                )
+            )
+            
+            async for trade in result.scalars():
+                symbol_id = SymbolConstants.IdByName[trade.symbol_name]
+                
+                new_trade = OKXTradeData2(
+                    symbol_id=symbol_id,
+                    trade_id=trade.trade_id,
+                    is_buy=trade.is_buy,
+                    price=trade.price,
+                    quantity=trade.quantity,
+                    timestamp_ms=trade.timestamp_ms,
+                )
+                
+                session_write.add(
+                    new_trade,
+                )
+
+                migrated_count += 1
+                
+                if migrated_count % _COMMIT_COUNT == 0:
+                    await session_write.commit()
+
+            await session_write.commit()
+        
+        await engine.dispose()
+
+        return migrated_count
+    
+    return uvloop.run(
+        _migrate_batch(),
+    )
+
+
+def migrate_order_book_data_batch(args):
+    """Миграция батча данных order book в отдельном процессе."""
+    database_url, offset, limit = args
+    
+    import asyncio
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from constants.okx import OKXConstants
+    from constants.symbol import SymbolConstants
+    from main.save_order_books.schemas import OKXOrderBookData, OKXOrderBookData2
+    
+    async def _migrate_batch():
+        engine = create_async_engine(
+            database_url,
+            echo=True,
+        )
+
+        session_factory = async_sessionmaker(
+            engine,
+            expire_on_commit=False,
+        )
+        
+        migrated_count = 0
+        session_read: AsyncSession
+        session_write: AsyncSession
+
+        async with session_factory() as session_read, session_factory() as session_write:
+            result = await session_read.stream(
+                select(
+                    OKXOrderBookData,
+                ).offset(
+                    offset,
+                ).limit(
+                    limit,
+                ).execution_options(
+                    yield_per=_YIELD_PER,
+                )
+            )
+            
+            async for order_book in result.scalars():
+                action_id = OKXConstants.OrderBookActionIdByName[order_book.action]
+                symbol_id = SymbolConstants.IdByName[order_book.symbol_name]
+                
+                new_order_book = OKXOrderBookData2(
+                    symbol_id=symbol_id,
+                    timestamp_ms=order_book.timestamp_ms,
+                    action_id=action_id,
+                    asks=order_book.asks,
+                    bids=order_book.bids,
+                )
+                
+                session_write.add(
+                    new_order_book,
+                )
+
+                migrated_count += 1
+                
+                if migrated_count % _COMMIT_COUNT == 0:
+                    await session_write.commit()
+            
+            await session_write.commit()
+        
+        await engine.dispose()
+
+        return migrated_count
+    
+    return uvloop.run(
+        _migrate_batch(),
+    )
+
+
+def migrate_candle_data_15m_batch(args):
+    """Миграция батча данных свечей 15m в отдельном процессе."""
+    database_url, offset, limit = args
+    
+    import asyncio
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from constants.symbol import SymbolConstants
+    from main.save_candles.schemas import OKXCandleData15m, OKXCandleData15m2
+    
+    async def _migrate_batch():
+        engine = create_async_engine(
+            database_url,
+            echo=True,
+        )
+
+        session_factory = async_sessionmaker(
+            engine,
+            expire_on_commit=False,
+        )
+        
+        migrated_count = 0
+        session_read: AsyncSession
+        session_write: AsyncSession
+
+        async with session_factory() as session_read, session_factory() as session_write:
+            result = await session_read.stream(
+                select(
+                    OKXCandleData15m,
+                ).offset(
+                    offset,
+                ).limit(
+                    limit,
+                ).execution_options(
+                    yield_per=_YIELD_PER,
+                )
+            )
+            
+            async for candle in result.scalars():
+                symbol_id = SymbolConstants.IdByName[candle.symbol_name]
+                
+                new_candle = OKXCandleData15m2(
+                    symbol_id=symbol_id,
+                    start_timestamp_ms=candle.start_timestamp_ms,
+                    is_closed=candle.is_closed,
+                    close_price=candle.close_price,
+                    high_price=candle.high_price,
+                    low_price=candle.low_price,
+                    open_price=candle.open_price,
+                    volume_contracts_count=candle.volume_contracts_count,
+                    volume_base_currency=candle.volume_base_currency,
+                    volume_quote_currency=candle.volume_quote_currency,
+                )
+                
+                session_write.add(
+                    new_candle,
+                )
+
+                migrated_count += 1
+                
+                if migrated_count % _COMMIT_COUNT == 0:
+                    await session_write.commit()
+            
+            await session_write.commit()
+        
+        await engine.dispose()
+
+        return migrated_count
+    
+    return uvloop.run(
+        _migrate_batch(),
+    )
+
+
+def migrate_candle_data_1h_batch(args):
+    """Миграция батча данных свечей 1H в отдельном процессе."""
+    database_url, offset, limit = args
+    
+    import asyncio
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from constants.symbol import SymbolConstants
+    from main.save_candles.schemas import OKXCandleData1H, OKXCandleData1H2
+    
+    async def _migrate_batch():
+        engine = create_async_engine(
+            database_url,
+            echo=True,
+        )
+
+        session_factory = async_sessionmaker(
+            engine,
+            expire_on_commit=False,
+        )
+        
+        migrated_count = 0
+        session_read: AsyncSession
+        session_write: AsyncSession
+
+        async with session_factory() as session_read, session_factory() as session_write:
+            result = await session_read.stream(
+                select(
+                    OKXCandleData1H,
+                ).offset(
+                    offset,
+                ).limit(
+                    limit,
+                ).execution_options(
+                    yield_per=_YIELD_PER,
+                )
+            )
+            
+            async for candle in result.scalars():
+                symbol_id = SymbolConstants.IdByName[candle.symbol_name]
+                
+                new_candle = OKXCandleData1H2(
+                    symbol_id=symbol_id,
+                    start_timestamp_ms=candle.start_timestamp_ms,
+                    is_closed=candle.is_closed,
+                    close_price=candle.close_price,
+                    high_price=candle.high_price,
+                    low_price=candle.low_price,
+                    open_price=candle.open_price,
+                    volume_contracts_count=candle.volume_contracts_count,
+                    volume_base_currency=candle.volume_base_currency,
+                    volume_quote_currency=candle.volume_quote_currency,
+                )
+                
+                session_write.add(
+                    new_candle,
+                )
+
+                migrated_count += 1
+                
+                if migrated_count % _COMMIT_COUNT == 0:
+                    await session_write.commit()
+            
+            await session_write.commit()
+        
+        await engine.dispose()
+
+        return migrated_count
+    
+    return uvloop.run(
+        _migrate_batch(),
+    )
 
 
 class DatabaseMigrator:
@@ -111,6 +404,14 @@ class DatabaseMigrator:
 
             return result.scalar()
 
+    def _create_batches(self, total_rows: int) -> list[tuple[int, int]]:
+        """Создание батчей для многопроцессной обработки."""
+        batches = []
+        for offset in range(0, total_rows, _BATCH_SIZE):
+            limit = min(_BATCH_SIZE, total_rows - offset)
+            batches.append((offset, limit))
+        return batches
+
     async def create_new_tables(self):
         """Создание новых таблиц с symbol_id."""
         try:
@@ -147,55 +448,24 @@ class DatabaseMigrator:
             logger.info('Таблица okx_trade_data пуста, пропускаем миграцию')
             return
 
-        migrated_count = 0
-        session_read: AsyncSession
-        session_write: AsyncSession
+        # Создаем батчи для многопроцессной обработки
+        batches = self._create_batches(total_rows)
+        logger.info(f'Создано {len(batches)} батчей для обработки в {_MAX_WORKERS} процессах')
 
-        async with self.session_factory() as session_read, self.session_factory() as session_write:
-            result = await session_read.stream(
-                select(
-                    OKXTradeData,
-                ).execution_options(
-                    yield_per=_YIELD_PER,
+        # Подготавливаем аргументы для каждого процесса
+        args_list = [(self.database_url, offset, limit) for offset, limit in batches]
+
+        # Запускаем многопроцессную миграцию
+        with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+            results = list(
+                executor.map(
+                    migrate_trade_data_batch,
+                    args_list,
                 ),
             )
 
-            async for trade in result.scalars():
-                # Находим соответствующий symbol_id
-                symbol_id = SymbolConstants.IdByName[trade.symbol_name]
-
-                # Создаем новую запись с symbol_id
-                new_trade = OKXTradeData2(
-                    symbol_id=symbol_id.value,
-                    trade_id=trade.trade_id,
-                    is_buy=trade.is_buy,
-                    price=trade.price,
-                    quantity=trade.quantity,
-                    timestamp_ms=trade.timestamp_ms,
-                )
-
-                session_write.add(
-                    new_trade,
-                )
-
-                migrated_count += 1
-
-                logger.info(
-                    f'Мигрирована запись: {trade.symbol_name} -> {symbol_id.value}, '
-                    f'trade_id={trade.trade_id}, timestamp={trade.timestamp_ms}'
-                )
-
-                # Коммитим каждые _COMMIT_COUNT записей для производительности
-                if not migrated_count % _COMMIT_COUNT:
-                    await session_write.commit()
-                    logger.info(f'Зафиксировано {migrated_count} записей...')
-
-            # Коммитим оставшиеся записи
-            await session_write.commit()
-
-        logger.info(
-            f'Миграция торгов завершена. Всего мигрировано: {migrated_count} записей'
-        )
+        total_migrated = sum(results)
+        logger.info(f'Миграция торгов завершена. Всего мигрировано: {total_migrated} записей')
 
     async def migrate_order_book_data(self):
         """Миграция данных из okx_order_book_data в okx_order_book_data_2."""
@@ -209,56 +479,19 @@ class DatabaseMigrator:
             logger.info('Таблица okx_order_book_data пуста, пропускаем миграцию')
             return
 
-        migrated_count = 0
-        session_read: AsyncSession
-        session_write: AsyncSession
+        # Создаем батчи для многопроцессной обработки
+        batches = self._create_batches(total_rows)
+        logger.info(f'Создано {len(batches)} батчей для обработки в {_MAX_WORKERS} процессах')
 
-        async with self.session_factory() as session_read, self.session_factory() as session_write:
-            result = await session_read.stream(
-                select(
-                    OKXOrderBookData,
-                ).execution_options(
-                    yield_per=_YIELD_PER,
-                ),
-            )
+        # Подготавливаем аргументы для каждого процесса
+        args_list = [(self.database_url, offset, limit) for offset, limit in batches]
 
-            async for order_book in result.scalars():
-                action_id = OKXConstants.OrderBookActionIdByName[order_book.action]
+        # Запускаем многопроцессную миграцию
+        with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+            results = list(executor.map(migrate_order_book_data_batch, args_list))
 
-                # Находим соответствующий symbol_id
-                symbol_id = SymbolConstants.IdByName[order_book.symbol_name]
-
-                # Создаем новую запись с symbol_id
-                new_order_book = OKXOrderBookData2(
-                    symbol_id=symbol_id.value,
-                    timestamp_ms=order_book.timestamp_ms,
-                    action_id=action_id,
-                    asks=order_book.asks,
-                    bids=order_book.bids,
-                )
-
-                session_write.add(
-                    new_order_book,
-                )
-
-                migrated_count += 1
-
-                logger.info(
-                    f'Мигрирована запись: {order_book.symbol_name} -> {symbol_id.value}, '
-                    f'timestamp={order_book.timestamp_ms}, action={order_book.action}'
-                )
-
-                # Коммитим каждые _COMMIT_COUNT записей для производительности
-                if not migrated_count % _COMMIT_COUNT:
-                    await session_write.commit()
-                    logger.info(f'Зафиксировано {migrated_count} записей...')
-
-            # Коммитим оставшиеся записи
-            await session_write.commit()
-
-        logger.info(
-            f'Миграция order book завершена. Всего мигрировано: {migrated_count} записей'
-        )
+        total_migrated = sum(results)
+        logger.info(f'Миграция order book завершена. Всего мигрировано: {total_migrated} записей')
 
     async def migrate_candle_data_15m(self):
         """Миграция данных из okx_candle_data_15m в okx_candle_data_15m_2."""
@@ -272,60 +505,19 @@ class DatabaseMigrator:
             logger.info('Таблица okx_candle_data_15m пуста, пропускаем миграцию')
             return
 
-        migrated_count = 0
-        session_read: AsyncSession
-        session_write: AsyncSession
+        # Создаем батчи для многопроцессной обработки
+        batches = self._create_batches(total_rows)
+        logger.info(f'Создано {len(batches)} батчей для обработки в {_MAX_WORKERS} процессах')
 
-        async with self.session_factory() as session_read, self.session_factory() as session_write:
-            result = await session_read.stream(
-                select(
-                    OKXCandleData15m,
-                ).execution_options(
-                    yield_per=_YIELD_PER,
-                ),
-            )
+        # Подготавливаем аргументы для каждого процесса
+        args_list = [(self.database_url, offset, limit) for offset, limit in batches]
 
-            async for candle in result.scalars():
-                # Находим соответствующий symbol_id
-                symbol_id = SymbolConstants.IdByName[candle.symbol_name]
+        # Запускаем многопроцессную миграцию
+        with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+            results = list(executor.map(migrate_candle_data_15m_batch, args_list))
 
-                # Создаем новую запись с symbol_id
-                new_candle = OKXCandleData15m2(
-                    symbol_id=symbol_id.value,
-                    start_timestamp_ms=candle.start_timestamp_ms,
-                    is_closed=candle.is_closed,
-                    close_price=candle.close_price,
-                    high_price=candle.high_price,
-                    low_price=candle.low_price,
-                    open_price=candle.open_price,
-                    volume_contracts_count=candle.volume_contracts_count,
-                    volume_base_currency=candle.volume_base_currency,
-                    volume_quote_currency=candle.volume_quote_currency,
-                )
-
-                session_write.add(
-                    new_candle,
-                )
-
-                migrated_count += 1
-
-                logger.info(
-                    f'Мигрирована запись: {candle.symbol_name} -> {symbol_id.value}, '
-                    f'start_timestamp={candle.start_timestamp_ms}, '
-                    f'is_closed={candle.is_closed}'
-                )
-
-                # Коммитим каждые _COMMIT_COUNT записей для производительности
-                if not migrated_count % _COMMIT_COUNT:
-                    await session_write.commit()
-                    logger.info(f'Зафиксировано {migrated_count} записей...')
-
-            # Коммитим оставшиеся записи
-            await session_write.commit()
-
-        logger.info(
-            f'Миграция свечей 15m завершена. Всего мигрировано: {migrated_count} записей'
-        )
+        total_migrated = sum(results)
+        logger.info(f'Миграция свечей 15m завершена. Всего мигрировано: {total_migrated} записей')
 
     async def migrate_candle_data_1h(self):
         """Миграция данных из okx_candle_data_1H в okx_candle_data_1H_2."""
@@ -339,60 +531,19 @@ class DatabaseMigrator:
             logger.info('Таблица okx_candle_data_1H пуста, пропускаем миграцию')
             return
 
-        migrated_count = 0
-        session_read: AsyncSession
-        session_write: AsyncSession
+        # Создаем батчи для многопроцессной обработки
+        batches = self._create_batches(total_rows)
+        logger.info(f'Создано {len(batches)} батчей для обработки в {_MAX_WORKERS} процессах')
 
-        async with self.session_factory() as session_read, self.session_factory() as session_write:
-            result = await session_read.stream(
-                select(
-                    OKXCandleData1H,
-                ).execution_options(
-                    yield_per=_YIELD_PER,
-                ),
-            )
+        # Подготавливаем аргументы для каждого процесса
+        args_list = [(self.database_url, offset, limit) for offset, limit in batches]
 
-            async for candle in result.scalars():
-                # Находим соответствующий symbol_id
-                symbol_id = SymbolConstants.IdByName[candle.symbol_name]
+        # Запускаем многопроцессную миграцию
+        with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+            results = list(executor.map(migrate_candle_data_1h_batch, args_list))
 
-                # Создаем новую запись с symbol_id
-                new_candle = OKXCandleData1H2(
-                    symbol_id=symbol_id.value,
-                    start_timestamp_ms=candle.start_timestamp_ms,
-                    is_closed=candle.is_closed,
-                    close_price=candle.close_price,
-                    high_price=candle.high_price,
-                    low_price=candle.low_price,
-                    open_price=candle.open_price,
-                    volume_contracts_count=candle.volume_contracts_count,
-                    volume_base_currency=candle.volume_base_currency,
-                    volume_quote_currency=candle.volume_quote_currency,
-                )
-
-                session_write.add(
-                    new_candle,
-                )
-
-                migrated_count += 1
-
-                logger.info(
-                    f'Мигрирована запись: {candle.symbol_name} -> {symbol_id.value}, '
-                    f'start_timestamp={candle.start_timestamp_ms}, '
-                    f'is_closed={candle.is_closed}'
-                )
-
-                # Коммитим каждые _COMMIT_COUNT записей для производительности
-                if not migrated_count % _COMMIT_COUNT:
-                    await session_write.commit()
-                    logger.info(f'Зафиксировано {migrated_count} записей...')
-
-            # Коммитим оставшиеся записи
-            await session_write.commit()
-
-        logger.info(
-            f'Миграция свечей 1H завершена. Всего мигрировано: {migrated_count} записей'
-        )
+        total_migrated = sum(results)
+        logger.info(f'Миграция свечей 1H завершена. Всего мигрировано: {total_migrated} записей')
 
     async def verify_migration(self):
         """Проверка результатов миграции."""
@@ -486,6 +637,8 @@ async def main():
 
 
 if __name__ == '__main__':
+    # Защита от многократного запуска процессов
+    mp.set_start_method('spawn', force=True)
     uvloop.run(
         main(),
     )
