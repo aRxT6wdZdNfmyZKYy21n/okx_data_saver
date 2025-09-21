@@ -9,6 +9,8 @@
 import asyncio
 import logging
 import multiprocessing as mp
+
+import numpy
 import os
 import sys
 import traceback
@@ -88,107 +90,158 @@ def migrate_trade_data_batch(args):
         skipped_count = 0
         error_count = 0
         session_read: AsyncSession
-        session_read_2: AsyncSession
         session_write: AsyncSession
 
-        async with session_factory() as session_read, session_factory() as session_read_2, session_factory() as session_write:
-            # Получаем общее количество записей
-            total_result = await session_read.execute(
-                select(
-                    func.count(),
-                ).select_from(
-                    OKXTradeData,
-                )
-            )
+        for symbol_name in SymbolConstants.IdByName:
+            print(f'[PID {os.getpid()}]: Обрабатываем записи с symbol name {symbol_name!r}...')
 
-            total_rows = total_result.scalar()
-            
-            print(f'[PID {os.getpid()}] Начинаем обработку {total_rows} записей торгов...')
-            
-            # Обрабатываем записи батчами для избежания проблем с памятью
-            batch_size = 1
-            for offset in range(
-                    0,
-                    total_rows,
-                    batch_size,
-            ):
-                try:
-                    # Получаем батч записей
-                    result = await session_read.execute(
-                        select(
-                            OKXTradeData,
-                        ).offset(
-                            offset,
-                        ).limit(
-                            batch_size,
-                        )
+            symbol_id = SymbolConstants.IdByName[symbol_name]
+
+            async with session_factory() as session_read, session_factory() as session_write:
+                # Получаем общее количество записей в таблице okx_trade_data
+
+                total_result = await session_read.execute(
+                    select(
+                        func.count(),
+                    ).select_from(
+                        OKXTradeData,
+                    ).where(
+                        OKXTradeData.symbol_name == symbol_name,
                     )
-                    
-                    trade_records = result.scalars().all()
-                    
-                    for trade_data in trade_records:
-                        try:
-                            # Проверяем, что symbol_name существует в константах
-                            if trade_data.symbol_name not in SymbolConstants.IdByName:
-                                print(f'[PID {os.getpid()}] Пропускаем запись с неизвестным symbol_name: {trade_data.symbol_name!r}')
-                                skipped_count += 1
+                )
 
-                                continue
-                                
-                            symbol_id = SymbolConstants.IdByName[trade_data.symbol_name]
-                            trade_id = trade_data.trade_id
+                total_rows = total_result.scalar()
 
-                            # Проверяем, не существует ли уже такая запись
-                            result_2 = await session_read_2.execute(
-                                select(
-                                    OKXTradeData2
-                                ).where(
-                                    and_(
-                                        OKXTradeData2.symbol_id == symbol_id,
-                                        OKXTradeData2.trade_id == trade_id,
-                                    ),
+                okx_trade_data_existent_trade_id_array = numpy.empty(
+                    dtype=numpy.int64,
+                    shape=(
+                        total_rows,
+                    ),
+                )
+
+                okx_trade_data_existent_trade_id_array_idx = 0
+
+                # Получаем общее количество записей в таблице okx_order_book_data
+
+                total_result = await session_read.execute(
+                    select(
+                        func.count(),
+                    ).select_from(
+                        OKXTradeData2,
+                    ).where(
+                        OKXTradeData2.symbol_id == symbol_id,
+                    )
+                )
+
+                total_rows = total_result.scalar()
+
+                okx_trade_data_2_existent_trade_id_array = numpy.empty(
+                    dtype=numpy.int64,
+                    shape=(
+                        total_rows,
+                    ),
+                )
+
+                okx_trade_data_2_existent_trade_id_array_idx = 0
+
+                result = await session_read.stream(
+                    select(
+                        OKXTradeData.trade_id
+                    ).where(
+                        OKXTradeData.symbol_name == symbol_name,
+                    ).execution_options(
+                        yield_per=_YIELD_PER
+                    )
+                )
+
+                async for trade_data in result:
+                    trade_id = trade_data.trade_id
+
+                    okx_trade_data_existent_trade_id_array[okx_trade_data_existent_trade_id_array_idx] = trade_id
+
+                    okx_trade_data_existent_trade_id_array_idx += 1
+
+                result = await session_read.stream(
+                    select(
+                        OKXTradeData2.trade_id
+                    ).where(
+                        OKXTradeData2.symbol_id == symbol_id,
+                    ).execution_options(
+                        yield_per=_YIELD_PER
+                    )
+                )
+
+                async for trade_data in result:
+                    trade_id = trade_data.trade_id
+
+                    okx_trade_data_2_existent_trade_id_array[okx_trade_data_existent_trade_id_array_idx] = trade_id
+
+                    okx_trade_data_2_existent_trade_id_array_idx += 1
+
+                okx_trade_data_existent_trade_id_array_diff = numpy.setdiff1d(
+                    okx_trade_data_existent_trade_id_array,
+                    okx_trade_data_2_existent_trade_id_array,
+                )
+
+                print(f'[PID {os.getpid()}] Начинаем обработку {okx_trade_data_existent_trade_id_array_diff.size} записей торгов...')
+
+                for trade_id in okx_trade_data_existent_trade_id_array_diff:
+                    try:
+                        # Получаем батч записей
+                        result = await session_read.execute(
+                            select(
+                                OKXTradeData,
+                            ).where(
+                                and_(
+                                    OKXTradeData.symbol_name == symbol_name,
+                                    OKXTradeData.trade_id == trade_id,
                                 )
                             )
+                        )
 
-                            existing_trade = result_2.scalar_one_or_none()
-                            if existing_trade is not None:
-                                print(
-                                    f'Trade already exists: {existing_trade}',
+                        trade_records = result.scalars().all()
+
+                        for trade_data in trade_records:
+                            try:
+                                # Проверяем, что symbol_name существует в константах
+                                if trade_data.symbol_name not in SymbolConstants.IdByName:
+                                    print(f'[PID {os.getpid()}] Пропускаем запись с неизвестным symbol_name: {trade_data.symbol_name!r}')
+                                    skipped_count += 1
+
+                                    continue
+
+                                symbol_id = SymbolConstants.IdByName[trade_data.symbol_name]
+
+                                # Создаем новую запись
+                                new_trade_data = OKXTradeData2(
+                                    symbol_id=symbol_id,
+                                    trade_id=trade_data.trade_id,
+                                    is_buy=trade_data.is_buy,
+                                    price=trade_data.price,
+                                    quantity=trade_data.quantity,
+                                    timestamp_ms=trade_data.timestamp_ms,
                                 )
 
+                                session_write.add(
+                                    new_trade_data,
+                                )
+
+                                migrated_count += 1
+
+                                if migrated_count % _COMMIT_COUNT == 0:
+                                    await session_write.commit()
+                                    print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей торгов...')
+                            except Exception as e:
+                                error_count += 1
+                                print(f'[PID {os.getpid()}] Ошибка при обработке записи trade_id={getattr(trade_data, "trade_id", "unknown")}: {str(e)}')
                                 continue
 
-                            # Создаем новую запись
-                            new_trade_data = OKXTradeData2(
-                                symbol_id=symbol_id,
-                                trade_id=trade_data.trade_id,
-                                is_buy=trade_data.is_buy,
-                                price=trade_data.price,
-                                quantity=trade_data.quantity,
-                                timestamp_ms=trade_data.timestamp_ms,
-                            )
-
-                            session_write.add(
-                                new_trade_data,
-                            )
-
-                            migrated_count += 1
-
-                            if migrated_count % _COMMIT_COUNT == 0:
-                                await session_write.commit()
-                                print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей торгов...')
-                        except Exception as e:
-                            error_count += 1
-                            print(f'[PID {os.getpid()}] Ошибка при обработке записи trade_id={getattr(trade_data, "trade_id", "unknown")}: {str(e)}')
-                            continue
-                    
-                    # Коммитим оставшиеся записи в батче
-                    await session_write.commit()
-                        
-                except Exception as e:
-                    print(f'[PID {os.getpid()}] Ошибка при получении батча offset={offset}: {str(e)}')
-                    error_count += 1
-                    continue
+                        # Коммитим оставшиеся записи в батче
+                        await session_write.commit()
+                    except Exception as e:
+                        print(f'[PID {os.getpid()}] Ошибка при получении trade_id={trade_id}: {str(e)}')
+                        error_count += 1
+                        continue
         
         await engine.dispose()
         
@@ -219,113 +272,157 @@ def migrate_order_book_data_batch(args):
         skipped_count = 0
         error_count = 0
         session_read: AsyncSession
-        session_read_2: AsyncSession
         session_write: AsyncSession
 
-        async with session_factory() as session_read, session_factory() as session_read_2, session_factory() as session_write:
-            # Получаем общее количество записей
-            total_result = await session_read.execute(
-                select(
-                    func.count(),
-                ).select_from(
-                    OKXOrderBookData,
-                )
-            )
+        for symbol_name in SymbolConstants.IdByName:
+            print(f'[PID {os.getpid()}]: Обрабатываем записи с symbol name {symbol_name!r}...')
 
-            total_rows = total_result.scalar()
-            
-            print(f'[PID {os.getpid()}] Начинаем обработку {total_rows} записей order book...')
-            
-            # Обрабатываем записи батчами для избежания проблем с памятью
-            batch_size = 1
+            symbol_id = SymbolConstants.IdByName[symbol_name]
 
-            for offset in range(
-                    0,
-                    total_rows,
-                    batch_size,
-            ):
-                try:
-                    # Получаем батч записей
-                    result = await session_read.execute(
-                        select(
-                            OKXOrderBookData,
-                        ).offset(
-                            offset,
-                        ).limit(
-                            batch_size,
-                        ),
+            async with session_factory() as session_read, session_factory() as session_write:
+                # Получаем общее количество записей в таблице okx_order_book_data
+
+                total_result = await session_read.execute(
+                    select(
+                        func.count(),
+                    ).select_from(
+                        OKXOrderBookData,
+                    ).where(
+                        OKXOrderBookData.symbol_name == symbol_name,
                     )
-                    
-                    order_book_records = result.scalars().all()
-                    
-                    for order_book in order_book_records:
-                        try:
-                            # Проверяем, что action существует в константах
-                            if order_book.action not in OKXConstants.OrderBookActionIdByName:
-                                print(f'[PID {os.getpid()}] Пропускаем запись с неизвестным action: {order_book.action}')
-                                skipped_count += 1
-                                continue
-                                
-                            # Проверяем, что symbol_name существует в константах
-                            if order_book.symbol_name not in SymbolConstants.IdByName:
-                                print(f'[PID {os.getpid()}] Пропускаем запись с неизвестным symbol_name: {order_book.symbol_name}')
-                                skipped_count += 1
-                                continue
-                                
-                            action_id = OKXConstants.OrderBookActionIdByName[order_book.action]
-                            symbol_id = SymbolConstants.IdByName[order_book.symbol_name]
+                )
 
-                            timestamp_ms = order_book.timestamp_ms
+                total_rows = total_result.scalar()
 
-                            # Проверяем, не существует ли уже такая запись
-                            result_2 = await session_read_2.execute(
-                                select(
-                                    OKXOrderBookData2
-                                ).where(
-                                    and_(
-                                        OKXOrderBookData2.symbol_id == symbol_id,
-                                        OKXOrderBookData2.timestamp_ms == timestamp_ms,
-                                    ),
+                okx_order_book_data_existent_timestamp_ms_array = numpy.empty(
+                    dtype=numpy.int64,
+                    shape=(
+                        total_rows,
+                    ),
+                )
+
+                okx_order_book_data_existent_timestamp_ms_array_idx = 0
+
+                # Получаем общее количество записей в таблице okx_order_book_data
+
+                total_result = await session_read.execute(
+                    select(
+                        func.count(),
+                    ).select_from(
+                        OKXOrderBookData2,
+                    ).where(
+                        OKXOrderBookData2.symbol_id == symbol_id,
+                    )
+                )
+
+                total_rows = total_result.scalar()
+
+                okx_order_book_data_2_existent_timestamp_ms_array = numpy.empty(
+                    dtype=numpy.int64,
+                    shape=(
+                        total_rows,
+                    ),
+                )
+
+                okx_order_book_data_2_existent_timestamp_ms_array_idx = 0
+
+                result = await session_read.stream(
+                    select(
+                        OKXOrderBookData.timestamp_ms
+                    ).where(
+                        OKXOrderBookData.symbol_name == symbol_name,
+                    )
+                )
+
+                async for order_book_data in result:
+                    timestamp_ms = order_book_data.timestamp_ms
+
+                    okx_order_book_data_existent_timestamp_ms_array[okx_order_book_data_existent_timestamp_ms_array_idx] = timestamp_ms
+
+                    okx_order_book_data_existent_timestamp_ms_array_idx += 1
+
+                result = await session_read.stream(
+                    select(
+                        OKXOrderBookData2.timestamp_ms
+                    ).where(
+                        OKXOrderBookData2.symbol_id == symbol_id,
+                    )
+                )
+
+                async for order_book_data in result:
+                    timestamp_ms = order_book_data.timestamp_ms
+
+                    okx_order_book_data_2_existent_timestamp_ms_array[okx_order_book_data_2_existent_timestamp_ms_array_idx] = timestamp_ms
+
+                    okx_order_book_data_2_existent_timestamp_ms_array_idx += 1
+
+                okx_order_book_data_existent_timestamp_ms_array_diff = numpy.setdiff1d(
+                    okx_order_book_data_existent_timestamp_ms_array,
+                    okx_order_book_data_2_existent_timestamp_ms_array,
+                )
+
+                print(f'[PID {os.getpid()}] Начинаем обработку {okx_order_book_data_existent_timestamp_ms_array_diff.size} записей торгов...')
+
+                for timestamp_ms in okx_order_book_data_existent_timestamp_ms_array_diff:
+                    try:
+                        # Получаем батч записей
+                        result = await session_read.execute(
+                            select(
+                                OKXOrderBookData,
+                            ).where(
+                                and_(
+                                    OKXTradeData.symbol_name == symbol_name,
+                                    OKXTradeData.timestamp_ms == timestamp_ms,
                                 )
-                            )
+                            ),
+                        )
 
-                            existing_order_book = result_2.scalar_one_or_none()
-                            if existing_order_book is not None:
-                                print(
-                                    f'Order book already exists: {existing_order_book}',
+                        order_book_records = result.scalars().all()
+
+                        for order_book in order_book_records:
+                            try:
+                                # Проверяем, что action существует в константах
+                                if order_book.action not in OKXConstants.OrderBookActionIdByName:
+                                    print(f'[PID {os.getpid()}] Пропускаем запись с неизвестным action: {order_book.action}')
+                                    skipped_count += 1
+                                    continue
+
+                                # Проверяем, что symbol_name существует в константах
+                                if order_book.symbol_name not in SymbolConstants.IdByName:
+                                    print(f'[PID {os.getpid()}] Пропускаем запись с неизвестным symbol_name: {order_book.symbol_name}')
+                                    skipped_count += 1
+                                    continue
+
+                                action_id = OKXConstants.OrderBookActionIdByName[order_book.action]
+
+                                new_order_book = OKXOrderBookData2(
+                                    symbol_id=symbol_id,
+                                    timestamp_ms=order_book.timestamp_ms,
+                                    action_id=action_id,
+                                    asks=order_book.asks,
+                                    bids=order_book.bids,
                                 )
 
+                                session_write.add(
+                                    new_order_book,
+                                )
+                                migrated_count += 1
+
+                                if migrated_count % _COMMIT_COUNT == 0:
+                                    await session_write.commit()
+                                    print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей order book...')
+                            except Exception as e:
+                                error_count += 1
+                                print(f'[PID {os.getpid()}] Ошибка при обработке записи order book timestamp_ms={getattr(order_book, "timestamp_ms", "unknown")}: {str(e)}')
                                 continue
 
-                            new_order_book = OKXOrderBookData2(
-                                symbol_id=symbol_id,
-                                timestamp_ms=timestamp_ms,
-                                action_id=action_id,
-                                asks=order_book.asks,
-                                bids=order_book.bids,
-                            )
-                            
-                            session_write.add(
-                                new_order_book,
-                            )
-                            migrated_count += 1
-                            
-                            if migrated_count % _COMMIT_COUNT == 0:
-                                await session_write.commit()
-                                print(f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей order book...')
+                        # Коммитим оставшиеся записи в батче
+                        await session_write.commit()
 
-                        except Exception as e:
-                            error_count += 1
-                            print(f'[PID {os.getpid()}] Ошибка при обработке записи order book timestamp_ms={getattr(order_book, "timestamp_ms", "unknown")}: {str(e)}')
-                            continue
-                    
-                    # Коммитим оставшиеся записи в батче
-                    await session_write.commit()
-                        
-                except Exception as e:
-                    print(f'[PID {os.getpid()}] Ошибка при получении батча offset={offset}: {str(e)}')
-                    error_count += 1
-                    continue
+                    except Exception as e:
+                        print(f'[PID {os.getpid()}] Ошибка при получении timestamp_ms={timestamp_ms}: {str(e)}')
+                        error_count += 1
+                        continue
         
         await engine.dispose()
         
