@@ -595,7 +595,7 @@ class FinPlotChartProcessor(object):
             async with postgres_db_session_maker() as session:
                 new_trade_data: OKXTradeData2
 
-                for new_trade_data in await session.stream(
+                result = await session.stream(
                     select(
                         OKXTradeData2,
                     )
@@ -610,15 +610,19 @@ class FinPlotChartProcessor(object):
                         OKXTradeData2.trade_id.desc(),
                     )
                     .limit(
-                        2_000_000,
+                        # 2_000_000,
                         # 1_000_000,
                         # 500_000,
                         # 50_000,
                         # 10_000
-                        # 1_000
+                        1_000
                         # 50
+                    ).execution_options(
+                        yield_per=10000,
                     )
-                ).scalars():
+                )
+
+                async for new_trade_data in result.scalars():
                     new_trade_price = new_trade_data.price
 
                     if new_max_trade_price is None or (
@@ -906,6 +910,10 @@ class FinPlotChartProcessor(object):
                 ],
             )
 
+            # new_trades_dataframe = pandas.read_csv(
+            #     'data/1.csv',
+            # )
+
             assert new_trades_dataframe.size, None
 
             new_trades_dataframe.timestamp_ms = pandas.to_datetime(
@@ -1076,12 +1084,15 @@ WHERE symbol_name IS NOT NULL;
         # delta_price / delta_trade_id = width / height;
         # width = height * (delta_price / delta_trade_id);
 
-        aspect_ratio = delta_price / delta_trade_id
+        # aspect_ratio = delta_price / delta_trade_id
 
-        height = 1000
+        height = int(
+            delta_price,
+        )  # 10000
 
         width = int(
-            height * aspect_ratio,
+            # height * aspect_ratio,
+            delta_trade_id,
         )
 
         order_book_volume_array = numpy.zeros((
