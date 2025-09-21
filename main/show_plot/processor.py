@@ -9,6 +9,10 @@ from decimal import (
     Decimal,
 )
 
+from functools import (
+    partial,
+)
+
 import numpy
 import pandas
 import talib
@@ -25,6 +29,9 @@ from sqlalchemy import (
     and_,
     select,
     text,
+)
+from sqlalchemy.orm import (
+    Session,
 )
 
 from constants.common import (
@@ -594,72 +601,24 @@ class FinPlotChartProcessor(object):
             else:
                 min_trade_id = 0
 
-            new_trade_raw_data_list: list[dict] | None = None
-            new_max_trade_price: Decimal | None = None
-            new_min_trade_price: Decimal | None = None
-
             postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
 
             async with postgres_db_session_maker() as session:
-                new_trade_data: OKXTradeData2
-
-                result = await session.stream(
-                    select(
-                        OKXTradeData2,
-                    )
-                    .where(
-                        and_(
-                            OKXTradeData2.symbol_id == current_symbol_id,
-                            OKXTradeData2.trade_id >= min_trade_id,
+                async with session.begin():
+                    new_trades_dataframe: DataFrame = await session.run_sync(
+                        partial(
+                            self.__fetch_trades_dataframe,
+                            min_trade_id=min_trade_id,
+                            symbol_id=current_symbol_id,
                         )
                     )
-                    .order_by(
-                        OKXTradeData2.symbol_id.asc(),
-                        OKXTradeData2.trade_id.desc(),
-                    )
-                    .limit(
-                        # 2_000_000,
-                        # 1_000_000,
-                        # 500_000,
-                        50_000,
-                        # 10_000
-                        # 1_000
-                        # 50
-                    ).execution_options(
-                        yield_per=10000,
-                    )
-                )
 
-                async for new_trade_data in result.scalars():
-                    new_trade_price = new_trade_data.price
+            if not new_trades_dataframe.size:
+                return
 
-                    if new_max_trade_price is None or (
-                        new_max_trade_price < new_trade_price
-                    ):
-                        new_max_trade_price = new_trade_price
+            price_series: Series = new_trades_dataframe.price
 
-                    if new_min_trade_price is None or (
-                        new_min_trade_price > new_trade_price
-                    ):
-                        new_min_trade_price = new_trade_price
-
-                    new_trade_raw_data = {
-                        'price': float(
-                            new_trade_price,
-                        ),
-                        'quantity': float(
-                            new_trade_data.quantity,
-                        ),
-                        'timestamp_ms': new_trade_data.timestamp_ms,
-                        'trade_id': new_trade_data.trade_id,
-                    }
-
-                    if new_trade_raw_data_list is None:
-                        new_trade_raw_data_list = []
-
-                    new_trade_raw_data_list.append(
-                        new_trade_raw_data,
-                    )
+            new_max_trade_price = price_series.max()
 
             if new_max_trade_price is not None:
                 max_trade_price = self.__max_trade_price
@@ -669,6 +628,8 @@ class FinPlotChartProcessor(object):
                         max_trade_price  # noqa
                     ) = new_max_trade_price
 
+            new_min_trade_price = price_series.min()
+
             if new_min_trade_price is not None:
                 min_trade_price = self.__min_trade_price
 
@@ -677,267 +638,263 @@ class FinPlotChartProcessor(object):
                         min_trade_price  # noqa
                     ) = new_min_trade_price
 
-            if new_trade_raw_data_list is None:
-                return
-
-            new_trades_dataframe = DataFrame.from_records(
-                new_trade_raw_data_list,
-                # [
-                #     {
-                #         'price': 100000.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533919,
-                #         'trade_id': 1,
-                #     },
-                #     {
-                #         'price': 99900.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533920,
-                #         'trade_id': 2,
-                #     },
-                #     {
-                #         'price': 99900.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533921,
-                #         'trade_id': 3,
-                #     },
-                #     {
-                #         'price': 99800.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533922,
-                #         'trade_id': 4,
-                #     },
-                #     {
-                #         'price': 99800.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533923,
-                #         'trade_id': 5,
-                #     },
-                #     {
-                #         'price': 99800.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533924,
-                #         'trade_id': 6,
-                #     },
-                #     {
-                #         'price': 99700.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533925,
-                #         'trade_id': 7,
-                #     },
-                #     {
-                #         'price': 99700.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533926,
-                #         'trade_id': 8,
-                #     },
-                #     {
-                #         'price': 99600.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533927,
-                #         'trade_id': 9,
-                #     },
-                #     {
-                #         'price': 99600.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533928,
-                #         'trade_id': 10,
-                #     },
-                #     {
-                #         'price': 99500.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533929,
-                #         'trade_id': 11,
-                #     },
-                #     {
-                #         'price': 99600.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533930,
-                #         'trade_id': 12,
-                #     },
-                # ],
-                # [
-                #     {
-                #         'price': 115924.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533919,
-                #         'trade_id': 1,
-                #     },
-                #     {
-                #         'price': 115922.33,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533920,
-                #         'trade_id': 2,
-                #     },
-                #     {
-                #         'price': 115922.33,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533921,
-                #         'trade_id': 3,
-                #     },
-                #     {
-                #         'price': 115922.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533922,
-                #         'trade_id': 4,
-                #     },
-                #     {
-                #         'price': 115922.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533923,
-                #         'trade_id': 5,
-                #     },
-                #     {
-                #         'price': 115940.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533924,
-                #         'trade_id': 6,
-                #     },
-                #     {
-                #         'price': 115940.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533925,
-                #         'trade_id': 7,
-                #     },
-                #     {
-                #         'price': 115944.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533926,
-                #         'trade_id': 8,
-                #     },
-                #     {
-                #         'price': 115944.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533927,
-                #         'trade_id': 9,
-                #     },
-                #     {
-                #         'price': 115948.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533928,
-                #         'trade_id': 10,
-                #     },
-                #     {
-                #         'price': 115948.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533929,
-                #         'trade_id': 11,
-                #     },
-                #     {
-                #         'price': 115952.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533930,
-                #         'trade_id': 12,
-                #     },
-                #     {
-                #         'price': 115952.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533931,
-                #         'trade_id': 13,
-                #     },
-                #     {
-                #         'price': 115954.9,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533932,
-                #         'trade_id': 14,
-                #     },
-                #     {
-                #         'price': 115952.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533933,
-                #         'trade_id': 15,
-                #     },
-                # ],
-                # [
-                #     {
-                #         'price': 115430.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533919,
-                #         'trade_id': 1,
-                #     },
-                #     {
-                #         'price': 116150.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533920,
-                #         'trade_id': 2,
-                #     },
-                #     {
-                #         'price': 115800.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533921,
-                #         'trade_id': 3,
-                #     },
-                #     {
-                #         'price': 116300.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533922,
-                #         'trade_id': 4,
-                #     },
-                #     {
-                #         'price': 115000.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533923,
-                #         'trade_id': 5,
-                #     },
-                #     {
-                #         'price': 115600.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533924,
-                #         'trade_id': 6,
-                #     },
-                #     {
-                #         'price': 115050.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533925,
-                #         'trade_id': 7,
-                #     },
-                #     {
-                #         'price': 115700.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533926,
-                #         'trade_id': 8,
-                #     },
-                #     {
-                #         'price': 115500.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533927,
-                #         'trade_id': 9,
-                #     },
-                #     {
-                #         'price': 115735.0,
-                #         'quantity': 1.0,
-                #         'timestamp_ms': 1758136533928,
-                #         'trade_id': 10,
-                #     },
-                # ],
-                columns=[
-                    'price',
-                    'quantity',
-                    'timestamp_ms',
-                    'trade_id',
-                ],
-            )
+            # new_trades_dataframe = DataFrame.from_records(
+            #     # [
+            #     #     {
+            #     #         'price': 100000.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533919,
+            #     #         'trade_id': 1,
+            #     #     },
+            #     #     {
+            #     #         'price': 99900.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533920,
+            #     #         'trade_id': 2,
+            #     #     },
+            #     #     {
+            #     #         'price': 99900.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533921,
+            #     #         'trade_id': 3,
+            #     #     },
+            #     #     {
+            #     #         'price': 99800.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533922,
+            #     #         'trade_id': 4,
+            #     #     },
+            #     #     {
+            #     #         'price': 99800.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533923,
+            #     #         'trade_id': 5,
+            #     #     },
+            #     #     {
+            #     #         'price': 99800.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533924,
+            #     #         'trade_id': 6,
+            #     #     },
+            #     #     {
+            #     #         'price': 99700.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533925,
+            #     #         'trade_id': 7,
+            #     #     },
+            #     #     {
+            #     #         'price': 99700.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533926,
+            #     #         'trade_id': 8,
+            #     #     },
+            #     #     {
+            #     #         'price': 99600.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533927,
+            #     #         'trade_id': 9,
+            #     #     },
+            #     #     {
+            #     #         'price': 99600.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533928,
+            #     #         'trade_id': 10,
+            #     #     },
+            #     #     {
+            #     #         'price': 99500.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533929,
+            #     #         'trade_id': 11,
+            #     #     },
+            #     #     {
+            #     #         'price': 99600.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533930,
+            #     #         'trade_id': 12,
+            #     #     },
+            #     # ],
+            #     # [
+            #     #     {
+            #     #         'price': 115924.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533919,
+            #     #         'trade_id': 1,
+            #     #     },
+            #     #     {
+            #     #         'price': 115922.33,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533920,
+            #     #         'trade_id': 2,
+            #     #     },
+            #     #     {
+            #     #         'price': 115922.33,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533921,
+            #     #         'trade_id': 3,
+            #     #     },
+            #     #     {
+            #     #         'price': 115922.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533922,
+            #     #         'trade_id': 4,
+            #     #     },
+            #     #     {
+            #     #         'price': 115922.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533923,
+            #     #         'trade_id': 5,
+            #     #     },
+            #     #     {
+            #     #         'price': 115940.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533924,
+            #     #         'trade_id': 6,
+            #     #     },
+            #     #     {
+            #     #         'price': 115940.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533925,
+            #     #         'trade_id': 7,
+            #     #     },
+            #     #     {
+            #     #         'price': 115944.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533926,
+            #     #         'trade_id': 8,
+            #     #     },
+            #     #     {
+            #     #         'price': 115944.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533927,
+            #     #         'trade_id': 9,
+            #     #     },
+            #     #     {
+            #     #         'price': 115948.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533928,
+            #     #         'trade_id': 10,
+            #     #     },
+            #     #     {
+            #     #         'price': 115948.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533929,
+            #     #         'trade_id': 11,
+            #     #     },
+            #     #     {
+            #     #         'price': 115952.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533930,
+            #     #         'trade_id': 12,
+            #     #     },
+            #     #     {
+            #     #         'price': 115952.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533931,
+            #     #         'trade_id': 13,
+            #     #     },
+            #     #     {
+            #     #         'price': 115954.9,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533932,
+            #     #         'trade_id': 14,
+            #     #     },
+            #     #     {
+            #     #         'price': 115952.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533933,
+            #     #         'trade_id': 15,
+            #     #     },
+            #     # ],
+            #     # [
+            #     #     {
+            #     #         'price': 115430.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533919,
+            #     #         'trade_id': 1,
+            #     #     },
+            #     #     {
+            #     #         'price': 116150.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533920,
+            #     #         'trade_id': 2,
+            #     #     },
+            #     #     {
+            #     #         'price': 115800.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533921,
+            #     #         'trade_id': 3,
+            #     #     },
+            #     #     {
+            #     #         'price': 116300.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533922,
+            #     #         'trade_id': 4,
+            #     #     },
+            #     #     {
+            #     #         'price': 115000.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533923,
+            #     #         'trade_id': 5,
+            #     #     },
+            #     #     {
+            #     #         'price': 115600.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533924,
+            #     #         'trade_id': 6,
+            #     #     },
+            #     #     {
+            #     #         'price': 115050.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533925,
+            #     #         'trade_id': 7,
+            #     #     },
+            #     #     {
+            #     #         'price': 115700.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533926,
+            #     #         'trade_id': 8,
+            #     #     },
+            #     #     {
+            #     #         'price': 115500.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533927,
+            #     #         'trade_id': 9,
+            #     #     },
+            #     #     {
+            #     #         'price': 115735.0,
+            #     #         'quantity': 1.0,
+            #     #         'timestamp_ms': 1758136533928,
+            #     #         'trade_id': 10,
+            #     #     },
+            #     # ],
+            #     columns=[
+            #         'price',
+            #         'quantity',
+            #         'timestamp_ms',
+            #         'trade_id',
+            #     ],
+            # )
 
             # new_trades_dataframe = pandas.read_csv(
             #     'data/1.csv',
             # )
 
-            assert new_trades_dataframe.size, None
-
-            new_trades_dataframe.timestamp_ms = pandas.to_datetime(
-                new_trades_dataframe.timestamp_ms,
-                unit='ms',
-            )
-
-            new_trades_dataframe.set_index(
-                'trade_id',
-                inplace=True,
-            )
-
-            new_trades_dataframe.sort_values(
-                'trade_id',
-                inplace=True,
-            )
+            # assert new_trades_dataframe.size, None
+            #
+            # new_trades_dataframe.timestamp_ms = pandas.to_datetime(
+            #     new_trades_dataframe.timestamp_ms,
+            #     unit='ms',
+            # )
+            #
+            # new_trades_dataframe.set_index(
+            #     'trade_id',
+            #     inplace=True,
+            # )
+            #
+            # new_trades_dataframe.sort_values(
+            #     'trade_id',
+            #     inplace=True,
+            # )
 
             if trades_dataframe is not None:
                 trades_dataframe.update(
@@ -1004,6 +961,72 @@ class FinPlotChartProcessor(object):
         await self.__window.plot(
             is_need_run_once=True,
         )
+
+    @staticmethod
+    def __fetch_trades_dataframe(
+            session: Session,
+
+            min_trade_id: int,
+            symbol_id: SymbolId,
+    ) -> DataFrame | None:
+        connection = session.connection()
+
+        trades_dataframe_chunks: list[DataFrame] = []
+
+        for trades_dataframe_chunk in pandas.read_sql_query(
+            select(
+                OKXTradeData2,
+            )
+            .where(
+                and_(
+                    OKXTradeData2.symbol_id == symbol_id,
+                    OKXTradeData2.trade_id >= min_trade_id,
+                )
+            )
+            .order_by(
+                OKXTradeData2.symbol_id.asc(),
+                OKXTradeData2.trade_id.desc(),
+            )
+            .limit(
+                2_000_000,
+                # 1_000_000,
+                # 500_000,
+                # 50_000,
+                # 10_000
+                # 1_000
+                # 50
+            ),
+            con=connection,
+            chunksize=10_000,
+        ):
+            trades_dataframe_chunk.timestamp_ms = pandas.to_datetime(
+                trades_dataframe_chunk.timestamp_ms,
+                unit='ms',
+            )
+
+            trades_dataframe_chunk.set_index(
+                'trade_id',
+                inplace=True,
+            )
+
+            trades_dataframe_chunks.append(
+                trades_dataframe_chunk,
+            )
+
+            print(
+                f'Fetched {len(trades_dataframe_chunks)} chunks'
+            )
+
+        trades_dataframe = pandas.concat(
+            trades_dataframe_chunks
+        )
+
+        trades_dataframe.sort_values(
+            'trade_id',
+            inplace=True,
+        )
+
+        return trades_dataframe
 
     async def __update_current_available_symbol_name_set(
         self,
