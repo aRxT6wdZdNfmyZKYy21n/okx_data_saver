@@ -192,7 +192,7 @@ def migrate_trade_data_batch(args):
 
                     trade_id = trade_data.trade_id
 
-                    okx_trade_data_2_existent_trade_id_array[okx_trade_data_existent_trade_id_array_idx] = trade_id
+                    okx_trade_data_2_existent_trade_id_array[okx_trade_data_2_existent_trade_id_array_idx] = trade_id
 
                     okx_trade_data_2_existent_trade_id_array_idx += 1
 
