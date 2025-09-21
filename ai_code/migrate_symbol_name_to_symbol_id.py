@@ -149,34 +149,48 @@ def migrate_trade_data_batch(args):
                         OKXTradeData.trade_id
                     ).where(
                         OKXTradeData.symbol_name == symbol_name,
+                    ).limit(
+                        okx_trade_data_existent_trade_id_array.size,
                     ).execution_options(
                         yield_per=_YIELD_PER
                     )
                 )
 
                 async for trade_data in result:
+                    if okx_trade_data_existent_trade_id_array_idx % 1000 == 0:
+                        print(trade_data, okx_trade_data_existent_trade_id_array_idx)
+
                     trade_id = trade_data.trade_id
 
                     okx_trade_data_existent_trade_id_array[okx_trade_data_existent_trade_id_array_idx] = trade_id
 
                     okx_trade_data_existent_trade_id_array_idx += 1
 
+                assert okx_trade_data_existent_trade_id_array_idx == okx_trade_data_existent_trade_id_array.size, (okx_trade_data_existent_trade_id_array_idx, okx_trade_data_existent_trade_id_array.size)
+
                 result = await session_read.stream(
                     select(
                         OKXTradeData2.trade_id
                     ).where(
                         OKXTradeData2.symbol_id == symbol_id,
+                    ).limit(
+                        okx_trade_data_2_existent_trade_id_array.size,
                     ).execution_options(
                         yield_per=_YIELD_PER
                     )
                 )
 
                 async for trade_data in result:
+                    if okx_trade_data_2_existent_trade_id_array_idx % 1000 == 0:
+                        print(trade_data, okx_trade_data_2_existent_trade_id_array_idx)
+
                     trade_id = trade_data.trade_id
 
                     okx_trade_data_2_existent_trade_id_array[okx_trade_data_existent_trade_id_array_idx] = trade_id
 
                     okx_trade_data_2_existent_trade_id_array_idx += 1
+
+                assert okx_trade_data_2_existent_trade_id_array_idx == okx_trade_data_2_existent_trade_id_array.size, (okx_trade_data_2_existent_trade_id_array_idx, okx_trade_data_2_existent_trade_id_array.size)
 
                 okx_trade_data_existent_trade_id_array_diff = numpy.setdiff1d(
                     okx_trade_data_existent_trade_id_array,
@@ -331,30 +345,48 @@ def migrate_order_book_data_batch(args):
                         OKXOrderBookData.timestamp_ms
                     ).where(
                         OKXOrderBookData.symbol_name == symbol_name,
+                    ).limit(
+                        okx_order_book_data_existent_timestamp_ms_array.size,
+                    ).execution_options(
+                        yield_per=_YIELD_PER
                     )
                 )
 
                 async for order_book_data in result:
+                    if okx_order_book_data_existent_timestamp_ms_array_idx % 1000 == 0:
+                        print(order_book_data, okx_order_book_data_existent_timestamp_ms_array_idx)
+
                     timestamp_ms = order_book_data.timestamp_ms
 
                     okx_order_book_data_existent_timestamp_ms_array[okx_order_book_data_existent_timestamp_ms_array_idx] = timestamp_ms
 
                     okx_order_book_data_existent_timestamp_ms_array_idx += 1
 
+                assert okx_order_book_data_existent_timestamp_ms_array_idx == okx_order_book_data_existent_timestamp_ms_array.size, (okx_order_book_data_existent_timestamp_ms_array_idx, okx_order_book_data_existent_timestamp_ms_array.size)
+
                 result = await session_read.stream(
                     select(
                         OKXOrderBookData2.timestamp_ms
                     ).where(
                         OKXOrderBookData2.symbol_id == symbol_id,
+                    ).limit(
+                        okx_order_book_data_2_existent_timestamp_ms_array.size,
+                    ).execution_options(
+                        yield_per=_YIELD_PER
                     )
                 )
 
                 async for order_book_data in result:
+                    if okx_order_book_data_2_existent_timestamp_ms_array_idx % 1000 == 0:
+                        print(order_book_data, okx_order_book_data_2_existent_timestamp_ms_array_idx)
+
                     timestamp_ms = order_book_data.timestamp_ms
 
                     okx_order_book_data_2_existent_timestamp_ms_array[okx_order_book_data_2_existent_timestamp_ms_array_idx] = timestamp_ms
 
                     okx_order_book_data_2_existent_timestamp_ms_array_idx += 1
+
+                assert okx_order_book_data_2_existent_timestamp_ms_array_idx == okx_order_book_data_2_existent_timestamp_ms_array.size, (okx_order_book_data_2_existent_timestamp_ms_array_idx, okx_order_book_data_2_existent_timestamp_ms_array.size)
 
                 okx_order_book_data_existent_timestamp_ms_array_diff = numpy.setdiff1d(
                     okx_order_book_data_existent_timestamp_ms_array,
@@ -797,10 +829,10 @@ class DatabaseMigrator:
 
             logger.info('Миграция данных...')
             await asyncio.gather(
-                self.migrate_trade_data(),
+                # self.migrate_trade_data(),
                 self.migrate_order_book_data(),
-                self.migrate_candle_data_15m(),
-                self.migrate_candle_data_1h(),
+                # self.migrate_candle_data_15m(),
+                # self.migrate_candle_data_1h(),
             )
 
             logger.info('Проверка результатов...')
