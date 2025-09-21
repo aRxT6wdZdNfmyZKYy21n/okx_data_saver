@@ -97,7 +97,7 @@ def migrate_trade_data_batch(args):
 
             symbol_id = SymbolConstants.IdByName[symbol_name]
 
-            async with session_factory() as session_read, session_factory() as session_write:
+            async with session_factory() as session_read:
                 # Получаем общее количество записей в таблице okx_trade_data
 
                 total_result = await session_read.execute(
@@ -112,16 +112,17 @@ def migrate_trade_data_batch(args):
 
                 total_rows = total_result.scalar()
 
-                okx_trade_data_existent_trade_id_array = numpy.empty(
-                    dtype=numpy.int64,
-                    shape=(
-                        total_rows,
-                    ),
-                )
+            okx_trade_data_existent_trade_id_array = numpy.empty(
+                dtype=numpy.int64,
+                shape=(
+                    total_rows,
+                ),
+            )
 
-                okx_trade_data_existent_trade_id_array_idx = 0
+            okx_trade_data_existent_trade_id_array_idx = 0
 
-                # Получаем общее количество записей в таблице okx_order_book_data
+            async with session_factory() as session_read:
+                # Получаем общее количество записей в таблице okx_trade_data_2
 
                 total_result = await session_read.execute(
                     select(
@@ -135,15 +136,16 @@ def migrate_trade_data_batch(args):
 
                 total_rows = total_result.scalar()
 
-                okx_trade_data_2_existent_trade_id_array = numpy.empty(
-                    dtype=numpy.int64,
-                    shape=(
-                        total_rows,
-                    ),
-                )
+            okx_trade_data_2_existent_trade_id_array = numpy.empty(
+                dtype=numpy.int64,
+                shape=(
+                    total_rows,
+                ),
+            )
 
-                okx_trade_data_2_existent_trade_id_array_idx = 0
+            okx_trade_data_2_existent_trade_id_array_idx = 0
 
+            async with session_factory() as session_read:
                 result = await session_read.stream(
                     select(
                         OKXTradeData.trade_id
@@ -152,7 +154,7 @@ def migrate_trade_data_batch(args):
                     ).limit(
                         okx_trade_data_existent_trade_id_array.size,
                     ).execution_options(
-                        yield_per=_YIELD_PER
+                        yield_per=_YIELD_PER,
                     )
                 )
 
@@ -166,17 +168,21 @@ def migrate_trade_data_batch(args):
 
                     okx_trade_data_existent_trade_id_array_idx += 1
 
-                assert okx_trade_data_existent_trade_id_array_idx == okx_trade_data_existent_trade_id_array.size, (okx_trade_data_existent_trade_id_array_idx, okx_trade_data_existent_trade_id_array.size)
+            assert okx_trade_data_existent_trade_id_array_idx == okx_trade_data_existent_trade_id_array.size, (
+                okx_trade_data_existent_trade_id_array_idx,
+                okx_trade_data_existent_trade_id_array.size
+            )
 
+            async with session_factory() as session_read:
                 result = await session_read.stream(
                     select(
-                        OKXTradeData2.trade_id
+                        OKXTradeData2.trade_id,
                     ).where(
                         OKXTradeData2.symbol_id == symbol_id,
                     ).limit(
                         okx_trade_data_2_existent_trade_id_array.size,
                     ).execution_options(
-                        yield_per=_YIELD_PER
+                        yield_per=_YIELD_PER,
                     )
                 )
 
@@ -190,16 +196,24 @@ def migrate_trade_data_batch(args):
 
                     okx_trade_data_2_existent_trade_id_array_idx += 1
 
-                assert okx_trade_data_2_existent_trade_id_array_idx == okx_trade_data_2_existent_trade_id_array.size, (okx_trade_data_2_existent_trade_id_array_idx, okx_trade_data_2_existent_trade_id_array.size)
+            assert okx_trade_data_2_existent_trade_id_array_idx == okx_trade_data_2_existent_trade_id_array.size, (
+                okx_trade_data_2_existent_trade_id_array_idx,
+                okx_trade_data_2_existent_trade_id_array.size
+            )
 
-                okx_trade_data_existent_trade_id_array_diff = numpy.setdiff1d(
-                    okx_trade_data_existent_trade_id_array,
-                    okx_trade_data_2_existent_trade_id_array,
-                )
+            okx_trade_data_existent_trade_id_array_diff = numpy.setdiff1d(
+                okx_trade_data_existent_trade_id_array,
+                okx_trade_data_2_existent_trade_id_array,
+            )
 
-                print(f'[PID {os.getpid()}] Начинаем обработку {okx_trade_data_existent_trade_id_array_diff.size} записей торгов...')
+            print(f'[PID {os.getpid()}] Начинаем обработку {okx_trade_data_existent_trade_id_array_diff.size} записей торгов...')
 
+            async with session_factory() as session_read, session_factory() as session_write:
                 for trade_id in okx_trade_data_existent_trade_id_array_diff:
+                    trade_id = int(
+                        trade_id,
+                    )
+
                     try:
                         # Получаем батч записей
                         result = await session_read.execute(
@@ -293,7 +307,7 @@ def migrate_order_book_data_batch(args):
 
             symbol_id = SymbolConstants.IdByName[symbol_name]
 
-            async with session_factory() as session_read, session_factory() as session_write:
+            async with session_factory() as session_read:
                 # Получаем общее количество записей в таблице okx_order_book_data
 
                 total_result = await session_read.execute(
@@ -308,16 +322,17 @@ def migrate_order_book_data_batch(args):
 
                 total_rows = total_result.scalar()
 
-                okx_order_book_data_existent_timestamp_ms_array = numpy.empty(
-                    dtype=numpy.int64,
-                    shape=(
-                        total_rows,
-                    ),
-                )
+            okx_order_book_data_existent_timestamp_ms_array = numpy.empty(
+                dtype=numpy.int64,
+                shape=(
+                    total_rows,
+                ),
+            )
 
-                okx_order_book_data_existent_timestamp_ms_array_idx = 0
+            okx_order_book_data_existent_timestamp_ms_array_idx = 0
 
-                # Получаем общее количество записей в таблице okx_order_book_data
+            async with session_factory() as session_read:
+                # Получаем общее количество записей в таблице okx_order_book_data_2
 
                 total_result = await session_read.execute(
                     select(
@@ -331,24 +346,25 @@ def migrate_order_book_data_batch(args):
 
                 total_rows = total_result.scalar()
 
-                okx_order_book_data_2_existent_timestamp_ms_array = numpy.empty(
-                    dtype=numpy.int64,
-                    shape=(
-                        total_rows,
-                    ),
-                )
+            okx_order_book_data_2_existent_timestamp_ms_array = numpy.empty(
+                dtype=numpy.int64,
+                shape=(
+                    total_rows,
+                ),
+            )
 
-                okx_order_book_data_2_existent_timestamp_ms_array_idx = 0
+            okx_order_book_data_2_existent_timestamp_ms_array_idx = 0
 
+            async with session_factory() as session_read:
                 result = await session_read.stream(
                     select(
-                        OKXOrderBookData.timestamp_ms
+                        OKXOrderBookData.timestamp_ms,
                     ).where(
                         OKXOrderBookData.symbol_name == symbol_name,
                     ).limit(
                         okx_order_book_data_existent_timestamp_ms_array.size,
                     ).execution_options(
-                        yield_per=_YIELD_PER
+                        yield_per=_YIELD_PER,
                     )
                 )
 
@@ -362,17 +378,21 @@ def migrate_order_book_data_batch(args):
 
                     okx_order_book_data_existent_timestamp_ms_array_idx += 1
 
-                assert okx_order_book_data_existent_timestamp_ms_array_idx == okx_order_book_data_existent_timestamp_ms_array.size, (okx_order_book_data_existent_timestamp_ms_array_idx, okx_order_book_data_existent_timestamp_ms_array.size)
+            assert okx_order_book_data_existent_timestamp_ms_array_idx == okx_order_book_data_existent_timestamp_ms_array.size, (
+                okx_order_book_data_existent_timestamp_ms_array_idx,
+                okx_order_book_data_existent_timestamp_ms_array.size
+            )
 
+            async with session_factory() as session_read:
                 result = await session_read.stream(
                     select(
-                        OKXOrderBookData2.timestamp_ms
+                        OKXOrderBookData2.timestamp_ms,
                     ).where(
                         OKXOrderBookData2.symbol_id == symbol_id,
                     ).limit(
                         okx_order_book_data_2_existent_timestamp_ms_array.size,
                     ).execution_options(
-                        yield_per=_YIELD_PER
+                        yield_per=_YIELD_PER,
                     )
                 )
 
@@ -386,16 +406,24 @@ def migrate_order_book_data_batch(args):
 
                     okx_order_book_data_2_existent_timestamp_ms_array_idx += 1
 
-                assert okx_order_book_data_2_existent_timestamp_ms_array_idx == okx_order_book_data_2_existent_timestamp_ms_array.size, (okx_order_book_data_2_existent_timestamp_ms_array_idx, okx_order_book_data_2_existent_timestamp_ms_array.size)
+            assert okx_order_book_data_2_existent_timestamp_ms_array_idx == okx_order_book_data_2_existent_timestamp_ms_array.size, (
+                okx_order_book_data_2_existent_timestamp_ms_array_idx,
+                okx_order_book_data_2_existent_timestamp_ms_array.size
+            )
 
-                okx_order_book_data_existent_timestamp_ms_array_diff = numpy.setdiff1d(
-                    okx_order_book_data_existent_timestamp_ms_array,
-                    okx_order_book_data_2_existent_timestamp_ms_array,
-                )
+            okx_order_book_data_existent_timestamp_ms_array_diff = numpy.setdiff1d(
+                okx_order_book_data_existent_timestamp_ms_array,
+                okx_order_book_data_2_existent_timestamp_ms_array,
+            )
 
-                print(f'[PID {os.getpid()}] Начинаем обработку {okx_order_book_data_existent_timestamp_ms_array_diff.size} записей торгов...')
+            print(f'[PID {os.getpid()}] Начинаем обработку {okx_order_book_data_existent_timestamp_ms_array_diff.size} записей торгов...')
 
+            async with session_factory() as session_read, session_factory() as session_write:
                 for timestamp_ms in okx_order_book_data_existent_timestamp_ms_array_diff:
+                    timestamp_ms = int(
+                        timestamp_ms,
+                    )
+
                     try:
                         # Получаем батч записей
                         result = await session_read.execute(
@@ -403,8 +431,8 @@ def migrate_order_book_data_batch(args):
                                 OKXOrderBookData,
                             ).where(
                                 and_(
-                                    OKXTradeData.symbol_name == symbol_name,
-                                    OKXTradeData.timestamp_ms == timestamp_ms,
+                                    OKXOrderBookData.symbol_name == symbol_name,
+                                    OKXOrderBookData.timestamp_ms == timestamp_ms,
                                 )
                             ),
                         )
