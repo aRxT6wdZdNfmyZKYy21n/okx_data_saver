@@ -35,7 +35,7 @@ from constants.plot import (
 )
 from constants.symbol import SymbolConstants
 from enumerations import (
-    TradingDirection,
+    TradingDirection, SymbolId,
 )
 from main.save_trades.schemas import (
     OKXTradeData2,
@@ -620,8 +620,8 @@ class FinPlotChartProcessor(object):
                     .limit(
                         # 2_000_000,
                         # 1_000_000,
-                        500_000,
-                        # 50_000,
+                        # 500_000,
+                        50_000,
                         # 10_000
                         # 1_000
                         # 50
@@ -967,13 +967,6 @@ class FinPlotChartProcessor(object):
         )
 
         with Timer() as timer:
-            self.__update_order_book_volume()
-
-        logger.info(
-            f'Order book volume array was updated by {timer.elapsed:.3f}s'
-        )
-
-        with Timer() as timer:
             self.__update_rsi_series()
 
         logger.info(
@@ -992,6 +985,13 @@ class FinPlotChartProcessor(object):
 
         logger.info(
             f'Trades smoothed dataframe by level map was updated by {timer.elapsed:.3f}s'
+        )
+
+        with Timer() as timer:
+            self.__update_order_book_volume()
+
+        logger.info(
+            f'Order book volume array was updated by {timer.elapsed:.3f}s'
         )
 
         with Timer() as timer:
@@ -1015,27 +1015,27 @@ class FinPlotChartProcessor(object):
         async with postgres_db_session_maker() as session:
             recursive_cte_full_query = text(
                 """
-WITH RECURSIVE symbol_name_cte(symbol_name) AS 
+WITH RECURSIVE symbol_id_cte(symbol_id) AS 
 (
   (
-    SELECT okx_trade_data.symbol_name AS symbol_name 
-    FROM okx_trade_data ORDER BY okx_trade_data.symbol_name ASC 
+    SELECT okx_trade_data_2.symbol_id AS symbol_id 
+    FROM okx_trade_data_2 ORDER BY okx_trade_data_2.symbol_id ASC 
     LIMIT 1
   )
   UNION ALL
   SELECT (
-    SELECT symbol_name
-    FROM okx_trade_data
-    WHERE symbol_name > cte.symbol_name
-    ORDER BY symbol_name ASC 
+    SELECT symbol_id
+    FROM okx_trade_data_2
+    WHERE symbol_id > cte.symbol_id
+    ORDER BY symbol_id ASC
     LIMIT 1
   )
-  FROM symbol_name_cte AS cte
-  WHERE cte.symbol_name IS NOT NULL
+  FROM symbol_id_cte AS cte
+  WHERE cte.symbol_id IS NOT NULL
 )
-SELECT symbol_name
-FROM symbol_name_cte
-WHERE symbol_name IS NOT NULL;
+SELECT symbol_id
+FROM symbol_id_cte
+WHERE symbol_id IS NOT NULL;
                 """
             )
 
@@ -1044,7 +1044,14 @@ WHERE symbol_name IS NOT NULL;
             )
 
             for row in result:
-                (symbol_name,) = row
+                symbol_id_raw: str = row.symbol_id
+
+                symbol_id = getattr(
+                    SymbolId,
+                    symbol_id_raw,
+                )
+
+                symbol_name = SymbolConstants.NameById[symbol_id]
 
                 if current_available_symbol_name_set is None:
                     current_available_symbol_name_set = set()
@@ -1073,11 +1080,21 @@ WHERE symbol_name IS NOT NULL;
         price_series = trades_dataframe.price
         trade_id_series = trades_dataframe.index
 
-        max_price = price_series.max()
-        max_trade_id = trade_id_series.max()
+        max_price = float(
+            price_series.max()
+        )
 
-        min_price = price_series.min()
-        min_trade_id = trade_id_series.min()
+        max_trade_id = int(
+            trade_id_series.max()
+        )
+
+        min_price = float(
+            price_series.min()
+        )
+
+        min_trade_id = int(
+            trade_id_series.min()
+        )
 
         delta_price = max_price - min_price
 
@@ -1125,13 +1142,118 @@ WHERE symbol_name IS NOT NULL;
             'Filling order book volume array...'
         )
 
-        # for x in range(width):
-        #     logger.info(
-        #         f'- X: {x}'
-        #     )
-        #
-        #     for y in range(height):
-        #         order_book_volume_array[x][y] = x * y
+        line_dataframe_by_level_map = self.__line_dataframe_by_level_map
+
+        first_line_dataframe: DataFrame = line_dataframe_by_level_map['Smoothed (1)']
+
+        active_extreme_line_raw_data_by_price_map: dict[float, dict[str, typing.Any]] = {}
+        inactive_extreme_line_raw_data_list: list[dict[str, typing.Any]] = []
+
+        for line_data in first_line_dataframe.itertuples():
+            end_trade_id = int(
+                line_data.end_trade_id
+            )
+
+            start_trade_id = int(
+                line_data.Index
+            )
+
+            end_price = line_data.end_price
+            start_price = line_data.start_price
+
+            left_price = min(
+                end_price,
+                start_price,
+            )
+
+            right_price = max(
+                end_price,
+                start_price,
+            )
+
+            for price, extreme_line_raw_data in tuple(
+                    active_extreme_line_raw_data_by_price_map.items(),
+            ):
+                if not (left_price <= price <= right_price):
+                    continue
+
+                active_extreme_line_raw_data_by_price_map.pop(
+                    price,
+                )
+
+                extreme_line_raw_data.update({
+                    'end_trade_id': end_trade_id,
+                    'price': price,
+                })
+
+                inactive_extreme_line_raw_data_list.append(
+                    extreme_line_raw_data,
+                )
+
+            assert end_price not in active_extreme_line_raw_data_by_price_map, (end_price,)
+            assert start_price not in active_extreme_line_raw_data_by_price_map, (start_price,)
+
+            active_extreme_line_raw_data_by_price_map.update({
+                end_price: {
+                    'end_trade_id': None,
+                    'start_trade_id': end_trade_id,
+                },
+
+                start_price: {
+                    'end_trade_id': None,
+                    'start_trade_id': start_trade_id,
+                },
+            })
+
+        for price, extreme_line_raw_data in (
+                active_extreme_line_raw_data_by_price_map.items()
+        ):
+            extreme_line_raw_data.update({
+                'end_trade_id': max_trade_id,
+                'price': price,
+            })
+
+            inactive_extreme_line_raw_data_list.append(
+                extreme_line_raw_data,
+            )
+
+        active_extreme_line_raw_data_by_price_map.clear()
+
+        for extreme_line_raw_data in inactive_extreme_line_raw_data_list:
+            end_trade_id: int = extreme_line_raw_data['end_trade_id']
+            price: float = extreme_line_raw_data['price']
+            start_trade_id: int = extreme_line_raw_data['start_trade_id']
+
+            end_x = int(
+                (
+                    end_trade_id - min_trade_id
+                ) /
+                order_book_volume_scale
+            )
+
+            start_x = int(
+                (
+                    start_trade_id - min_trade_id
+                ) /
+                order_book_volume_scale
+            )
+
+            y = min(
+                int(
+                    (
+                        price - min_price
+                    ) /
+                    order_book_volume_scale
+                ),
+                height - 1
+            )
+
+            logger.info(
+                f'Price: {price}, start_trade_id: {start_trade_id}, end_trade_id: {end_trade_id}, start_x: {start_x}, end_x: {end_x}, y: {y}'
+            )
+
+            for x in range(start_x, end_x):
+                order_book_volume_array[x, y] = x - start_x
 
         self.__order_book_volume_array = order_book_volume_array
 
