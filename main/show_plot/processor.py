@@ -72,6 +72,7 @@ class FinPlotChartProcessor(object):
         '__min_trade_price',
         '__order_book_volume_array',
         '__order_book_volume_position',
+        '__order_book_volume_scale',
         '__rsi_series',
         '__test_analytics_raw_data_list',
         '__test_series',
@@ -100,6 +101,7 @@ class FinPlotChartProcessor(object):
         self.__min_trade_price: Decimal | None = None
         self.__order_book_volume_array: numpy.ndarray | None = None
         self.__order_book_volume_position: tuple[float, float] | None = None
+        self.__order_book_volume_scale: float | None = None
         self.__rsi_series: Series | None = None
         self.__test_analytics_raw_data_list: list[dict[str, typing.Any]] | None = None
         self.__test_series: Series | None = None
@@ -189,6 +191,11 @@ class FinPlotChartProcessor(object):
             self,
     ) -> tuple[float, float] | None:
         return self.__order_book_volume_position
+
+    def get_order_book_volume_scale(
+            self,
+    ) -> float | None:
+        return self.__order_book_volume_scale
 
     def get_rsi_series(
         self,
@@ -316,6 +323,7 @@ class FinPlotChartProcessor(object):
         self.__min_trade_price = None
         self.__order_book_volume_array = None
         self.__order_book_volume_position = None
+        self.__order_book_volume_scale = None
         self.__rsi_series = None
         self.__test_analytics_raw_data_list = None
         self.__test_series = None
@@ -612,10 +620,10 @@ class FinPlotChartProcessor(object):
                     .limit(
                         # 2_000_000,
                         # 1_000_000,
-                        # 500_000,
+                        500_000,
                         # 50_000,
                         # 10_000
-                        1_000
+                        # 1_000
                         # 50
                     ).execution_options(
                         yield_per=10000,
@@ -1081,18 +1089,31 @@ WHERE symbol_name IS NOT NULL;
         if not delta_trade_id:
             return
 
-        # delta_price / delta_trade_id = width / height;
-        # width = height * (delta_price / delta_trade_id);
+        logger.info(
+            f'delta_price: {delta_price}, delta_trade_id: {delta_trade_id})'
+        )
 
-        # aspect_ratio = delta_price / delta_trade_id
+        # delta_price / delta_trade_id = height / width;
+        # width = height * (delta_trade_id / delta_price);
+
+        aspect_ratio = delta_trade_id / delta_price
 
         height = int(
-            delta_price,
-        )  # 10000
+            100  # delta_price / 10,
+        )
+
+        order_book_volume_scale = (
+            delta_price /
+            height
+        )
 
         width = int(
-            # height * aspect_ratio,
-            delta_trade_id,
+            height * aspect_ratio,
+            # delta_trade_id / 10,
+        )
+
+        logger.info(
+            f'Creating order book volume array ({width} x {height}, scale {order_book_volume_scale}, aspect ratio {aspect_ratio})'
         )
 
         order_book_volume_array = numpy.zeros((
@@ -1100,9 +1121,17 @@ WHERE symbol_name IS NOT NULL;
             height,
         ))
 
-        for x in range(width):
-            for y in range(height):
-                order_book_volume_array[x][y] = x * y
+        logger.info(
+            'Filling order book volume array...'
+        )
+
+        # for x in range(width):
+        #     logger.info(
+        #         f'- X: {x}'
+        #     )
+        #
+        #     for y in range(height):
+        #         order_book_volume_array[x][y] = x * y
 
         self.__order_book_volume_array = order_book_volume_array
 
@@ -1114,6 +1143,8 @@ WHERE symbol_name IS NOT NULL;
                 min_price,
             )
         )
+
+        self.__order_book_volume_scale = order_book_volume_scale
 
     def __update_rsi_series(
         self,

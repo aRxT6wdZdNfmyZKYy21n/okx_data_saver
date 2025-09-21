@@ -893,6 +893,10 @@ class FinPlotChartWindow(QMainWindow):
             processor.get_order_book_volume_position()
         )
 
+        order_book_volume_scale = (
+            processor.get_order_book_volume_scale()
+        )
+
         order_book_image_item = self.__order_book_image_item
 
         order_book_image_item.setPos(
@@ -903,6 +907,10 @@ class FinPlotChartWindow(QMainWindow):
 
         order_book_image_item.setImage(
             order_book_volume_array,
+        )
+
+        order_book_image_item.setScale(
+            order_book_volume_scale,
         )
 
         price_series: pandas.Series = trades_smoothed_dataframe.price
