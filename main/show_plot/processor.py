@@ -1182,7 +1182,7 @@ WHERE symbol_id IS NOT NULL;
                 )
 
                 extreme_line_raw_data.update({
-                    'end_trade_id': end_trade_id,
+                    'end_trade_id': start_trade_id,  # end_trade_id,
                     'price': price,
                 })
 
