@@ -10,7 +10,7 @@ from functools import (
 )
 
 import numpy
-import pandas
+import polars
 from chrono import (
     Timer,
 )
@@ -200,9 +200,7 @@ class FinPlotChartWindow(QMainWindow):
             green_color_array,
         )
 
-        order_book_volumes_asks_image_item.setColorMap(
-            green_color_map
-        )
+        order_book_volumes_asks_image_item.setColorMap(green_color_map)
 
         order_book_volumes_bids_image_item = pyqtgraph.ImageItem()
 
@@ -817,18 +815,18 @@ class FinPlotChartWindow(QMainWindow):
                 assert bollinger_upper_band_series is not None, None
 
                 self.__bollinger_base_line_plot_data_item.setData(
-                    bollinger_base_line_series.index,
-                    bollinger_base_line_series.array,
+                    bollinger_base_line_series.to_numpy(),
+                    bollinger_base_line_series.to_numpy(),
                 )
 
                 self.__bollinger_lower_band_plot_data_item.setData(
-                    bollinger_lower_band_series.index,
-                    bollinger_lower_band_series.array,
+                    bollinger_lower_band_series.to_numpy(),
+                    bollinger_lower_band_series.to_numpy(),
                 )
 
                 self.__bollinger_upper_band_plot_data_item.setData(
-                    bollinger_upper_band_series.index,
-                    bollinger_upper_band_series.array,
+                    bollinger_upper_band_series.to_numpy(),
+                    bollinger_upper_band_series.to_numpy(),
                 )
 
                 """
@@ -886,18 +884,18 @@ class FinPlotChartWindow(QMainWindow):
 
             candle_start_timestamp_ms_set: set[int] = set()
 
-            for candle_row_data in candle_dataframe.itertuples():
-                start_trade_id: int = candle_row_data.Index
+            for candle_row_data in candle_dataframe.iter_rows(named=True):
+                start_trade_id: int = candle_row_data['start_trade_id']
 
-                candle_close_price: float = candle_row_data.close_price
-                candle_high_price: float = candle_row_data.high_price
-                candle_low_price: float = candle_row_data.low_price
-                candle_open_price: float = candle_row_data.open_price
+                candle_close_price: float = candle_row_data['close_price']
+                candle_high_price: float = candle_row_data['high_price']
+                candle_low_price: float = candle_row_data['low_price']
+                candle_open_price: float = candle_row_data['open_price']
 
-                end_timestamp: pandas.Timestamp = candle_row_data.end_timestamp_ms
-                end_trade_id: int = candle_row_data.end_trade_id
+                end_timestamp: polars.Datetime = candle_row_data['end_timestamp_ms']
+                end_trade_id: int = candle_row_data['end_trade_id']
 
-                start_timestamp: pandas.Timestamp = candle_row_data.start_timestamp_ms
+                start_timestamp: polars.Datetime = candle_row_data['start_timestamp_ms']
                 start_timestamp_ms = int(start_timestamp.timestamp() * 1000)
 
                 candle_start_timestamp_ms_set.add(
@@ -958,17 +956,11 @@ class FinPlotChartWindow(QMainWindow):
                         price_candlestick_item,
                     )
 
-        extreme_lines_array = (
-            processor.get_extreme_lines_array()
-        )
+        extreme_lines_array = processor.get_extreme_lines_array()
 
-        extreme_lines_position = (
-            processor.get_extreme_lines_position()
-        )
+        extreme_lines_position = processor.get_extreme_lines_position()
 
-        extreme_lines_scale = (
-            processor.get_extreme_lines_scale()
-        )
+        extreme_lines_scale = processor.get_extreme_lines_scale()
 
         extreme_lines_image_item = self.__extreme_lines_image_item
 
@@ -986,21 +978,13 @@ class FinPlotChartWindow(QMainWindow):
             extreme_lines_scale,
         )
 
-        order_book_volumes_asks_array = (
-            processor.get_order_book_volumes_asks_array()
-        )
+        order_book_volumes_asks_array = processor.get_order_book_volumes_asks_array()
 
-        order_book_volumes_bids_array = (
-            processor.get_order_book_volumes_bids_array()
-        )
+        order_book_volumes_bids_array = processor.get_order_book_volumes_bids_array()
 
-        order_book_volumes_position = (
-            processor.get_order_book_volumes_position()
-        )
+        order_book_volumes_position = processor.get_order_book_volumes_position()
 
-        order_book_volumes_scale = (
-            processor.get_order_book_volumes_scale()
-        )
+        order_book_volumes_scale = processor.get_order_book_volumes_scale()
 
         order_book_volumes_asks_image_item = self.__order_book_volumes_asks_image_item
 
@@ -1034,11 +1018,11 @@ class FinPlotChartWindow(QMainWindow):
             order_book_volumes_scale,
         )
 
-        price_series: pandas.Series = trades_smoothed_dataframe.price
+        price_series: polars.Series = trades_smoothed_dataframe.get_column('price')
 
         self.__price_plot_data_item.setData(
-            price_series.index,
-            price_series.array,
+            price_series.to_numpy(),
+            price_series.to_numpy(),
         )
 
         if _IS_NEED_SHOW_RSI:
@@ -1046,8 +1030,8 @@ class FinPlotChartWindow(QMainWindow):
 
             if rsi_series is not None:
                 self.__rsi_plot_data_item.setData(
-                    rsi_series.index,
-                    rsi_series.array,
+                    rsi_series.to_numpy(),
+                    rsi_series.to_numpy(),
                 )
 
         test_analytics_raw_data_list = processor.get_test_analytics_raw_data_list()
@@ -1062,7 +1046,7 @@ class FinPlotChartWindow(QMainWindow):
             ] = {}  # TODO: test_analytics_raw_data_list -> test_analytics_raw_data_by_start_timestamp_ms_map
 
             for test_analytics_raw_data in test_analytics_raw_data_list:
-                start_timestamp: pandas.Timestamp = test_analytics_raw_data[
+                start_timestamp: polars.Datetime = test_analytics_raw_data[
                     'first_start_timestamp'
                 ]
 
@@ -1082,7 +1066,7 @@ class FinPlotChartWindow(QMainWindow):
 
                 end_price: float = test_analytics_raw_data['second_price']
 
-                end_timestamp: pandas.Timestamp = test_analytics_raw_data[
+                end_timestamp: polars.Datetime = test_analytics_raw_data[
                     'second_start_timestamp'
                 ]
 
@@ -1112,12 +1096,12 @@ class FinPlotChartWindow(QMainWindow):
                     )
 
                 test_analytics_rect_item_position = Point(
-                    start_timestamp.value,
+                    start_timestamp.timestamp() * 1000,
                     start_price,
                 )
 
                 test_analytics_rect_item_size = Point(
-                    end_timestamp.value - start_timestamp.value,
+                    (end_timestamp - start_timestamp).total_seconds() * 1000,
                     end_price - start_price,
                 )
 
@@ -1189,8 +1173,8 @@ class FinPlotChartWindow(QMainWindow):
 
         if test_series is not None:
             self.__test_plot_data_item.setData(
-                test_series.index,
-                test_series.array,
+                test_series.to_numpy(),
+                test_series.to_numpy(),
             )
 
         if _IS_NEED_SHOW_VELOCITY:
@@ -1198,8 +1182,8 @@ class FinPlotChartWindow(QMainWindow):
 
             if velocity_series is not None:
                 self.__velocity_plot_data_item.setData(
-                    velocity_series.index,
-                    velocity_series.array,
+                    velocity_series.to_numpy(),
+                    velocity_series.to_numpy(),
                 )
 
     def auto_range_price_plot(

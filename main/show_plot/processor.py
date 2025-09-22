@@ -14,10 +14,10 @@ from functools import (
 )
 
 import numpy
-import pandas
+import polars
 import talib
 
-from pandas import (
+from polars import (
     DataFrame,
     Series,
 )
@@ -109,7 +109,7 @@ class FinPlotChartProcessor(object):
         self.__bollinger_base_line_series: Series | None = None
         self.__bollinger_lower_band_series: Series | None = None
         self.__bollinger_upper_band_series: Series | None = None
-        self.__candle_dataframe_by_interval_name_map: dict[str, pandas.DataFrame] = {}
+        self.__candle_dataframe_by_interval_name_map: dict[str, polars.DataFrame] = {}
         self.__current_available_symbol_name_set: set[str] | None = None
         self.__current_rsi_interval_name: str | None = None
         self.__current_symbol_name: str | None = None
@@ -157,7 +157,7 @@ class FinPlotChartProcessor(object):
 
     def get_candle_dataframe_by_interval_name_map(
         self,
-    ) -> dict[str, pandas.DataFrame]:
+    ) -> dict[str, polars.DataFrame]:
         return self.__candle_dataframe_by_interval_name_map
 
     async def get_current_available_symbol_names(
@@ -205,37 +205,37 @@ class FinPlotChartProcessor(object):
         return self.__min_trade_price
 
     def get_extreme_lines_array(
-            self,
+        self,
     ) -> numpy.ndarray | None:
         return self.__extreme_lines_array
 
     def get_extreme_lines_position(
-            self,
+        self,
     ) -> tuple[float, float] | None:
         return self.__extreme_lines_position
 
     def get_extreme_lines_scale(
-            self,
+        self,
     ) -> float | None:
         return self.__extreme_lines_scale
 
     def get_order_book_volumes_asks_array(
-            self,
+        self,
     ) -> numpy.ndarray | None:
         return self.__order_book_volumes_asks_array
 
     def get_order_book_volumes_bids_array(
-            self,
+        self,
     ) -> numpy.ndarray | None:
         return self.__order_book_volumes_bids_array
 
     def get_order_book_volumes_position(
-            self,
+        self,
     ) -> tuple[float, float] | None:
         return self.__order_book_volumes_position
 
     def get_order_book_volumes_scale(
-            self,
+        self,
     ) -> float | None:
         return self.__order_book_volumes_scale
 
@@ -424,21 +424,21 @@ class FinPlotChartProcessor(object):
             bollinger_base_line_series,
             bollinger_lower_band_series,
         ) = talib.BBANDS(  # noqa
-            trades_dataframe.price,
+            trades_dataframe.get_column('price'),
             matype=(
                 talib.MA_Type.SMA  # noqa
             ),
             timeperiod=20,
         )
 
-        if not bollinger_base_line_series.size:
-            assert not bollinger_lower_band_series.size, None
-            assert not bollinger_upper_band_series.size, None
+        if bollinger_base_line_series.height == 0:
+            assert bollinger_lower_band_series.height == 0, None
+            assert bollinger_upper_band_series.height == 0, None
 
             return
 
-        assert bollinger_lower_band_series.size, None
-        assert bollinger_upper_band_series.size, None
+        assert bollinger_lower_band_series.height > 0, None
+        assert bollinger_upper_band_series.height > 0, None
 
         self.__bollinger_base_line_series = bollinger_base_line_series
         self.__bollinger_lower_band_series = bollinger_lower_band_series
@@ -473,7 +473,9 @@ class FinPlotChartProcessor(object):
             min_trade_id: int
 
             if old_candle_dataframe is not None:
-                min_pandas_trade_id = old_candle_dataframe.index.max()
+                min_pandas_trade_id = old_candle_dataframe.get_column(
+                    'start_trade_id'
+                ).max()
 
                 min_trade_id = int(
                     min_pandas_trade_id,
@@ -481,19 +483,19 @@ class FinPlotChartProcessor(object):
             else:
                 min_trade_id = 0
 
-            for trade_data in trades_dataframe.loc[
-                trades_dataframe.index >= min_trade_id
-            ].itertuples():
-                trade_id: int = trade_data.Index
+            for trade_data in trades_dataframe.filter(
+                polars.col('trade_id') >= min_trade_id
+            ).iter_rows(named=True):
+                trade_id: int = trade_data['trade_id']
 
                 # if trade_id < min_trade_id:
                 #     continue
 
-                price: float = trade_data.price
-                quantity: float = trade_data.quantity
+                price: float = trade_data['price']
+                quantity: float = trade_data['quantity']
                 volume = price * quantity
 
-                timestamp: pandas.Timestamp = trade_data.timestamp_ms
+                timestamp: polars.Datetime = trade_data['timestamp_ms']
 
                 timestamp_ms = timestamp.value // 10**6
 
@@ -560,56 +562,29 @@ class FinPlotChartProcessor(object):
 
                 last_candle_raw_data = None  # noqa
 
-            new_candle_dataframe = DataFrame.from_records(
-                candle_raw_data_list,
-                columns=[
-                    'close_price',
-                    'end_timestamp_ms',
-                    'end_trade_id',
-                    'high_price',
-                    'low_price',
-                    'open_price',
-                    'start_timestamp_ms',
-                    'start_trade_id',
-                    'trades_count',
-                    'volume',
-                ],
-            )
+            new_candle_dataframe = polars.DataFrame(candle_raw_data_list)
 
-            assert new_candle_dataframe.size, (
+            assert new_candle_dataframe.height > 0, (
                 min_trade_id,
                 old_candle_dataframe,
             )
 
-            new_candle_dataframe.end_timestamp_ms = pandas.to_datetime(
-                new_candle_dataframe.end_timestamp_ms,
-                unit='ms',
+            new_candle_dataframe = new_candle_dataframe.with_columns(
+                polars.col('end_timestamp_ms')
+                .cast(polars.Datetime('ms'))
+                .alias('end_timestamp_ms'),
+                polars.col('start_timestamp_ms')
+                .cast(polars.Datetime('ms'))
+                .alias('start_timestamp_ms'),
             )
 
-            new_candle_dataframe.start_timestamp_ms = pandas.to_datetime(
-                new_candle_dataframe.start_timestamp_ms,
-                unit='ms',
-            )
+            new_candle_dataframe = new_candle_dataframe.sort('start_trade_id')
 
-            new_candle_dataframe.set_index(
-                'start_trade_id',
-                inplace=True,
-            )
-
-            new_candle_dataframe.sort_values(
-                'start_trade_id',
-                inplace=True,
-            )
-
-            candle_dataframe: pandas.DataFrame
+            candle_dataframe: polars.DataFrame
 
             if old_candle_dataframe is not None:
-                old_candle_dataframe.update(
-                    new_candle_dataframe,
-                )
-
-                candle_dataframe = old_candle_dataframe.combine_first(
-                    new_candle_dataframe,
+                candle_dataframe = polars.concat(
+                    [old_candle_dataframe, new_candle_dataframe]
                 )
             else:
                 candle_dataframe = new_candle_dataframe
@@ -632,7 +607,7 @@ class FinPlotChartProcessor(object):
             min_trade_id: int  # TODO: min_trade_id
 
             if trades_dataframe is not None:
-                min_pandas_trade_id = trades_dataframe.index.max()
+                min_pandas_trade_id = trades_dataframe.get_column('trade_id').max()
 
                 min_trade_id = int(
                     min_pandas_trade_id,
@@ -652,10 +627,10 @@ class FinPlotChartProcessor(object):
                         )
                     )
 
-            if not new_trades_dataframe.size:
+            if new_trades_dataframe.height == 0:
                 return
 
-            price_series: Series = new_trades_dataframe.price
+            price_series: Series = new_trades_dataframe.get_column('price')
 
             new_max_trade_price = price_series.max()
 
@@ -936,13 +911,7 @@ class FinPlotChartProcessor(object):
             # )
 
             if trades_dataframe is not None:
-                trades_dataframe.update(
-                    new_trades_dataframe,
-                )
-
-                trades_dataframe = trades_dataframe.combine_first(
-                    new_trades_dataframe,
-                )
+                trades_dataframe = polars.concat([trades_dataframe, new_trades_dataframe])
             else:
                 trades_dataframe = new_trades_dataframe
 
@@ -986,16 +955,12 @@ class FinPlotChartProcessor(object):
         with Timer() as timer:
             self.__update_extreme_lines()
 
-        logger.info(
-            f'Extreme lines were updated by {timer.elapsed:.3f}s'
-        )
+        logger.info(f'Extreme lines were updated by {timer.elapsed:.3f}s')
 
         with Timer() as timer:
             await self.__update_order_book_volumes()
 
-        logger.info(
-            f'Order book volumes were updated by {timer.elapsed:.3f}s'
-        )
+        logger.info(f'Order book volumes were updated by {timer.elapsed:.3f}s')
 
         with Timer() as timer:
             self.__update_velocity_series()
@@ -1010,17 +975,16 @@ class FinPlotChartProcessor(object):
 
     @staticmethod
     def __fetch_order_book_dataframe(
-            session: Session,
-
-            max_timestamp_ms: int,
-            min_timestamp_ms: int,
-            symbol_id: SymbolId,
+        session: Session,
+        max_timestamp_ms: int,
+        min_timestamp_ms: int,
+        symbol_id: SymbolId,
     ) -> DataFrame | None:
         connection = session.connection()
 
         order_book_dataframe_chunks: list[DataFrame] = []
 
-        for order_book_dataframe_chunk in pandas.read_sql_query(
+        for order_book_dataframe_chunk in polars.read_database(
             select(
                 OKXOrderBookData2,
             )
@@ -1044,49 +1008,37 @@ class FinPlotChartProcessor(object):
                 inplace=True,
             )
 
-            order_book_dataframe_chunk.timestamp_ms = pandas.to_datetime(
-                order_book_dataframe_chunk.timestamp_ms,
-                unit='ms',
+            order_book_dataframe_chunk = order_book_dataframe_chunk.with_columns(
+                polars.col('timestamp_ms').cast(polars.Datetime('ms')).alias('timestamp_ms')
             )
 
-            order_book_dataframe_chunk.set_index(
-                'timestamp_ms',
-                inplace=True,
-            )
+            # В polars нет концепции индекса, используем колонки напрямую
 
             order_book_dataframe_chunks.append(
                 order_book_dataframe_chunk,
             )
 
-            print(
-                f'Fetched {len(order_book_dataframe_chunks)} chunks'
-            )
+            print(f'Fetched {len(order_book_dataframe_chunks)} chunks')
 
-        order_book_dataframe = pandas.concat(
-            order_book_dataframe_chunks
-        )
+        order_book_dataframe = polars.concat(order_book_dataframe_chunks)
 
         order_book_dataframe_chunks.clear()
 
-        order_book_dataframe.sort_values(
-            'timestamp_ms',
-            inplace=True,
-        )
+        order_book_dataframe = order_book_dataframe.sort('timestamp_ms')
 
         return order_book_dataframe
 
     @staticmethod
     def __fetch_trades_dataframe(
-            session: Session,
-
-            min_trade_id: int,
-            symbol_id: SymbolId,
+        session: Session,
+        min_trade_id: int,
+        symbol_id: SymbolId,
     ) -> DataFrame | None:
         connection = session.connection()
 
         trades_dataframe_chunks: list[DataFrame] = []
 
-        for trades_dataframe_chunk in pandas.read_sql_query(
+        for trades_dataframe_chunk in polars.read_database(
             select(
                 OKXTradeData2,
             )
@@ -1118,34 +1070,23 @@ class FinPlotChartProcessor(object):
                 inplace=True,
             )
 
-            trades_dataframe_chunk.timestamp_ms = pandas.to_datetime(
-                trades_dataframe_chunk.timestamp_ms,
-                unit='ms',
+            trades_dataframe_chunk = trades_dataframe_chunk.with_columns(
+                polars.col('timestamp_ms').cast(polars.Datetime('ms')).alias('timestamp_ms')
             )
 
-            trades_dataframe_chunk.set_index(
-                'trade_id',
-                inplace=True,
-            )
+            # В polars нет концепции индекса, используем колонки напрямую
 
             trades_dataframe_chunks.append(
                 trades_dataframe_chunk,
             )
 
-            print(
-                f'Fetched {len(trades_dataframe_chunks)} chunks'
-            )
+            print(f'Fetched {len(trades_dataframe_chunks)} chunks')
 
-        trades_dataframe = pandas.concat(
-            trades_dataframe_chunks
-        )
+        trades_dataframe = polars.concat(trades_dataframe_chunks)
 
         trades_dataframe_chunks.clear()
 
-        trades_dataframe.sort_values(
-            'trade_id',
-            inplace=True,
-        )
+        trades_dataframe = trades_dataframe.sort('trade_id')
 
         return trades_dataframe
 
@@ -1215,45 +1156,35 @@ WHERE symbol_id IS NOT NULL;
         # window.auto_range_price_plot()
 
     def __update_extreme_lines(
-            self,
+        self,
     ) -> None:
         trades_dataframe = self.__trades_dataframe
 
         assert trades_dataframe is not None, None
 
-        price_series = trades_dataframe.price
+        price_series = trades_dataframe.get_column('price')
 
-        max_price = float(
-            price_series.max()
-        )
+        max_price = float(price_series.max())
 
-        min_price = float(
-            price_series.min()
-        )
+        min_price = float(price_series.min())
 
         delta_price = max_price - min_price
 
         if not delta_price:
             return
 
-        trade_id_series = trades_dataframe.index
+        trade_id_series = trades_dataframe.get_column('trade_id')
 
-        max_trade_id = int(
-            trade_id_series.max()
-        )
+        max_trade_id = int(trade_id_series.max())
 
-        min_trade_id = int(
-            trade_id_series.min()
-        )
+        min_trade_id = int(trade_id_series.min())
 
         delta_trade_id = max_trade_id - min_trade_id
 
         if not delta_trade_id:
             return
 
-        logger.info(
-            f'delta_price: {delta_price}, delta_trade_id: {delta_trade_id})'
-        )
+        logger.info(f'delta_price: {delta_price}, delta_trade_id: {delta_trade_id})')
 
         # delta_price / delta_trade_id = height / width;
         # width = height * (delta_trade_id / delta_price);
@@ -1264,10 +1195,7 @@ WHERE symbol_id IS NOT NULL;
             100  # delta_price / 10,
         )
 
-        extreme_lines_scale = (
-            delta_price /
-            height
-        )
+        extreme_lines_scale = delta_price / height
 
         width = int(
             height * aspect_ratio,
@@ -1278,33 +1206,31 @@ WHERE symbol_id IS NOT NULL;
             f'Creating extreme line array ({width} x {height}, scale {extreme_lines_scale}, aspect ratio {aspect_ratio})'
         )
 
-        extreme_lines_array = numpy.zeros((
-            width,
-            height,
-        ))
-
-        logger.info(
-            'Filling extreme line array...'
+        extreme_lines_array = numpy.zeros(
+            (
+                width,
+                height,
+            )
         )
+
+        logger.info('Filling extreme line array...')
 
         line_dataframe_by_level_map = self.__line_dataframe_by_level_map
 
         first_line_dataframe: DataFrame = line_dataframe_by_level_map['Smoothed (1)']
 
-        active_extreme_line_raw_data_by_price_map: dict[float, dict[str, typing.Any]] = {}
+        active_extreme_line_raw_data_by_price_map: dict[
+            float, dict[str, typing.Any]
+        ] = {}
         extreme_line_raw_data_list: list[dict[str, typing.Any]] = []
 
-        for line_data in first_line_dataframe.itertuples():
-            end_trade_id = int(
-                line_data.end_trade_id
-            )
+        for line_data in first_line_dataframe.iter_rows(named=True):
+            end_trade_id = int(line_data['end_trade_id'])
 
-            start_trade_id = int(
-                line_data.Index
-            )
+            start_trade_id = int(line_data['start_trade_id'])
 
-            end_price = line_data.end_price
-            start_price = line_data.start_price
+            end_price = line_data['end_price']
+            start_price = line_data['start_price']
 
             left_price = min(
                 end_price,
@@ -1317,7 +1243,7 @@ WHERE symbol_id IS NOT NULL;
             )
 
             for price, extreme_line_raw_data in tuple(
-                    active_extreme_line_raw_data_by_price_map.items(),
+                active_extreme_line_raw_data_by_price_map.items(),
             ):
                 if not (left_price <= price <= right_price):
                     continue
@@ -1326,37 +1252,47 @@ WHERE symbol_id IS NOT NULL;
                     price,
                 )
 
-                extreme_line_raw_data.update({
-                    'end_trade_id': start_trade_id,  # end_trade_id,
-                    'price': price,
-                })
+                extreme_line_raw_data.update(
+                    {
+                        'end_trade_id': start_trade_id,  # end_trade_id,
+                        'price': price,
+                    }
+                )
 
                 extreme_line_raw_data_list.append(
                     extreme_line_raw_data,
                 )
 
-            assert end_price not in active_extreme_line_raw_data_by_price_map, (end_price,)
-            assert start_price not in active_extreme_line_raw_data_by_price_map, (start_price,)
+            assert end_price not in active_extreme_line_raw_data_by_price_map, (
+                end_price,
+            )
+            assert start_price not in active_extreme_line_raw_data_by_price_map, (
+                start_price,
+            )
 
-            active_extreme_line_raw_data_by_price_map.update({
-                end_price: {
-                    'end_trade_id': None,
-                    'start_trade_id': end_trade_id,
-                },
+            active_extreme_line_raw_data_by_price_map.update(
+                {
+                    end_price: {
+                        'end_trade_id': None,
+                        'start_trade_id': end_trade_id,
+                    },
+                    start_price: {
+                        'end_trade_id': None,
+                        'start_trade_id': start_trade_id,
+                    },
+                }
+            )
 
-                start_price: {
-                    'end_trade_id': None,
-                    'start_trade_id': start_trade_id,
-                },
-            })
-
-        for price, extreme_line_raw_data in (
-                active_extreme_line_raw_data_by_price_map.items()
-        ):
-            extreme_line_raw_data.update({
-                'end_trade_id': max_trade_id,
-                'price': price,
-            })
+        for (
+            price,
+            extreme_line_raw_data,
+        ) in active_extreme_line_raw_data_by_price_map.items():
+            extreme_line_raw_data.update(
+                {
+                    'end_trade_id': max_trade_id,
+                    'price': price,
+                }
+            )
 
             extreme_line_raw_data_list.append(
                 extreme_line_raw_data,
@@ -1369,29 +1305,11 @@ WHERE symbol_id IS NOT NULL;
             price: float = extreme_line_raw_data['price']
             start_trade_id: int = extreme_line_raw_data['start_trade_id']
 
-            end_x = int(
-                (
-                    end_trade_id - min_trade_id
-                ) /
-                extreme_lines_scale
-            )
+            end_x = int((end_trade_id - min_trade_id) / extreme_lines_scale)
 
-            start_x = int(
-                (
-                    start_trade_id - min_trade_id
-                ) /
-                extreme_lines_scale
-            )
+            start_x = int((start_trade_id - min_trade_id) / extreme_lines_scale)
 
-            y = min(
-                int(
-                    (
-                        price - min_price
-                    ) /
-                    extreme_lines_scale
-                ),
-                height - 1
-            )
+            y = min(int((price - min_price) / extreme_lines_scale), height - 1)
 
             logger.info(
                 f'Price: {price}, start_trade_id: {start_trade_id}, end_trade_id: {end_trade_id}, start_x: {start_x}, end_x: {end_x}, y: {y}'
@@ -1400,7 +1318,7 @@ WHERE symbol_id IS NOT NULL;
             # for x in range(start_x, end_x):
             #     extreme_lines_array[x, y] = x - start_x
 
-            extreme_lines_array[start_x: end_x, y] = numpy.arange(
+            extreme_lines_array[start_x:end_x, y] = numpy.arange(
                 end_x - start_x,
             )
 
@@ -1412,13 +1330,13 @@ WHERE symbol_id IS NOT NULL;
             ),
             float(
                 min_price,
-            )
+            ),
         )
 
         self.__extreme_lines_scale = extreme_lines_scale
 
     async def __update_order_book_volumes(
-            self,
+        self,
     ) -> None:
         current_symbol_name = self.__current_symbol_name
         if current_symbol_name is None:
@@ -1430,46 +1348,36 @@ WHERE symbol_id IS NOT NULL;
 
         assert trades_dataframe is not None, None
 
-        price_series = trades_dataframe.price
+        price_series = trades_dataframe.get_column('price')
 
-        max_price = float(
-            price_series.max()
-        )
+        max_price = float(price_series.max())
 
-        min_price = float(
-            price_series.min()
-        )
+        min_price = float(price_series.min())
 
         delta_price = max_price - min_price
 
         if not delta_price:
             return
 
-        trade_id_series = trades_dataframe.index
+        trade_id_series = trades_dataframe.get_column('trade_id')
 
-        max_trade_id = int(
-            trade_id_series.max()
-        )
+        max_trade_id = int(trade_id_series.max())
 
-        min_trade_id = int(
-            trade_id_series.min()
-        )
+        min_trade_id = int(trade_id_series.min())
 
         delta_trade_id = max_trade_id - min_trade_id
 
         if not delta_trade_id:
             return
 
-        logger.info(
-            f'delta_price: {delta_price}, delta_trade_id: {delta_trade_id})'
-        )
+        logger.info(f'delta_price: {delta_price}, delta_trade_id: {delta_trade_id})')
 
-        timestamp_ms_series = trades_dataframe.timestamp_ms
+        timestamp_ms_series = trades_dataframe.get_column('timestamp_ms')
 
-        max_timestamp: pandas.Timestamp = timestamp_ms_series.max()
+        max_timestamp: polars.Datetime = timestamp_ms_series.max()
         max_timestamp_ms = max_timestamp.value // 10**6
 
-        min_timestamp: pandas.Timestamp = timestamp_ms_series.min()
+        min_timestamp: polars.Datetime = timestamp_ms_series.min()
         min_timestamp_ms = min_timestamp.value // 10**6
 
         delta_timestamp_ms = max_timestamp_ms - min_timestamp_ms
@@ -1489,7 +1397,8 @@ WHERE symbol_id IS NOT NULL;
                         and_(
                             OKXOrderBookData2.symbol_id == current_symbol_id,
                             OKXOrderBookData2.timestamp_ms <= min_timestamp_ms,
-                            OKXOrderBookData2.action_id == OKXOrderBookActionId.Snapshot,
+                            OKXOrderBookData2.action_id
+                            == OKXOrderBookActionId.Snapshot,
                         )
                     )
                     .order_by(
@@ -1524,9 +1433,7 @@ WHERE symbol_id IS NOT NULL;
                     )
                 )
 
-                logger.info(
-                    f'new_order_book_dataframe: {new_order_book_dataframe}'
-                )
+                logger.info(f'new_order_book_dataframe: {new_order_book_dataframe}')
 
         # delta_price / delta_trade_id = height / width;
         # width = height * (delta_trade_id / delta_price);
@@ -1537,10 +1444,7 @@ WHERE symbol_id IS NOT NULL;
             100  # delta_price / 10,
         )
 
-        order_book_volumes_scale = (
-            delta_price /
-            height
-        )
+        order_book_volumes_scale = delta_price / height
 
         width = int(
             height * aspect_ratio,
@@ -1551,31 +1455,33 @@ WHERE symbol_id IS NOT NULL;
             f'Creating order book volume array ({width} x {height}, scale {order_book_volumes_scale}, aspect ratio {aspect_ratio})'
         )
 
-        order_book_volumes_asks_array = numpy.zeros((
-            width,
-            height,
-        ))
-
-        order_book_volumes_bids_array = numpy.zeros((
-            width,
-            height,
-        ))
-
-        logger.info(
-            'Filling order book volumes asks and bids arrays...'
+        order_book_volumes_asks_array = numpy.zeros(
+            (
+                width,
+                height,
+            )
         )
+
+        order_book_volumes_bids_array = numpy.zeros(
+            (
+                width,
+                height,
+            )
+        )
+
+        logger.info('Filling order book volumes asks and bids arrays...')
 
         order_book_ask_quantity_by_price_map: dict[Decimal, Decimal] = {}
         order_book_bid_quantity_by_price_map: dict[Decimal, Decimal] = {}
 
-        for order_book_data in new_order_book_dataframe.itertuples():
-            action_id: OKXOrderBookActionId = order_book_data.action_id
+        for order_book_data in new_order_book_dataframe.iter_rows(named=True):
+            action_id: OKXOrderBookActionId = order_book_data['action_id']
 
             if action_id == OKXOrderBookActionId.Snapshot:
                 order_book_ask_quantity_by_price_map.clear()
                 order_book_bid_quantity_by_price_map.clear()
 
-            asks: list[str, str, str, str] = order_book_data.asks
+            asks: list[str, str, str, str] = order_book_data['asks']
 
             for ask_list in asks:
                 price_raw, quantity_raw, _, _ = ask_list
@@ -1596,7 +1502,7 @@ WHERE symbol_id IS NOT NULL;
                         None,
                     )
 
-            bids: list[str, str, str, str] = order_book_data.bids
+            bids: list[str, str, str, str] = order_book_data['bids']
 
             for bid_list in bids:
                 price_raw, quantity_raw, _, _ = bid_list
@@ -1617,18 +1523,18 @@ WHERE symbol_id IS NOT NULL;
                         None,
                     )
 
-            timestamp: pandas.Timestamp = order_book_data.Index
+            timestamp: polars.Datetime = order_book_data['timestamp_ms']
             timestamp_ms = timestamp.value // 10**6
 
             logger.info(
-                f'{timestamp_ms} / {max_timestamp_ms} ({100. * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
+                f'{timestamp_ms} / {max_timestamp_ms} ({100.0 * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
             )
 
-            filtered_trades_dataframe: DataFrame = trades_dataframe.loc[
-                trades_dataframe.timestamp_ms <= timestamp,
-            ]
+            filtered_trades_dataframe: DataFrame = trades_dataframe.filter(
+                polars.col('timestamp_ms') <= timestamp
+            )
 
-            if filtered_trades_dataframe.empty:
+            if filtered_trades_dataframe.height == 0:
                 logger.warning(
                     f'Filtered trades dataframe is empty for timestamp {timestamp}'
                 )
@@ -1636,15 +1542,12 @@ WHERE symbol_id IS NOT NULL;
                 continue
 
             closest_trade_id = int(
-                filtered_trades_dataframe.index.max()
+                filtered_trades_dataframe.get_column('trade_id').max()
             )
 
             x = min(
                 int(
-                    (
-                        closest_trade_id - min_trade_id
-                    ) /
-                    order_book_volumes_scale,
+                    (closest_trade_id - min_trade_id) / order_book_volumes_scale,
                 ),
                 width - 1,
             )
@@ -1654,10 +1557,7 @@ WHERE symbol_id IS NOT NULL;
 
                 y = min(
                     int(
-                        (
-                            float(price) - min_price
-                        ) /
-                        order_book_volumes_scale,
+                        (float(price) - min_price) / order_book_volumes_scale,
                     ),
                     height - 1,
                 )
@@ -1671,10 +1571,7 @@ WHERE symbol_id IS NOT NULL;
 
                 y = min(
                     int(
-                        (
-                            float(price) - min_price
-                        ) /
-                        order_book_volumes_scale,
+                        (float(price) - min_price) / order_book_volumes_scale,
                     ),
                     height - 1,
                 )
@@ -1692,7 +1589,7 @@ WHERE symbol_id IS NOT NULL;
             ),
             float(
                 min_price,
-            )
+            ),
         )
 
         self.__order_book_volumes_scale = order_book_volumes_scale
@@ -1736,15 +1633,15 @@ WHERE symbol_id IS NOT NULL;
         return  # TODO
 
         prices: list[float] = []
-        start_timestamps: list[pandas.Timestamp] = []
+        start_timestamps: list[polars.Datetime] = []
 
-        for trade_data in trades_dataframe.itertuples():
-            start_timestamp: pandas.Timestamp = trade_data.Index
+        for trade_data in trades_dataframe.iter_rows(named=True):
+            start_timestamp: polars.Datetime = trade_data['timestamp_ms']
 
-            trade_close_price = trade_data.close
-            trade_high_price = trade_data.high
-            trade_low_price = trade_data.low
-            trade_open_price = trade_data.open
+            trade_close_price = trade_data['close_price']
+            trade_high_price = trade_data['high_price']
+            trade_low_price = trade_data['low_price']
+            trade_open_price = trade_data['open_price']
 
             is_bull = trade_close_price >= trade_open_price
 
@@ -1803,7 +1700,7 @@ WHERE symbol_id IS NOT NULL;
             )
 
         prices_2: list[float] = []
-        start_timestamps_2: list[pandas.Timestamp] = []
+        start_timestamps_2: list[polars.Datetime] = []
 
         for _ in range(10):
             self.__process_1(
@@ -1829,7 +1726,7 @@ WHERE symbol_id IS NOT NULL;
             start_timestamps_2.clear()
 
         prices_3: list[float] = []
-        start_timestamps_3: list[pandas.Timestamp] = []
+        start_timestamps_3: list[polars.Datetime] = []
 
         for _ in range(0):
             self.__process_2(
@@ -1902,13 +1799,13 @@ WHERE symbol_id IS NOT NULL;
         }
 
         prices_final: list[float] = []
-        start_timestamps_final: list[pandas.Timestamp] = []
+        start_timestamps_final: list[polars.Datetime] = []
 
         start_timestamp = start_timestamps[0]
         end_timestamp = start_timestamps[-1]
 
         old_price: float | None = None
-        old_start_timestamp: pandas.Timestamp | None = None
+        old_start_timestamp: polars.Datetime | None = None
 
         while start_timestamp <= end_timestamp:
             price = price_by_start_timestamp_map.get(
@@ -2015,19 +1912,19 @@ WHERE symbol_id IS NOT NULL;
                 else:
                     min_start_trade_id = 0
 
-                for trade_data in trades_dataframe.loc[
-                    trades_dataframe.index >= min_start_trade_id
-                ].itertuples():
-                    trade_id: int = trade_data.Index
+                for trade_data in trades_dataframe.filter(
+                    polars.col('trade_id') >= min_start_trade_id
+                ).iter_rows(named=True):
+                    trade_id: int = trade_data['trade_id']
 
                     # if trade_id < min_trade_id:
                     #     continue
 
-                    price: float = trade_data.price
-                    quantity: float = trade_data.quantity
+                    price: float = trade_data['price']
+                    quantity: float = trade_data['quantity']
                     volume = price * quantity
 
-                    timestamp: pandas.Timestamp = trade_data.timestamp_ms
+                    timestamp: polars.Datetime = trade_data['timestamp_ms']
 
                     # timestamp_ms = timestamp.value // 10 ** 6
 
@@ -2136,33 +2033,33 @@ WHERE symbol_id IS NOT NULL;
                 # for line_data in previous_line_dataframe.loc[
                 #     previous_line_dataframe.index >= min_start_trade_id
                 # ].itertuples():
-                for line_data in previous_line_dataframe.itertuples():
+                for line_data in previous_line_dataframe.iter_rows(named=True):
                     high_price: float
                     trading_direction: TradingDirection
                     low_price: float
 
                     if line_raw_data_1 is None:
-                        end_price: float = line_data.end_price
+                        end_price: float = line_data['end_price']
                         high_price = end_price
-                        start_price: float = line_data.start_price
+                        start_price: float = line_data['start_price']
                         low_price: float = start_price
 
-                        trading_direction: TradingDirection = (
-                            line_data.trading_direction
-                        )
+                        trading_direction: TradingDirection = line_data[
+                            'trading_direction'
+                        ]
 
                         line_raw_data_1 = {
-                            'end_timestamp': line_data.end_timestamp,
-                            'end_trade_id': line_data.end_trade_id,
+                            'end_timestamp': line_data['end_timestamp'],
+                            'end_trade_id': line_data['end_trade_id'],
                             'end_price': end_price,
                             'high_price': high_price,
                             'low_price': low_price,
-                            'start_timestamp': line_data.start_timestamp,
-                            'start_trade_id': line_data.Index,
+                            'start_timestamp': line_data['start_timestamp'],
+                            'start_trade_id': line_data['start_trade_id'],
                             'start_price': start_price,
-                            'quantity': line_data.quantity,
+                            'quantity': line_data['quantity'],
                             'trading_direction': trading_direction,
-                            'volume': line_data.volume,
+                            'volume': line_data['volume'],
                         }
 
                         if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
@@ -2185,19 +2082,20 @@ WHERE symbol_id IS NOT NULL;
 
                         continue
 
-                    if line_data.trading_direction == TradingDirection.Cross:
+                    if line_data['trading_direction'] == TradingDirection.Cross:
                         # Combine
 
                         line_raw_data_1.update(
                             {
-                                'end_timestamp': line_data.end_timestamp,
-                                'end_trade_id': line_data.end_trade_id,
-                                'end_price': line_data.end_price,
+                                'end_timestamp': line_data['end_timestamp'],
+                                'end_trade_id': line_data['end_trade_id'],
+                                'end_price': line_data['end_price'],
                                 # 'high_price': high_price,
                                 # 'low_price': low_price,
                                 'quantity': line_raw_data_1['quantity']
-                                + line_data.quantity,
-                                'volume': line_raw_data_1['volume'] + line_data.volume,
+                                + line_data['quantity'],
+                                'volume': line_raw_data_1['volume']
+                                + line_data['volume'],
                             },
                         )
 
@@ -2220,14 +2118,14 @@ WHERE symbol_id IS NOT NULL;
                     if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
                         print('Line data:', line_data)
 
-                    assert first_line_data.trading_direction != trading_direction, (
+                    assert first_line_data['trading_direction'] != trading_direction, (
                         first_line_data,
                         line_raw_data_1,
                         second_line_data,
                         smoothing_level,
                     )
 
-                    if second_line_data.trading_direction != trading_direction:
+                    if second_line_data['trading_direction'] != trading_direction:
                         # Flush
 
                         if smoothing_level == _DEBUG_SMOOTHING_LEVEL:
@@ -2237,27 +2135,27 @@ WHERE symbol_id IS NOT NULL;
                             line_raw_data_1,
                         )
 
-                        end_price: float = first_line_data.end_price
+                        end_price: float = first_line_data['end_price']
                         high_price = end_price
-                        start_price: float = first_line_data.start_price
+                        start_price: float = first_line_data['start_price']
                         low_price: float = start_price
 
-                        trading_direction: TradingDirection = (
-                            first_line_data.trading_direction
-                        )
+                        trading_direction: TradingDirection = first_line_data[
+                            'trading_direction'
+                        ]
 
                         line_raw_data_1 = {
-                            'end_timestamp': first_line_data.end_timestamp,
-                            'end_trade_id': first_line_data.end_trade_id,
+                            'end_timestamp': first_line_data['end_timestamp'],
+                            'end_trade_id': first_line_data['end_trade_id'],
                             'end_price': end_price,
                             'high_price': high_price,
                             'low_price': low_price,
-                            'start_timestamp': first_line_data.start_timestamp,
-                            'start_trade_id': first_line_data.Index,
+                            'start_timestamp': first_line_data['start_timestamp'],
+                            'start_trade_id': first_line_data['start_trade_id'],
                             'start_price': start_price,
-                            'quantity': first_line_data.quantity,
+                            'quantity': first_line_data['quantity'],
                             'trading_direction': trading_direction,
-                            'volume': first_line_data.volume,
+                            'volume': first_line_data['volume'],
                         }
 
                         # if trading_direction == TradingDirection.Cross:
@@ -2282,7 +2180,7 @@ WHERE symbol_id IS NOT NULL;
 
                     # Check low price update direction
 
-                    new_low_price = first_line_data.end_price
+                    new_low_price = first_line_data['end_price']
 
                     low_price_direction = TradingUtils.get_direction(
                         low_price,
@@ -2302,27 +2200,27 @@ WHERE symbol_id IS NOT NULL;
                             line_raw_data_1,
                         )
 
-                        end_price: float = first_line_data.end_price
+                        end_price: float = first_line_data['end_price']
                         high_price = end_price
-                        start_price: float = first_line_data.start_price
+                        start_price: float = first_line_data['start_price']
                         low_price: float = start_price
 
-                        trading_direction: TradingDirection = (
-                            first_line_data.trading_direction
-                        )
+                        trading_direction: TradingDirection = first_line_data[
+                            'trading_direction'
+                        ]
 
                         line_raw_data_1 = {
-                            'end_timestamp': first_line_data.end_timestamp,
-                            'end_trade_id': first_line_data.end_trade_id,
+                            'end_timestamp': first_line_data['end_timestamp'],
+                            'end_trade_id': first_line_data['end_trade_id'],
                             'end_price': end_price,
                             'high_price': high_price,
                             'low_price': low_price,
-                            'start_timestamp': first_line_data.start_timestamp,
-                            'start_trade_id': first_line_data.Index,
+                            'start_timestamp': first_line_data['start_timestamp'],
+                            'start_trade_id': first_line_data['start_trade_id'],
                             'start_price': start_price,
-                            'quantity': first_line_data.quantity,
+                            'quantity': first_line_data['quantity'],
                             'trading_direction': trading_direction,
-                            'volume': first_line_data.volume,
+                            'volume': first_line_data['volume'],
                         }
 
                         # if trading_direction == TradingDirection.Cross:
@@ -2347,7 +2245,7 @@ WHERE symbol_id IS NOT NULL;
 
                     # Check high price update direction
 
-                    new_high_price = second_line_data.end_price
+                    new_high_price = second_line_data['end_price']
 
                     high_price_direction = TradingUtils.get_direction(
                         high_price,
@@ -2367,27 +2265,27 @@ WHERE symbol_id IS NOT NULL;
                             line_raw_data_1,
                         )
 
-                        end_price: float = first_line_data.end_price
+                        end_price: float = first_line_data['end_price']
                         high_price = end_price
-                        start_price: float = first_line_data.start_price
+                        start_price: float = first_line_data['start_price']
                         low_price: float = start_price
 
-                        trading_direction: TradingDirection = (
-                            first_line_data.trading_direction
-                        )
+                        trading_direction: TradingDirection = first_line_data[
+                            'trading_direction'
+                        ]
 
                         line_raw_data_1 = {
-                            'end_timestamp': first_line_data.end_timestamp,
-                            'end_trade_id': first_line_data.end_trade_id,
+                            'end_timestamp': first_line_data['end_timestamp'],
+                            'end_trade_id': first_line_data['end_trade_id'],
                             'end_price': end_price,
                             'high_price': high_price,
                             'low_price': low_price,
-                            'start_timestamp': first_line_data.start_timestamp,
-                            'start_trade_id': first_line_data.Index,
+                            'start_timestamp': first_line_data['start_timestamp'],
+                            'start_trade_id': first_line_data['start_trade_id'],
                             'start_price': start_price,
-                            'quantity': first_line_data.quantity,
+                            'quantity': first_line_data['quantity'],
                             'trading_direction': trading_direction,
-                            'volume': first_line_data.volume,
+                            'volume': first_line_data['volume'],
                         }
 
                         # if trading_direction == TradingDirection.Cross:
@@ -2425,13 +2323,13 @@ WHERE symbol_id IS NOT NULL;
 
                     line_raw_data_1.update(
                         {
-                            'end_timestamp': first_line_data.end_timestamp,
-                            'end_trade_id': first_line_data.end_trade_id,
-                            'end_price': first_line_data.end_price,
+                            'end_timestamp': first_line_data['end_timestamp'],
+                            'end_trade_id': first_line_data['end_trade_id'],
+                            'end_price': first_line_data['end_price'],
                             'quantity': line_raw_data_1['quantity']
-                            + first_line_data.quantity,
+                            + first_line_data['quantity'],
                             'volume': line_raw_data_1['quantity']
-                            + first_line_data.volume,
+                            + first_line_data['volume'],
                         }
                     )
 
@@ -2450,13 +2348,13 @@ WHERE symbol_id IS NOT NULL;
 
                     line_raw_data_1.update(
                         {
-                            'end_timestamp': second_line_data.end_timestamp,
-                            'end_trade_id': second_line_data.end_trade_id,
-                            'end_price': second_line_data.end_price,
+                            'end_timestamp': second_line_data['end_timestamp'],
+                            'end_trade_id': second_line_data['end_trade_id'],
+                            'end_price': second_line_data['end_price'],
                             'quantity': line_raw_data_1['quantity']
-                            + second_line_data.quantity,
+                            + second_line_data['quantity'],
                             'volume': line_raw_data_1['quantity']
-                            + second_line_data.volume,
+                            + second_line_data['volume'],
                         }
                     )
 
@@ -2476,27 +2374,27 @@ WHERE symbol_id IS NOT NULL;
                     line_raw_data_1 = None  # noqa
 
                 if first_line_data is not None:
-                    end_price: float = first_line_data.end_price
+                    end_price: float = first_line_data['end_price']
                     high_price = end_price
-                    start_price: float = first_line_data.start_price
+                    start_price: float = first_line_data['start_price']
                     low_price: float = start_price
 
-                    trading_direction: TradingDirection = (
-                        first_line_data.trading_direction
-                    )
+                    trading_direction: TradingDirection = first_line_data[
+                        'trading_direction'
+                    ]
 
                     line_raw_data_1 = {
-                        'end_timestamp': first_line_data.end_timestamp,
-                        'end_trade_id': first_line_data.end_trade_id,
+                        'end_timestamp': first_line_data['end_timestamp'],
+                        'end_trade_id': first_line_data['end_trade_id'],
                         'end_price': end_price,
                         'high_price': high_price,
                         'low_price': low_price,
-                        'start_timestamp': first_line_data.start_timestamp,
-                        'start_trade_id': first_line_data.Index,
+                        'start_timestamp': first_line_data['start_timestamp'],
+                        'start_trade_id': first_line_data['start_trade_id'],
                         'start_price': start_price,
-                        'quantity': first_line_data.quantity,
+                        'quantity': first_line_data['quantity'],
                         'trading_direction': trading_direction,
-                        'volume': first_line_data.volume,
+                        'volume': first_line_data['volume'],
                     }
 
                     # Flush
@@ -2532,7 +2430,8 @@ WHERE symbol_id IS NOT NULL;
                                 'end_trade_id': line_raw_data_1['end_trade_id'],
                                 'end_price': line_raw_data_1['end_price'],
                                 'quantity': (
-                                    line_raw_data['quantity'] + line_raw_data_1['quantity']
+                                    line_raw_data['quantity']
+                                    + line_raw_data_1['quantity']
                                 ),
                                 'volume': (
                                     line_raw_data['volume'] + line_raw_data_1['volume']
@@ -2556,41 +2455,14 @@ WHERE symbol_id IS NOT NULL;
                     line_raw_data = None  # noqa
 
             if line_raw_data_list:
-                new_line_dataframe = DataFrame.from_records(
-                    line_raw_data_list,
-                    columns=[
-                        'start_timestamp',
-                        'start_trade_id',
-                        'start_price',
-                        'end_timestamp',
-                        'end_trade_id',
-                        'end_price',
-                        'quantity',
-                        'trading_direction',
-                        'volume',
-                    ],
-                )
+                new_line_dataframe = polars.DataFrame(line_raw_data_list)
 
-                assert new_line_dataframe.size, None
+                assert new_line_dataframe.height > 0, None
 
-                new_line_dataframe.set_index(
-                    'start_trade_id',
-                    inplace=True,
-                )
-
-                new_line_dataframe.sort_values(
-                    'start_trade_id',
-                    inplace=True,
-                )
+                new_line_dataframe = new_line_dataframe.sort('start_trade_id')
 
                 if old_line_dataframe is not None:
-                    old_line_dataframe.update(
-                        new_line_dataframe,
-                    )
-
-                    line_dataframe = old_line_dataframe.combine_first(
-                        new_line_dataframe,
-                    )
+                    line_dataframe = polars.concat([old_line_dataframe, new_line_dataframe])
                 else:
                     line_dataframe = new_line_dataframe
 
@@ -2621,14 +2493,14 @@ WHERE symbol_id IS NOT NULL;
 
             last_line_data: typing.NamedTuple | None = None
 
-            for line_data in line_dataframe.loc[
-                line_dataframe.index >= min_start_trade_id  # min_trade_id
-            ].itertuples():  # TODO
+            for line_data in line_dataframe.filter(
+                polars.col('start_trade_id') >= min_start_trade_id  # min_trade_id
+            ).iter_rows(named=True):  # TODO
                 trades_smoothed_raw_data_list.append(
                     {
-                        'price': line_data.start_price,
-                        'timestamp': line_data.start_timestamp,
-                        'trade_id': line_data.Index,
+                        'price': line_data['start_price'],
+                        'timestamp': line_data['start_timestamp'],
+                        'trade_id': line_data['start_trade_id'],
                     }
                 )
 
@@ -2637,45 +2509,24 @@ WHERE symbol_id IS NOT NULL;
             if last_line_data is not None:
                 trades_smoothed_raw_data_list.append(
                     {
-                        'price': last_line_data.end_price,
-                        'timestamp': last_line_data.end_timestamp,
-                        'trade_id': last_line_data.end_trade_id,
+                        'price': last_line_data['end_price'],
+                        'timestamp': last_line_data['end_timestamp'],
+                        'trade_id': last_line_data['end_trade_id'],
                     },
                 )
 
             if trades_smoothed_raw_data_list:
-                new_smoothed_dataframe = DataFrame.from_records(
-                    trades_smoothed_raw_data_list,
-                    columns=[
-                        'price',
-                        # 'quantity',
-                        'timestamp',
-                        'trade_id',
-                        # 'volume',
-                    ],
-                )
+                new_smoothed_dataframe = polars.DataFrame(trades_smoothed_raw_data_list)
 
-                assert new_smoothed_dataframe.size, None
+                assert new_smoothed_dataframe.height > 0, None
 
-                new_smoothed_dataframe.set_index(
-                    'trade_id',
-                    inplace=True,
-                )
-
-                new_smoothed_dataframe.sort_values(
-                    'trade_id',
-                    inplace=True,
-                )
+                new_smoothed_dataframe = new_smoothed_dataframe.sort('trade_id')
 
                 smoothed_dataframe: DataFrame
 
                 if old_smoothed_dataframe is not None:
-                    old_smoothed_dataframe.update(
-                        new_smoothed_dataframe,
-                    )
-
-                    smoothed_dataframe = old_smoothed_dataframe.combine_first(
-                        new_smoothed_dataframe,
+                    smoothed_dataframe = polars.concat(
+                        [old_smoothed_dataframe, new_smoothed_dataframe]
                     )
                 else:
                     smoothed_dataframe = new_smoothed_dataframe
@@ -2705,8 +2556,8 @@ WHERE symbol_id IS NOT NULL;
         first_item_idx: int,
         prices: list[float],
         prices_2: list[float],
-        start_timestamps: list[pandas.Timestamp],
-        start_timestamps_2: list[pandas.Timestamp],
+        start_timestamps: list[polars.Datetime],
+        start_timestamps_2: list[polars.Datetime],
     ) -> None:
         while first_item_idx < len(start_timestamps) - 2:
             second_item_idx = first_item_idx + 1
@@ -2767,8 +2618,8 @@ WHERE symbol_id IS NOT NULL;
         first_item_idx: int,
         prices: list[float],
         prices_2: list[float],
-        start_timestamps: list[pandas.Timestamp],
-        start_timestamps_2: list[pandas.Timestamp],
+        start_timestamps: list[polars.Datetime],
+        start_timestamps_2: list[polars.Datetime],
     ) -> None:
         while first_item_idx < len(start_timestamps) - 3:
             second_item_idx = first_item_idx + 1

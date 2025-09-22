@@ -6,6 +6,7 @@ httpx
 numpy
 orjson
 pandas
+polars
 pydantic
 pydantic-settings
 PyQt6
