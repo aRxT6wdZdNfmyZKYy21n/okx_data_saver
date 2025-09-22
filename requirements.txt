@@ -7,6 +7,7 @@ numpy
 orjson
 pandas
 polars
+polars_talib
 pydantic
 pydantic-settings
 PyQt6

@@ -3,18 +3,16 @@ import logging
 import traceback
 import typing
 from datetime import (
-    timedelta,
+    datetime,
+    UTC,
 )
 from decimal import (
     Decimal,
 )
 
-from functools import (
-    partial,
-)
-
 import numpy
 import polars
+import polars_talib
 import talib
 
 from polars import (
@@ -61,7 +59,12 @@ from main.show_plot.globals import (
 from main.show_plot.gui.window import (
     FinPlotChartWindow,
 )
-from utils.trading import TradingUtils
+from settings import (
+    settings,
+)
+from utils.trading import (
+    TradingUtils,
+)
 
 logger = logging.getLogger(
     __name__,
@@ -92,8 +95,6 @@ class FinPlotChartProcessor(object):
         '__order_book_volumes_position',
         '__order_book_volumes_scale',
         '__rsi_series',
-        '__test_analytics_raw_data_list',
-        '__test_series',
         '__trades_dataframe',
         '__trades_dataframe_update_lock',
         '__trades_smoothed_dataframe_by_level_map',
@@ -117,7 +118,7 @@ class FinPlotChartProcessor(object):
         self.__extreme_lines_array: numpy.ndarray | None = None
         self.__extreme_lines_position: tuple[float, float] | None = None
         self.__extreme_lines_scale: float | None = None
-        self.__line_dataframe_by_level_map: DataFrame | None = {}
+        self.__line_dataframe_by_level_map: dict[str, DataFrame | None] = {}
         self.__max_trade_price: Decimal | None = None
         self.__min_trade_price: Decimal | None = None
         self.__order_book_volumes_asks_array: numpy.ndarray | None = None
@@ -125,8 +126,6 @@ class FinPlotChartProcessor(object):
         self.__order_book_volumes_position: tuple[float, float] | None = None
         self.__order_book_volumes_scale: float | None = None
         self.__rsi_series: Series | None = None
-        self.__test_analytics_raw_data_list: list[dict[str, typing.Any]] | None = None
-        self.__test_series: Series | None = None
         self.__trades_dataframe: DataFrame | None = None
         self.__trades_dataframe_update_lock = asyncio.Lock()
         self.__trades_smoothed_dataframe_by_level_map: dict[str, DataFrame | None] = {}
@@ -243,16 +242,6 @@ class FinPlotChartProcessor(object):
         self,
     ) -> Series | None:
         return self.__rsi_series
-
-    def get_test_analytics_raw_data_list(
-        self,
-    ) -> list[dict[str, typing.Any]] | None:
-        return self.__test_analytics_raw_data_list
-
-    def get_test_series(
-        self,
-    ) -> Series | None:
-        return self.__test_series
 
     def get_trades_dataframe(
         self,
@@ -371,8 +360,6 @@ class FinPlotChartProcessor(object):
         self.__order_book_volumes_position = None
         self.__order_book_volumes_scale = None
         self.__rsi_series = None
-        self.__test_analytics_raw_data_list = None
-        self.__test_series = None
         self.__trades_dataframe = None
         self.__trades_smoothed_dataframe_by_level_map.clear()
         self.__velocity_series = None
@@ -423,10 +410,12 @@ class FinPlotChartProcessor(object):
             bollinger_upper_band_series,
             bollinger_base_line_series,
             bollinger_lower_band_series,
-        ) = talib.BBANDS(  # noqa
-            trades_dataframe.get_column('price'),
-            matype=(
-                talib.MA_Type.SMA  # noqa
+        ) = polars_talib.bbands(
+            trades_dataframe.get_column(
+                'price',
+            ),
+            matype=int(
+                talib.MA_Type.SMA.value,
             ),
             timeperiod=20,
         )
@@ -495,9 +484,11 @@ class FinPlotChartProcessor(object):
                 quantity: float = trade_data['quantity']
                 volume = price * quantity
 
-                timestamp: polars.Datetime = trade_data['timestamp_ms']
+                datetime_: datetime = trade_data['datetime']
 
-                timestamp_ms = timestamp.value // 10**6
+                timestamp_ms = int(
+                    datetime_.timestamp() * 1000,  # ms
+                )
 
                 candle_start_timestamp_ms = timestamp_ms - (
                     timestamp_ms % interval_duration_ms
@@ -570,15 +561,35 @@ class FinPlotChartProcessor(object):
             )
 
             new_candle_dataframe = new_candle_dataframe.with_columns(
-                polars.col('end_timestamp_ms')
-                .cast(polars.Datetime('ms'))
-                .alias('end_timestamp_ms'),
-                polars.col('start_timestamp_ms')
-                .cast(polars.Datetime('ms'))
-                .alias('start_timestamp_ms'),
+                polars.col(
+                    'end_timestamp_ms',
+                )
+                .cast(
+                    polars.Datetime(
+                        time_unit='ms',
+                        time_zone=UTC,
+                    ),
+                )
+                .alias(
+                    'end_datetime',
+                ),
+                polars.col(
+                    'start_timestamp_ms',
+                )
+                .cast(
+                    polars.Datetime(
+                        time_unit='ms',
+                        time_zone=UTC,
+                    ),
+                )
+                .alias(
+                    'start_datetime',
+                ),
             )
 
-            new_candle_dataframe = new_candle_dataframe.sort('start_trade_id')
+            new_candle_dataframe = new_candle_dataframe.sort(
+                'start_trade_id',
+            )
 
             candle_dataframe: polars.DataFrame
 
@@ -615,22 +626,17 @@ class FinPlotChartProcessor(object):
             else:
                 min_trade_id = 0
 
-            postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
-
-            async with postgres_db_session_maker() as session:
-                async with session.begin():
-                    new_trades_dataframe: DataFrame = await session.run_sync(
-                        partial(
-                            self.__fetch_trades_dataframe,
-                            min_trade_id=min_trade_id,
-                            symbol_id=current_symbol_id,
-                        )
-                    )
+            new_trades_dataframe: DataFrame = self.__fetch_trades_dataframe(
+                min_trade_id=min_trade_id,
+                symbol_id=current_symbol_id,
+            )
 
             if new_trades_dataframe.height == 0:
                 return
 
-            price_series: Series = new_trades_dataframe.get_column('price')
+            price_series: Series = new_trades_dataframe.get_column(
+                'price',
+            )
 
             new_max_trade_price = price_series.max()
 
@@ -911,7 +917,9 @@ class FinPlotChartProcessor(object):
             # )
 
             if trades_dataframe is not None:
-                trades_dataframe = polars.concat([trades_dataframe, new_trades_dataframe])
+                trades_dataframe = polars.concat(
+                    [trades_dataframe, new_trades_dataframe]
+                )
             else:
                 trades_dataframe = new_trades_dataframe
 
@@ -936,13 +944,6 @@ class FinPlotChartProcessor(object):
 
         logger.info(
             f'RSI series were updated by {timer.elapsed:.3f}s',
-        )
-
-        with Timer() as timer:
-            self.__update_test_series()
-
-        logger.info(
-            f'Test series were updated by {timer.elapsed:.3f}s',
         )
 
         with Timer() as timer:
@@ -975,118 +976,146 @@ class FinPlotChartProcessor(object):
 
     @staticmethod
     def __fetch_order_book_dataframe(
-        session: Session,
         max_timestamp_ms: int,
         min_timestamp_ms: int,
         symbol_id: SymbolId,
     ) -> DataFrame | None:
-        connection = session.connection()
-
-        order_book_dataframe_chunks: list[DataFrame] = []
-
-        for order_book_dataframe_chunk in polars.read_database(
-            select(
-                OKXOrderBookData2,
+        with Timer() as timer:
+            order_book_dataframe = polars.read_database_uri(
+                execute_options={
+                    'max_timestamp_ms': max_timestamp_ms,
+                    'min_timestamp_ms': min_timestamp_ms,
+                    'symbol_id': str(
+                        symbol_id.name,
+                    ),
+                },
+                query=(
+                    'SELECT'
+                    # Primary key fields
+                    ' timestamp_ms'
+                    # Attribute fields
+                    ', action_id'
+                    ', asks'
+                    ', bids'
+                    f' FROM {OKXOrderBookData2.__tablename__}'
+                    ' WHERE symbol_id = :symbol_id'
+                    ' AND timestamp_ms >= :min_timestamp_ms'
+                    ' AND timestamp_ms <= :max_timestamp_ms'
+                    ' ORDER BY'
+                    ' symbol_id ASC'
+                    ', timestamp_ms ASC'
+                    ';'
+                ),
+                engine='connectorx',
+                uri=(
+                    'postgresql'
+                    '://'
+                    f'{settings.POSTGRES_DB_USER_NAME}'
+                    ':'
+                    f'{settings.POSTGRES_DB_PASSWORD.get_secret_value()}'
+                    '@'
+                    f'{settings.POSTGRES_DB_HOST_NAME}'
+                    ':'
+                    f'{settings.POSTGRES_DB_PORT}'
+                    '/'
+                    f'{settings.POSTGRES_DB_NAME}'
+                ),
             )
-            .where(
-                and_(
-                    OKXOrderBookData2.symbol_id == symbol_id,
-                    OKXOrderBookData2.timestamp_ms >= min_timestamp_ms,
-                    OKXOrderBookData2.timestamp_ms <= max_timestamp_ms,
-                )
+
+        print(
+            f'Fetched order book dataframe by {timer.elapsed:.3f}s',
+        )
+
+        order_book_dataframe = order_book_dataframe.with_columns(
+            polars.col(
+                'timestamp_ms',
             )
-            .order_by(
-                OKXOrderBookData2.symbol_id.asc(),
-                OKXOrderBookData2.timestamp_ms.asc(),
-            ),
-            con=connection,
-            chunksize=10_000,
-        ):
-            order_book_dataframe_chunk.drop(
-                'symbol_id',
-                axis=1,
-                inplace=True,
+            .cast(
+                polars.Datetime(
+                    time_unit='ms',
+                    time_zone=UTC,
+                ),
             )
-
-            order_book_dataframe_chunk = order_book_dataframe_chunk.with_columns(
-                polars.col('timestamp_ms').cast(polars.Datetime('ms')).alias('timestamp_ms')
+            .alias(
+                'datetime',
             )
+        )
 
-            # В polars нет концепции индекса, используем колонки напрямую
-
-            order_book_dataframe_chunks.append(
-                order_book_dataframe_chunk,
-            )
-
-            print(f'Fetched {len(order_book_dataframe_chunks)} chunks')
-
-        order_book_dataframe = polars.concat(order_book_dataframe_chunks)
-
-        order_book_dataframe_chunks.clear()
-
-        order_book_dataframe = order_book_dataframe.sort('timestamp_ms')
+        order_book_dataframe = order_book_dataframe.sort(
+            'datetime',
+        )
 
         return order_book_dataframe
 
     @staticmethod
     def __fetch_trades_dataframe(
-        session: Session,
         min_trade_id: int,
         symbol_id: SymbolId,
     ) -> DataFrame | None:
-        connection = session.connection()
-
-        trades_dataframe_chunks: list[DataFrame] = []
-
-        for trades_dataframe_chunk in polars.read_database(
-            select(
-                OKXTradeData2,
-            )
-            .where(
-                and_(
-                    OKXTradeData2.symbol_id == symbol_id,
-                    OKXTradeData2.trade_id >= min_trade_id,
-                )
-            )
-            .order_by(
-                OKXTradeData2.symbol_id.asc(),
-                OKXTradeData2.trade_id.desc(),
-            )
-            .limit(
-                2_000_000,
-                # 1_000_000,
-                # 500_000,
-                # 50_000,
-                # 10_000
-                # 1_000
-                # 50
-            ),
-            con=connection,
-            chunksize=10_000,
-        ):
-            trades_dataframe_chunk.drop(
-                'symbol_id',
-                axis=1,
-                inplace=True,
-            )
-
-            trades_dataframe_chunk = trades_dataframe_chunk.with_columns(
-                polars.col('timestamp_ms').cast(polars.Datetime('ms')).alias('timestamp_ms')
-            )
-
-            # В polars нет концепции индекса, используем колонки напрямую
-
-            trades_dataframe_chunks.append(
-                trades_dataframe_chunk,
+        with Timer() as timer:
+            trades_dataframe = polars.read_database_uri(
+                engine='connectorx',
+                execute_options={
+                    'limit': 2_000_000,
+                    'min_trade_id': min_trade_id,
+                    'symbol_id': str(
+                        symbol_id.name,
+                    ),
+                },
+                query=(
+                    'SELECT'
+                    # Primary key fields
+                    ' trade_id'
+                    # Attribute fields
+                    ', is_buy'
+                    ', price'
+                    ', quantity'
+                    ', timestamp_ms'
+                    f' FROM {OKXTradeData2.__tablename__}'
+                    ' WHERE'
+                    ' symbol_id = :symbol_id'
+                    ' AND trade_id >= :min_trade_id'
+                    ' ORDER BY'
+                    ' symbol_id ASC'
+                    ', trade_id DESC'
+                    ' LIMIT :limit'
+                    ';'
+                ),
+                uri=(
+                    'postgresql'
+                    '://'
+                    f'{settings.POSTGRES_DB_USER_NAME}'
+                    ':'
+                    f'{settings.POSTGRES_DB_PASSWORD.get_secret_value()}'
+                    '@'
+                    f'{settings.POSTGRES_DB_HOST_NAME}'
+                    ':'
+                    f'{settings.POSTGRES_DB_PORT}'
+                    '/'
+                    f'{settings.POSTGRES_DB_NAME}'
+                ),
             )
 
-            print(f'Fetched {len(trades_dataframe_chunks)} chunks')
+        print(f'Fetched trades dataframe by {timer.elapsed:.3f}s')
 
-        trades_dataframe = polars.concat(trades_dataframe_chunks)
+        trades_dataframe = trades_dataframe.with_columns(
+            polars.col(
+                'timestamp_ms',
+            )
+            .cast(
+                polars.Datetime(
+                    time_unit='ms',
+                    time_zone=UTC,
+                ),
+            )
+            .alias(
+                'datetime',
+            )
+        )
 
-        trades_dataframe_chunks.clear()
-
-        trades_dataframe = trades_dataframe.sort('trade_id')
+        trades_dataframe = trades_dataframe.sort(
+            'trade_id',
+        )
 
         return trades_dataframe
 
@@ -1372,13 +1401,19 @@ WHERE symbol_id IS NOT NULL;
 
         logger.info(f'delta_price: {delta_price}, delta_trade_id: {delta_trade_id})')
 
-        timestamp_ms_series = trades_dataframe.get_column('timestamp_ms')
+        datetime_series = trades_dataframe.get_column(
+            'datetime',
+        )
 
-        max_timestamp: polars.Datetime = timestamp_ms_series.max()
-        max_timestamp_ms = max_timestamp.value // 10**6
+        max_datetime: datetime = datetime_series.max()
+        max_timestamp_ms = int(
+            max_datetime.timestamp() * 1000,  # ms
+        )
 
-        min_timestamp: polars.Datetime = timestamp_ms_series.min()
-        min_timestamp_ms = min_timestamp.value // 10**6
+        min_datetime: datetime = datetime_series.min()
+        min_timestamp_ms = int(
+            min_datetime.timestamp() * 1000,  # ms
+        )
 
         delta_timestamp_ms = max_timestamp_ms - min_timestamp_ms
 
@@ -1412,28 +1447,25 @@ WHERE symbol_id IS NOT NULL;
 
                 initial_order_book_snapshot_data = result.scalar_one_or_none()
 
-                if initial_order_book_snapshot_data is None:
-                    logger.info(
-                        'Could not find initial order book snapshot data'
-                        f'for symbol ID {current_symbol_id} and max timestamp (ms) {min_timestamp_ms}'
-                    )
+        if initial_order_book_snapshot_data is None:
+            logger.info(
+                'Could not find initial order book snapshot data'
+                f'for symbol ID {current_symbol_id} and max timestamp (ms) {min_timestamp_ms}'
+            )
 
-                    return
+            return
 
-                logger.info(
-                    f'Found initial order book snapshot data: {initial_order_book_snapshot_data}'
-                )
+        logger.info(
+            f'Found initial order book snapshot data: {initial_order_book_snapshot_data}'
+        )
 
-                new_order_book_dataframe: DataFrame = await session.run_sync(
-                    partial(
-                        self.__fetch_order_book_dataframe,
-                        max_timestamp_ms=max_timestamp_ms,
-                        min_timestamp_ms=initial_order_book_snapshot_data.min_timestamp_ms,
-                        symbol_id=current_symbol_id,
-                    )
-                )
+        new_order_book_dataframe: DataFrame = self.__fetch_order_book_dataframe(
+            max_timestamp_ms=max_timestamp_ms,
+            min_timestamp_ms=initial_order_book_snapshot_data.min_timestamp_ms,
+            symbol_id=current_symbol_id,
+        )
 
-                logger.info(f'new_order_book_dataframe: {new_order_book_dataframe}')
+        logger.info(f'new_order_book_dataframe: {new_order_book_dataframe}')
 
         # delta_price / delta_trade_id = height / width;
         # width = height * (delta_trade_id / delta_price);
@@ -1523,20 +1555,22 @@ WHERE symbol_id IS NOT NULL;
                         None,
                     )
 
-            timestamp: polars.Datetime = order_book_data['timestamp_ms']
-            timestamp_ms = timestamp.value // 10**6
+            datetime_: datetime = order_book_data['datetime']
+            timestamp_ms = int(
+                datetime_.timestamp() * 1000,  # ms
+            )
 
             logger.info(
                 f'{timestamp_ms} / {max_timestamp_ms} ({100.0 * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
             )
 
             filtered_trades_dataframe: DataFrame = trades_dataframe.filter(
-                polars.col('timestamp_ms') <= timestamp
+                polars.col('datetime') <= datetime_
             )
 
             if filtered_trades_dataframe.height == 0:
                 logger.warning(
-                    f'Filtered trades dataframe is empty for timestamp {timestamp}'
+                    f'Filtered trades dataframe is empty for datetime {datetime_}'
                 )
 
                 continue
@@ -1613,8 +1647,10 @@ WHERE symbol_id IS NOT NULL;
         if candle_dataframe is None:
             return
 
-        rsi_series = talib.RSI(  # noqa
-            candle_dataframe.close_price,
+        rsi_series = polars_talib.rsi(  # noqa
+            candle_dataframe.get_column(
+                'close_price',
+            ),
             timeperiod=14,  # 6
         )
 
@@ -1622,252 +1658,6 @@ WHERE symbol_id IS NOT NULL;
             return
 
         self.__rsi_series = rsi_series
-
-    def __update_test_series(
-        self,
-    ) -> None:
-        trades_dataframe = self.__trades_dataframe
-
-        assert trades_dataframe is not None, None
-
-        return  # TODO
-
-        prices: list[float] = []
-        start_timestamps: list[polars.Datetime] = []
-
-        for trade_data in trades_dataframe.iter_rows(named=True):
-            start_timestamp: polars.Datetime = trade_data['timestamp_ms']
-
-            trade_close_price = trade_data['close_price']
-            trade_high_price = trade_data['high_price']
-            trade_low_price = trade_data['low_price']
-            trade_open_price = trade_data['open_price']
-
-            is_bull = trade_close_price >= trade_open_price
-
-            second_price: float
-            third_price: float
-
-            if is_bull:
-                second_price = trade_low_price
-                third_price = trade_high_price
-            else:
-                second_price = trade_high_price
-                third_price = trade_low_price
-
-            prices.append(
-                trade_open_price,
-            )
-
-            start_timestamps.append(
-                start_timestamp,
-            )
-
-            prices.append(
-                second_price,
-            )
-
-            start_timestamps.append(
-                start_timestamp
-                + timedelta(
-                    minutes=3,
-                    seconds=45,
-                ),
-            )
-
-            prices.append(
-                third_price,
-            )
-
-            start_timestamps.append(
-                start_timestamp
-                + timedelta(
-                    minutes=7,
-                    seconds=30,
-                ),
-            )
-
-            prices.append(
-                trade_close_price,
-            )
-
-            start_timestamps.append(
-                start_timestamp
-                + timedelta(
-                    minutes=11,
-                    seconds=15,
-                ),
-            )
-
-        prices_2: list[float] = []
-        start_timestamps_2: list[polars.Datetime] = []
-
-        for _ in range(10):
-            self.__process_1(
-                first_item_idx=0,
-                prices=prices,
-                prices_2=prices_2,
-                start_timestamps=start_timestamps,
-                start_timestamps_2=start_timestamps_2,
-            )
-
-            prices.clear()
-            start_timestamps.clear()
-
-            self.__process_1(
-                first_item_idx=1,
-                prices=prices_2,
-                prices_2=prices,
-                start_timestamps=start_timestamps_2,
-                start_timestamps_2=start_timestamps,
-            )
-
-            prices_2.clear()
-            start_timestamps_2.clear()
-
-        prices_3: list[float] = []
-        start_timestamps_3: list[polars.Datetime] = []
-
-        for _ in range(0):
-            self.__process_2(
-                first_item_idx=0,
-                prices=prices,
-                prices_2=prices_2,
-                start_timestamps=start_timestamps,
-                start_timestamps_2=start_timestamps_2,
-            )
-
-            prices.clear()
-            start_timestamps.clear()
-
-            self.__process_2(
-                first_item_idx=1,
-                prices=prices_2,
-                prices_2=prices_3,
-                start_timestamps=start_timestamps_2,
-                start_timestamps_2=start_timestamps_3,
-            )
-
-            prices_2.clear()
-            start_timestamps_2.clear()
-
-            self.__process_2(
-                first_item_idx=2,
-                prices=prices_3,
-                prices_2=prices,
-                start_timestamps=start_timestamps_3,
-                start_timestamps_2=start_timestamps,
-            )
-
-            prices_3.clear()
-            start_timestamps_3.clear()
-
-        if not start_timestamps:
-            return
-
-        test_analytics_raw_data_list: list[dict[str, typing.Any]] = []
-
-        for first_item_idx in range(len(start_timestamps) - 1):
-            second_item_idx = first_item_idx + 1
-
-            first_price = prices[first_item_idx]
-            first_start_timestamp = start_timestamps[first_item_idx]
-
-            second_price = prices[second_item_idx]
-            second_start_timestamp = start_timestamps[second_item_idx]
-
-            is_bull = second_price >= first_price
-
-            test_analytics_raw_data_list.append(
-                {
-                    'is_bull': is_bull,
-                    'first_price': first_price,
-                    'first_start_timestamp': first_start_timestamp,
-                    'second_price': second_price,
-                    'second_start_timestamp': second_start_timestamp,
-                }
-            )
-
-        self.__test_analytics_raw_data_list = test_analytics_raw_data_list
-
-        price_by_start_timestamp_map = {
-            timestamp: price
-            for timestamp, price in zip(
-                start_timestamps,
-                prices,
-            )
-        }
-
-        prices_final: list[float] = []
-        start_timestamps_final: list[polars.Datetime] = []
-
-        start_timestamp = start_timestamps[0]
-        end_timestamp = start_timestamps[-1]
-
-        old_price: float | None = None
-        old_start_timestamp: polars.Datetime | None = None
-
-        while start_timestamp <= end_timestamp:
-            price = price_by_start_timestamp_map.get(
-                start_timestamp,
-            )
-
-            if price is None:
-                assert old_price is not None, None
-                assert old_start_timestamp is not None, None
-
-                next_price: float | None = None
-                next_timestamp = start_timestamp
-
-                while next_timestamp <= end_timestamp:
-                    next_price = price_by_start_timestamp_map.get(
-                        next_timestamp,
-                    )
-
-                    if next_price is not None:
-                        break
-
-                    next_timestamp += timedelta(
-                        minutes=3,
-                        seconds=45,
-                    )
-
-                if next_price is not None:
-                    coefficient = (
-                        start_timestamp.timestamp() - old_start_timestamp.timestamp()
-                    ) / (next_timestamp.timestamp() - old_start_timestamp.timestamp())
-
-                    price = old_price + coefficient * (next_price - old_price)
-                else:
-                    price = old_price
-
-                price_by_start_timestamp_map[start_timestamp] = price
-            else:
-                old_price = price
-                old_start_timestamp = start_timestamp
-
-            prices_final.append(
-                price,
-            )
-
-            start_timestamps_final.append(
-                start_timestamp,
-            )
-
-            start_timestamp += timedelta(
-                minutes=3,
-                seconds=45,
-            )
-
-        test_series = Series(
-            prices_final,
-            start_timestamps_final,
-        )
-
-        if not test_series.size:
-            return
-
-        self.__test_series = test_series
 
     def __update_trades_smoothed_dataframe_by_level_map(self) -> None:
         line_dataframe_by_level_map = self.__line_dataframe_by_level_map
@@ -1924,15 +1714,15 @@ WHERE symbol_id IS NOT NULL;
                     quantity: float = trade_data['quantity']
                     volume = price * quantity
 
-                    timestamp: polars.Datetime = trade_data['timestamp_ms']
+                    datetime_: datetime = trade_data['datetime']
 
                     # timestamp_ms = timestamp.value // 10 ** 6
 
                     if line_raw_data is None:
                         line_raw_data = {
-                            'start_timestamp': timestamp,
-                            'start_trade_id': trade_id,
+                            'start_datetime': datetime_,
                             'start_price': price,
+                            'start_trade_id': trade_id,
                             'quantity': quantity,
                             'trading_direction': None,
                             'volume': volume,
@@ -1953,8 +1743,8 @@ WHERE symbol_id IS NOT NULL;
 
                             line_raw_data.update(
                                 {
+                                    'end_datetime': datetime_,
                                     'end_price': end_price,
-                                    'end_timestamp': timestamp,
                                     'end_trade_id': trade_id,
                                     'quantity': (line_raw_data['quantity'] + quantity),
                                     'trading_direction': new_trading_direction,
@@ -1990,7 +1780,7 @@ WHERE symbol_id IS NOT NULL;
                                 )
 
                                 line_raw_data = {
-                                    'start_timestamp': line_raw_data['end_timestamp'],
+                                    'start_datetime': line_raw_data['end_datetime'],
                                     'start_trade_id': line_raw_data['end_trade_id'],
                                     'start_price': old_end_price,
                                     'quantity': quantity,
@@ -2001,7 +1791,7 @@ WHERE symbol_id IS NOT NULL;
                             line_raw_data.update(
                                 {
                                     'end_price': new_end_price,
-                                    'end_timestamp': timestamp,
+                                    'end_datetime': datetime_,
                                     'end_trade_id': trade_id,
                                 }
                             )
@@ -2462,7 +2252,9 @@ WHERE symbol_id IS NOT NULL;
                 new_line_dataframe = new_line_dataframe.sort('start_trade_id')
 
                 if old_line_dataframe is not None:
-                    line_dataframe = polars.concat([old_line_dataframe, new_line_dataframe])
+                    line_dataframe = polars.concat(
+                        [old_line_dataframe, new_line_dataframe]
+                    )
                 else:
                     line_dataframe = new_line_dataframe
 
@@ -2550,126 +2342,3 @@ WHERE symbol_id IS NOT NULL;
             return
 
         self.__velocity_series = candle_dataframe_1m.trades_count
-
-    @staticmethod
-    def __process_1(
-        first_item_idx: int,
-        prices: list[float],
-        prices_2: list[float],
-        start_timestamps: list[polars.Datetime],
-        start_timestamps_2: list[polars.Datetime],
-    ) -> None:
-        while first_item_idx < len(start_timestamps) - 2:
-            second_item_idx = first_item_idx + 1
-            third_item_idx = second_item_idx + 1
-
-            first_price = prices[first_item_idx]
-            first_start_timestamp = start_timestamps[first_item_idx]
-
-            prices_2.append(
-                first_price,
-            )
-
-            start_timestamps_2.append(
-                first_start_timestamp,
-            )
-
-            second_price = prices[second_item_idx]
-            second_start_timestamp = start_timestamps[second_item_idx]
-
-            third_price = prices[third_item_idx]
-            third_start_timestamp = start_timestamps[third_item_idx]
-
-            is_bull_1 = second_price > first_price
-            is_bear_1 = second_price < first_price
-            is_cross_1 = second_price == first_price
-
-            is_bull_2 = third_price > second_price
-            is_bear_2 = third_price < second_price
-            is_cross_2 = third_price == second_price
-
-            if not (
-                is_bull_1 == is_bull_2
-                or is_bear_1 == is_bear_2
-                or is_cross_1
-                or is_cross_2
-            ):
-                # second_price = (
-                #     (
-                #         first_price +
-                #         third_price
-                #     ) /
-                #
-                #     2.0
-                # )
-
-                prices_2.append(
-                    second_price,
-                )
-
-                start_timestamps_2.append(
-                    second_start_timestamp,
-                )
-
-            first_item_idx += 2
-
-    @staticmethod
-    def __process_2(
-        first_item_idx: int,
-        prices: list[float],
-        prices_2: list[float],
-        start_timestamps: list[polars.Datetime],
-        start_timestamps_2: list[polars.Datetime],
-    ) -> None:
-        while first_item_idx < len(start_timestamps) - 3:
-            second_item_idx = first_item_idx + 1
-            third_item_idx = second_item_idx + 1
-            fourth_item_idx = third_item_idx + 1
-
-            first_price = prices[first_item_idx]
-            first_start_timestamp = start_timestamps[first_item_idx]
-
-            prices_2.append(
-                first_price,
-            )
-
-            start_timestamps_2.append(
-                first_start_timestamp,
-            )
-
-            second_price = prices[second_item_idx]
-            second_start_timestamp = start_timestamps[second_item_idx]
-
-            third_price = prices[third_item_idx]
-            third_start_timestamp = start_timestamps[third_item_idx]
-
-            fourth_price = prices[fourth_item_idx]
-            fourth_start_timestamp = start_timestamps[fourth_item_idx]
-
-            if not (
-                (
-                    first_price <= second_price <= fourth_price
-                    and first_price <= third_price <= fourth_price
-                )
-                or (
-                    fourth_price <= second_price <= first_price
-                    and fourth_price <= third_price <= first_price
-                )
-            ):
-                prices_2.append(
-                    second_price,
-                )
-
-                start_timestamps_2.append(
-                    second_start_timestamp,
-                )
-
-                prices_2.append(
-                    third_price,
-                )
-
-                start_timestamps_2.append(
-                    third_start_timestamp,
-                )
-
-            first_item_idx += 3

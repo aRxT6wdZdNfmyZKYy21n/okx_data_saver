@@ -3,7 +3,12 @@ from __future__ import annotations
 import asyncio
 import traceback
 import typing
-from collections import defaultdict
+from collections import (
+    defaultdict,
+)
+from datetime import (
+    datetime,
+)
 
 from functools import (
     partial,
@@ -538,19 +543,6 @@ class FinPlotChartWindow(QMainWindow):
                 name='RSI',
             )
 
-        self.__test_analytics_rect_item_by_start_timestamp_ms_map: dict[
-            int, RectItem
-        ] = {}
-
-        self.__test_plot_data_item = price_plot.plot(
-            pen=(
-                127,
-                127,
-                127,
-            ),
-            name='Test',
-        )
-
         if _IS_NEED_SHOW_RSI:
             self.__rsi_interval_name_combo_box = rsi_interval_name_combo_box
             self.__rsi_interval_name_label = rsi_interval_name_label
@@ -892,11 +884,11 @@ class FinPlotChartWindow(QMainWindow):
                 candle_low_price: float = candle_row_data['low_price']
                 candle_open_price: float = candle_row_data['open_price']
 
-                end_timestamp: polars.Datetime = candle_row_data['end_timestamp_ms']
+                # end_datetime: datetime = candle_row_data['end_datetime']
                 end_trade_id: int = candle_row_data['end_trade_id']
 
-                start_timestamp: polars.Datetime = candle_row_data['start_timestamp_ms']
-                start_timestamp_ms = int(start_timestamp.timestamp() * 1000)
+                start_datetime: datetime = candle_row_data['start_datetime']
+                start_timestamp_ms = int(start_datetime.timestamp() * 1000)
 
                 candle_start_timestamp_ms_set.add(
                     start_timestamp_ms,
@@ -1033,149 +1025,6 @@ class FinPlotChartWindow(QMainWindow):
                     rsi_series.to_numpy(),
                     rsi_series.to_numpy(),
                 )
-
-        test_analytics_raw_data_list = processor.get_test_analytics_raw_data_list()
-
-        test_analytics_rect_item_by_start_timestamp_ms_map = (
-            self.__test_analytics_rect_item_by_start_timestamp_ms_map
-        )
-
-        if test_analytics_raw_data_list is not None:
-            test_analytics_raw_data_by_start_timestamp_ms_map: dict[
-                int, dict[str, typing.Any]
-            ] = {}  # TODO: test_analytics_raw_data_list -> test_analytics_raw_data_by_start_timestamp_ms_map
-
-            for test_analytics_raw_data in test_analytics_raw_data_list:
-                start_timestamp: polars.Datetime = test_analytics_raw_data[
-                    'first_start_timestamp'
-                ]
-
-                start_timestamp_ms = int(
-                    start_timestamp.timestamp() * 1000  # ms
-                )
-
-                test_analytics_raw_data_by_start_timestamp_ms_map[
-                    start_timestamp_ms
-                ] = test_analytics_raw_data
-
-                test_analytics_rect_item = (
-                    test_analytics_rect_item_by_start_timestamp_ms_map.get(
-                        start_timestamp_ms,
-                    )
-                )
-
-                end_price: float = test_analytics_raw_data['second_price']
-
-                end_timestamp: polars.Datetime = test_analytics_raw_data[
-                    'second_start_timestamp'
-                ]
-
-                is_bull: bool = test_analytics_raw_data['is_bull']
-
-                start_price: float = test_analytics_raw_data['first_price']
-
-                test_analytics_color: QColor
-
-                if is_bull:
-                    test_analytics_color = QColor(
-                        0,
-                        255,
-                        0,
-                        int(
-                            255 * 0.25,
-                        ),
-                    )
-                else:
-                    test_analytics_color = QColor(
-                        255,
-                        0,
-                        0,
-                        int(
-                            255 * 0.25,
-                        ),
-                    )
-
-                test_analytics_rect_item_position = Point(
-                    start_timestamp.timestamp() * 1000,
-                    start_price,
-                )
-
-                test_analytics_rect_item_size = Point(
-                    (end_timestamp - start_timestamp).total_seconds() * 1000,
-                    end_price - start_price,
-                )
-
-                if test_analytics_rect_item is not None:
-                    test_analytics_rect_item.set_pen_color(
-                        test_analytics_color,
-                    )
-
-                    test_analytics_rect_item.set_brush_color(
-                        test_analytics_color,
-                    )
-
-                    test_analytics_rect_item.setPos(
-                        test_analytics_rect_item_position,
-                    )
-
-                    test_analytics_rect_item.set_size(
-                        test_analytics_rect_item_size,
-                    )
-                else:
-                    # Add new rect
-
-                    test_analytics_rect_item = (  # noqa
-                        test_analytics_rect_item_by_start_timestamp_ms_map[
-                            start_timestamp_ms
-                        ]
-                    ) = RectItem(
-                        brush_color=test_analytics_color,
-                        pen_color=test_analytics_color,
-                        position=test_analytics_rect_item_position,
-                        size=test_analytics_rect_item_size,
-                    )
-
-                    price_plot.addItem(
-                        test_analytics_rect_item,
-                    )
-
-            # Remove other items
-
-            for start_timestamp_ms in tuple(
-                test_analytics_rect_item_by_start_timestamp_ms_map,
-            ):
-                if (
-                    start_timestamp_ms
-                    in test_analytics_raw_data_by_start_timestamp_ms_map
-                ):
-                    continue
-
-                test_analytics_rect_item = (
-                    test_analytics_rect_item_by_start_timestamp_ms_map.pop(
-                        start_timestamp_ms,
-                    )
-                )
-
-                price_plot.removeItem(
-                    test_analytics_rect_item,
-                )
-        else:
-            for (
-                test_analytics_rect_item
-            ) in test_analytics_rect_item_by_start_timestamp_ms_map.values():
-                price_plot.removeItem(
-                    test_analytics_rect_item,
-                )
-
-            test_analytics_rect_item_by_start_timestamp_ms_map.clear()
-
-        test_series = processor.get_test_series()
-
-        if test_series is not None:
-            self.__test_plot_data_item.setData(
-                test_series.to_numpy(),
-                test_series.to_numpy(),
-            )
 
         if _IS_NEED_SHOW_VELOCITY:
             velocity_series = processor.get_velocity_series()
