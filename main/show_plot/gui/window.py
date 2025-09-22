@@ -9,6 +9,7 @@ from functools import (
     partial,
 )
 
+import numpy
 import pandas
 from chrono import (
     Timer,
@@ -168,7 +169,68 @@ class FinPlotChartWindow(QMainWindow):
         )
 
         extreme_lines_image_item = pyqtgraph.ImageItem()
-        order_book_volumes_image_item = pyqtgraph.ImageItem()
+        order_book_volumes_asks_image_item = pyqtgraph.ImageItem()
+
+        position_array = numpy.array(
+            [
+                0.0,
+                1.0,
+            ],
+        )
+
+        green_color_array = numpy.array(
+            [
+                [
+                    0,  # R
+                    0,  # G
+                    0,  # B
+                    0,  # A
+                ],
+                [
+                    0,  # R
+                    255,  # G
+                    0,  # B
+                    255,  # A
+                ],
+            ],
+        )
+
+        green_color_map = pyqtgraph.ColorMap(
+            position_array,
+            green_color_array,
+        )
+
+        order_book_volumes_asks_image_item.setColorMap(
+            green_color_map
+        )
+
+        order_book_volumes_bids_image_item = pyqtgraph.ImageItem()
+
+        red_color_array = numpy.array(
+            [
+                [
+                    0,  # R
+                    0,  # G
+                    0,  # B
+                    0,  # A
+                ],
+                [
+                    255,  # R
+                    0,  # G
+                    0,  # B
+                    255,  # A
+                ],
+            ],
+        )
+
+        red_color_map = pyqtgraph.ColorMap(
+            position_array,
+            red_color_array,
+        )
+
+        order_book_volumes_bids_image_item.setColorMap(
+            red_color_map,
+        )
 
         graphics_layout_widget: pyqtgraph.GraphicsLayout = (  # noqa
             pyqtgraph.GraphicsLayoutWidget()
@@ -213,7 +275,11 @@ class FinPlotChartWindow(QMainWindow):
         )
 
         price_plot.addItem(
-            order_book_volumes_image_item,
+            order_book_volumes_asks_image_item,
+        )
+
+        price_plot.addItem(
+            order_book_volumes_bids_image_item,
         )
 
         graphics_layout_widget.nextRow()
@@ -423,7 +489,8 @@ class FinPlotChartWindow(QMainWindow):
 
         self.__drawing_lock = asyncio.Lock()
 
-        self.__order_book_volumes_image_item = order_book_volumes_image_item
+        self.__order_book_volumes_asks_image_item = order_book_volumes_asks_image_item
+        self.__order_book_volumes_bids_image_item = order_book_volumes_bids_image_item
         self.__price_plot = price_plot
 
         price_plot_data_item_kwargs = {}
@@ -919,8 +986,12 @@ class FinPlotChartWindow(QMainWindow):
             extreme_lines_scale,
         )
 
-        order_book_volumes_array = (
-            processor.get_order_book_volumes_array()
+        order_book_volumes_asks_array = (
+            processor.get_order_book_volumes_asks_array()
+        )
+
+        order_book_volumes_bids_array = (
+            processor.get_order_book_volumes_bids_array()
         )
 
         order_book_volumes_position = (
@@ -931,19 +1002,35 @@ class FinPlotChartWindow(QMainWindow):
             processor.get_order_book_volumes_scale()
         )
 
-        order_book_volumes_image_item = self.__order_book_volumes_image_item
+        order_book_volumes_asks_image_item = self.__order_book_volumes_asks_image_item
 
-        order_book_volumes_image_item.setPos(
+        order_book_volumes_asks_image_item.setPos(
             QPointF(
                 *order_book_volumes_position,
             ),
         )
 
-        order_book_volumes_image_item.setImage(
-            order_book_volumes_array,
+        order_book_volumes_asks_image_item.setImage(
+            order_book_volumes_asks_array,
         )
 
-        order_book_volumes_image_item.setScale(
+        order_book_volumes_asks_image_item.setScale(
+            order_book_volumes_scale,
+        )
+
+        order_book_volumes_bids_image_item = self.__order_book_volumes_bids_image_item
+
+        order_book_volumes_bids_image_item.setPos(
+            QPointF(
+                *order_book_volumes_position,
+            ),
+        )
+
+        order_book_volumes_bids_image_item.setImage(
+            order_book_volumes_bids_array,
+        )
+
+        order_book_volumes_bids_image_item.setScale(
             order_book_volumes_scale,
         )
 
