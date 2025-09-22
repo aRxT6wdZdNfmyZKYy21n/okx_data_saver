@@ -74,12 +74,15 @@ class FinPlotChartProcessor(object):
         '__current_rsi_interval_name',
         '__current_symbol_name',
         '__current_trades_smoothing_level',
+        '__extreme_lines_array',
+        '__extreme_lines_position',
+        '__extreme_lines_scale',
         '__line_dataframe_by_level_map',
         '__max_trade_price',
         '__min_trade_price',
-        '__order_book_volume_array',
-        '__order_book_volume_position',
-        '__order_book_volume_scale',
+        '__order_book_volumes_array',
+        '__order_book_volumes_position',
+        '__order_book_volumes_scale',
         '__rsi_series',
         '__test_analytics_raw_data_list',
         '__test_series',
@@ -103,12 +106,15 @@ class FinPlotChartProcessor(object):
         self.__current_rsi_interval_name: str | None = None
         self.__current_symbol_name: str | None = None
         self.__current_trades_smoothing_level: str | None = None
+        self.__extreme_lines_array: numpy.ndarray | None = None
+        self.__extreme_lines_position: tuple[float, float] | None = None
+        self.__extreme_lines_scale: float | None = None
         self.__line_dataframe_by_level_map: DataFrame | None = {}
         self.__max_trade_price: Decimal | None = None
         self.__min_trade_price: Decimal | None = None
-        self.__order_book_volume_array: numpy.ndarray | None = None
-        self.__order_book_volume_position: tuple[float, float] | None = None
-        self.__order_book_volume_scale: float | None = None
+        self.__order_book_volumes_array: numpy.ndarray | None = None
+        self.__order_book_volumes_position: tuple[float, float] | None = None
+        self.__order_book_volumes_scale: float | None = None
         self.__rsi_series: Series | None = None
         self.__test_analytics_raw_data_list: list[dict[str, typing.Any]] | None = None
         self.__test_series: Series | None = None
@@ -189,20 +195,35 @@ class FinPlotChartProcessor(object):
     ) -> Decimal | None:
         return self.__min_trade_price
 
-    def get_order_book_volume_array(
+    def get_extreme_lines_array(
             self,
     ) -> numpy.ndarray | None:
-        return self.__order_book_volume_array
+        return self.__extreme_lines_array
 
-    def get_order_book_volume_position(
+    def get_extreme_lines_position(
             self,
     ) -> tuple[float, float] | None:
-        return self.__order_book_volume_position
+        return self.__extreme_lines_position
 
-    def get_order_book_volume_scale(
+    def get_extreme_lines_scale(
             self,
     ) -> float | None:
-        return self.__order_book_volume_scale
+        return self.__extreme_lines_scale
+
+    def get_order_book_volumes_array(
+            self,
+    ) -> numpy.ndarray | None:
+        return self.__order_book_volumes_array
+
+    def get_order_book_volumes_position(
+            self,
+    ) -> tuple[float, float] | None:
+        return self.__order_book_volumes_position
+
+    def get_order_book_volumes_scale(
+            self,
+    ) -> float | None:
+        return self.__order_book_volumes_scale
 
     def get_rsi_series(
         self,
@@ -325,12 +346,15 @@ class FinPlotChartProcessor(object):
         self.__bollinger_lower_band_series = None
         self.__bollinger_upper_band_series = None
         self.__candle_dataframe_by_interval_name_map.clear()
+        self.__extreme_lines_array = None
+        self.__extreme_lines_position = None
+        self.__extreme_lines_scale = None
         self.__line_dataframe_by_level_map.clear()
         self.__max_trade_price = None
         self.__min_trade_price = None
-        self.__order_book_volume_array = None
-        self.__order_book_volume_position = None
-        self.__order_book_volume_scale = None
+        self.__order_book_volumes_array = None
+        self.__order_book_volumes_position = None
+        self.__order_book_volumes_scale = None
         self.__rsi_series = None
         self.__test_analytics_raw_data_list = None
         self.__test_series = None
@@ -945,10 +969,17 @@ class FinPlotChartProcessor(object):
         )
 
         with Timer() as timer:
-            self.__update_order_book_volume()
+            self.__update_extreme_lines()
 
         logger.info(
-            f'Order book volume array was updated by {timer.elapsed:.3f}s'
+            f'Extreme lines were updated by {timer.elapsed:.3f}s'
+        )
+
+        with Timer() as timer:
+            self.__update_order_book_volumess()
+
+        logger.info(
+            f'Order book volumes were updated by {timer.elapsed:.3f}s'
         )
 
         with Timer() as timer:
@@ -1093,7 +1124,7 @@ WHERE symbol_id IS NOT NULL;
 
         # window.auto_range_price_plot()
 
-    def __update_order_book_volume(
+    def __update_extreme_lines(
             self,
     ) -> None:
         trades_dataframe = self.__trades_dataframe
@@ -1142,7 +1173,7 @@ WHERE symbol_id IS NOT NULL;
             100  # delta_price / 10,
         )
 
-        order_book_volume_scale = (
+        extreme_lines_scale = (
             delta_price /
             height
         )
@@ -1153,16 +1184,16 @@ WHERE symbol_id IS NOT NULL;
         )
 
         logger.info(
-            f'Creating order book volume array ({width} x {height}, scale {order_book_volume_scale}, aspect ratio {aspect_ratio})'
+            f'Creating extreme line array ({width} x {height}, scale {extreme_lines_scale}, aspect ratio {aspect_ratio})'
         )
 
-        order_book_volume_array = numpy.zeros((
+        extreme_lines_array = numpy.zeros((
             width,
             height,
         ))
 
         logger.info(
-            'Filling order book volume array...'
+            'Filling extreme line array...'
         )
 
         line_dataframe_by_level_map = self.__line_dataframe_by_level_map
@@ -1170,7 +1201,7 @@ WHERE symbol_id IS NOT NULL;
         first_line_dataframe: DataFrame = line_dataframe_by_level_map['Smoothed (1)']
 
         active_extreme_line_raw_data_by_price_map: dict[float, dict[str, typing.Any]] = {}
-        inactive_extreme_line_raw_data_list: list[dict[str, typing.Any]] = []
+        extreme_line_raw_data_list: list[dict[str, typing.Any]] = []
 
         for line_data in first_line_dataframe.itertuples():
             end_trade_id = int(
@@ -1209,7 +1240,7 @@ WHERE symbol_id IS NOT NULL;
                     'price': price,
                 })
 
-                inactive_extreme_line_raw_data_list.append(
+                extreme_line_raw_data_list.append(
                     extreme_line_raw_data,
                 )
 
@@ -1236,13 +1267,13 @@ WHERE symbol_id IS NOT NULL;
                 'price': price,
             })
 
-            inactive_extreme_line_raw_data_list.append(
+            extreme_line_raw_data_list.append(
                 extreme_line_raw_data,
             )
 
         active_extreme_line_raw_data_by_price_map.clear()
 
-        for extreme_line_raw_data in inactive_extreme_line_raw_data_list:
+        for extreme_line_raw_data in extreme_line_raw_data_list:
             end_trade_id: int = extreme_line_raw_data['end_trade_id']
             price: float = extreme_line_raw_data['price']
             start_trade_id: int = extreme_line_raw_data['start_trade_id']
@@ -1251,14 +1282,14 @@ WHERE symbol_id IS NOT NULL;
                 (
                     end_trade_id - min_trade_id
                 ) /
-                order_book_volume_scale
+                extreme_lines_scale
             )
 
             start_x = int(
                 (
                     start_trade_id - min_trade_id
                 ) /
-                order_book_volume_scale
+                extreme_lines_scale
             )
 
             y = min(
@@ -1266,7 +1297,7 @@ WHERE symbol_id IS NOT NULL;
                     (
                         price - min_price
                     ) /
-                    order_book_volume_scale
+                    extreme_lines_scale
                 ),
                 height - 1
             )
@@ -1275,12 +1306,16 @@ WHERE symbol_id IS NOT NULL;
                 f'Price: {price}, start_trade_id: {start_trade_id}, end_trade_id: {end_trade_id}, start_x: {start_x}, end_x: {end_x}, y: {y}'
             )
 
-            for x in range(start_x, end_x):
-                order_book_volume_array[x, y] = x - start_x
+            # for x in range(start_x, end_x):
+            #     extreme_lines_array[x, y] = x - start_x
 
-        self.__order_book_volume_array = order_book_volume_array
+            extreme_lines_array[start_x: end_x, y] = numpy.arange(
+                end_x - start_x,
+            )
 
-        self.__order_book_volume_position = (
+        self.__extreme_lines_array = extreme_lines_array
+
+        self.__extreme_lines_position = (
             float(
                 min_trade_id,
             ),
@@ -1289,7 +1324,94 @@ WHERE symbol_id IS NOT NULL;
             )
         )
 
-        self.__order_book_volume_scale = order_book_volume_scale
+        self.__extreme_lines_scale = extreme_lines_scale
+
+    def __update_order_book_volumes(
+            self,
+    ) -> None:
+        trades_dataframe = self.__trades_dataframe
+
+        assert trades_dataframe is not None, None
+
+        price_series = trades_dataframe.price
+        trade_id_series = trades_dataframe.index
+
+        max_price = float(
+            price_series.max()
+        )
+
+        max_trade_id = int(
+            trade_id_series.max()
+        )
+
+        min_price = float(
+            price_series.min()
+        )
+
+        min_trade_id = int(
+            trade_id_series.min()
+        )
+
+        delta_price = max_price - min_price
+
+        if not delta_price:
+            return
+
+        delta_trade_id = max_trade_id - min_trade_id
+
+        if not delta_trade_id:
+            return
+
+        logger.info(
+            f'delta_price: {delta_price}, delta_trade_id: {delta_trade_id})'
+        )
+
+        # delta_price / delta_trade_id = height / width;
+        # width = height * (delta_trade_id / delta_price);
+
+        aspect_ratio = delta_trade_id / delta_price
+
+        height = int(
+            100  # delta_price / 10,
+        )
+
+        order_book_volumes_scale = (
+            delta_price /
+            height
+        )
+
+        width = int(
+            height * aspect_ratio,
+            # delta_trade_id / 10,
+        )
+
+        logger.info(
+            f'Creating order book volume array ({width} x {height}, scale {order_book_volumes_scale}, aspect ratio {aspect_ratio})'
+        )
+
+        order_book_volumes_array = numpy.zeros((
+            width,
+            height,
+        ))
+
+        logger.info(
+            'Filling order book volumes array...'
+        )
+
+        # TODO
+
+        self.__order_book_volumes_array = order_book_volumes_array
+
+        self.__order_book_volumes_position = (
+            float(
+                min_trade_id,
+            ),
+            float(
+                min_price,
+            )
+        )
+
+        self.__order_book_volumes_scale = order_book_volumes_scale
 
     def __update_rsi_series(
         self,
@@ -2114,6 +2236,7 @@ WHERE symbol_id IS NOT NULL;
                     old_trading_direction: TradingDirection = line_raw_data[
                         'trading_direction'
                     ]
+
                     new_trading_direction: TradingDirection = line_raw_data_1[
                         'trading_direction'
                     ]
@@ -2124,16 +2247,20 @@ WHERE symbol_id IS NOT NULL;
                                 'end_timestamp': line_raw_data_1['end_timestamp'],
                                 'end_trade_id': line_raw_data_1['end_trade_id'],
                                 'end_price': line_raw_data_1['end_price'],
-                                'quantity': line_raw_data['quantity']
-                                + line_raw_data_1['quantity'],
-                                'volume': line_raw_data['volume']
-                                + line_raw_data_1['volume'],
+                                'quantity': (
+                                    line_raw_data['quantity'] + line_raw_data_1['quantity']
+                                ),
+                                'volume': (
+                                    line_raw_data['volume'] + line_raw_data_1['volume']
+                                ),
                             }
                         )
                     else:
                         # Flush
 
-                        line_raw_data_list.append(line_raw_data)
+                        line_raw_data_list.append(
+                            line_raw_data,
+                        )
 
                         line_raw_data = line_raw_data_1
 

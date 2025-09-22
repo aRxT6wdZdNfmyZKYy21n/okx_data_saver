@@ -167,11 +167,12 @@ class FinPlotChartWindow(QMainWindow):
             'Chart',
         )
 
+        extreme_lines_image_item = pyqtgraph.ImageItem()
+        order_book_volumes_image_item = pyqtgraph.ImageItem()
+
         graphics_layout_widget: pyqtgraph.GraphicsLayout = (  # noqa
             pyqtgraph.GraphicsLayoutWidget()
         )
-
-        order_book_image_item = pyqtgraph.ImageItem()
 
         price_plot = graphics_layout_widget.addPlot(
             title='Price',
@@ -208,7 +209,11 @@ class FinPlotChartWindow(QMainWindow):
         )
 
         price_plot.addItem(
-            order_book_image_item,
+            extreme_lines_image_item,
+        )
+
+        price_plot.addItem(
+            order_book_volumes_image_item,
         )
 
         graphics_layout_widget.nextRow()
@@ -414,10 +419,11 @@ class FinPlotChartWindow(QMainWindow):
         """
 
         self.__candles_plot_by_interval_name_map = candles_plot_by_interval_name_map
+        self.__extreme_lines_image_item = extreme_lines_image_item
 
         self.__drawing_lock = asyncio.Lock()
 
-        self.__order_book_image_item = order_book_image_item
+        self.__order_book_volumes_image_item = order_book_volumes_image_item
         self.__price_plot = price_plot
 
         price_plot_data_item_kwargs = {}
@@ -885,32 +891,60 @@ class FinPlotChartWindow(QMainWindow):
                         price_candlestick_item,
                     )
 
-        order_book_volume_array = (
-            processor.get_order_book_volume_array()
+        extreme_lines_array = (
+            processor.get_extreme_lines_array()
         )
 
-        order_book_volume_position = (
-            processor.get_order_book_volume_position()
+        extreme_lines_position = (
+            processor.get_extreme_lines_position()
         )
 
-        order_book_volume_scale = (
-            processor.get_order_book_volume_scale()
+        extreme_lines_scale = (
+            processor.get_extreme_lines_scale()
         )
 
-        order_book_image_item = self.__order_book_image_item
+        extreme_lines_image_item = self.__extreme_lines_image_item
 
-        order_book_image_item.setPos(
+        extreme_lines_image_item.setPos(
             QPointF(
-                *order_book_volume_position,
+                *extreme_lines_position,
             ),
         )
 
-        order_book_image_item.setImage(
-            order_book_volume_array,
+        extreme_lines_image_item.setImage(
+            extreme_lines_array,
         )
 
-        order_book_image_item.setScale(
-            order_book_volume_scale,
+        extreme_lines_image_item.setScale(
+            extreme_lines_scale,
+        )
+
+        order_book_volumes_array = (
+            processor.get_order_book_volumes_array()
+        )
+
+        order_book_volumes_position = (
+            processor.get_order_book_volumes_position()
+        )
+
+        order_book_volumes_scale = (
+            processor.get_order_book_volumes_scale()
+        )
+
+        order_book_volumes_image_item = self.__order_book_volumes_image_item
+
+        order_book_volumes_image_item.setPos(
+            QPointF(
+                *order_book_volumes_position,
+            ),
+        )
+
+        order_book_volumes_image_item.setImage(
+            order_book_volumes_array,
+        )
+
+        order_book_volumes_image_item.setScale(
+            order_book_volumes_scale,
         )
 
         price_series: pandas.Series = trades_smoothed_dataframe.price
