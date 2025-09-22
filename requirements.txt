@@ -1,6 +1,7 @@
 aiogram
 asyncpg
 chrono
+connectorx
 git+https://github.com/aRxT6wdZdNfmyZKYy21n/finplot.git
 httpx
 numpy
@@ -8,6 +9,7 @@ orjson
 pandas
 polars
 polars_talib
+pyarrow
 pydantic
 pydantic-settings
 PyQt6

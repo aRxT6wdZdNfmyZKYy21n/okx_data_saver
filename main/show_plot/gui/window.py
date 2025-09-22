@@ -19,9 +19,6 @@ import polars
 from chrono import (
     Timer,
 )
-from pyqtgraph import (
-    Point,
-)
 from qasync import (
     asyncSlot,
 )
@@ -52,9 +49,6 @@ from main.show_plot.gui.item.candlestick import (
 )
 from main.show_plot.gui.item.datetime_by_trade_id_axis import (
     DateTimeByTradeIDAxisItem,
-)
-from main.show_plot.gui.item.rect import (
-    RectItem,
 )
 from utils.async_ import (
     create_task_with_exceptions_logging,
@@ -771,8 +765,6 @@ class FinPlotChartWindow(QMainWindow):
             self.__price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map
         )
 
-        price_plot = self.__price_plot
-
         if trades_smoothed_dataframe is None:
             print(
                 'trades_smoothed_dataframe is None',
@@ -797,6 +789,12 @@ class FinPlotChartWindow(QMainWindow):
 
             return
 
+        trade_id_series = trades_smoothed_dataframe.get_column(
+            'trade_id',
+        )
+
+        trade_id_numpy_array = trade_id_series.to_numpy()
+
         if _IS_NEED_SHOW_BOLLINGER_BANDS:
             bollinger_base_line_series = processor.get_bollinger_base_line_series()
             bollinger_lower_band_series = processor.get_bollinger_lower_band_series()
@@ -807,17 +805,17 @@ class FinPlotChartWindow(QMainWindow):
                 assert bollinger_upper_band_series is not None, None
 
                 self.__bollinger_base_line_plot_data_item.setData(
-                    bollinger_base_line_series.to_numpy(),
+                    trade_id_numpy_array,
                     bollinger_base_line_series.to_numpy(),
                 )
 
                 self.__bollinger_lower_band_plot_data_item.setData(
-                    bollinger_lower_band_series.to_numpy(),
+                    trade_id_numpy_array,
                     bollinger_lower_band_series.to_numpy(),
                 )
 
                 self.__bollinger_upper_band_plot_data_item.setData(
-                    bollinger_upper_band_series.to_numpy(),
+                    trade_id_numpy_array,
                     bollinger_upper_band_series.to_numpy(),
                 )
 
@@ -979,41 +977,46 @@ class FinPlotChartWindow(QMainWindow):
         order_book_volumes_scale = processor.get_order_book_volumes_scale()
 
         order_book_volumes_asks_image_item = self.__order_book_volumes_asks_image_item
-
-        order_book_volumes_asks_image_item.setPos(
-            QPointF(
-                *order_book_volumes_position,
-            ),
-        )
-
-        order_book_volumes_asks_image_item.setImage(
-            order_book_volumes_asks_array,
-        )
-
-        order_book_volumes_asks_image_item.setScale(
-            order_book_volumes_scale,
-        )
-
         order_book_volumes_bids_image_item = self.__order_book_volumes_bids_image_item
 
-        order_book_volumes_bids_image_item.setPos(
-            QPointF(
+        if order_book_volumes_position is not None:
+            order_book_volumes_position_point = QPointF(
                 *order_book_volumes_position,
-            ),
-        )
+            )
 
-        order_book_volumes_bids_image_item.setImage(
-            order_book_volumes_bids_array,
-        )
+            order_book_volumes_asks_image_item.setPos(
+                order_book_volumes_position_point,
+            )
 
-        order_book_volumes_bids_image_item.setScale(
-            order_book_volumes_scale,
-        )
+            order_book_volumes_bids_image_item.setPos(
+                order_book_volumes_position_point,
+            )
 
-        price_series: polars.Series = trades_smoothed_dataframe.get_column('price')
+        if order_book_volumes_asks_array is not None:
+            order_book_volumes_asks_image_item.setImage(
+                order_book_volumes_asks_array,
+            )
+
+        if order_book_volumes_bids_array is not None:
+            order_book_volumes_bids_image_item.setImage(
+                order_book_volumes_bids_array,
+            )
+
+        if order_book_volumes_scale is not None:
+            order_book_volumes_asks_image_item.setScale(
+                order_book_volumes_scale,
+            )
+
+            order_book_volumes_bids_image_item.setScale(
+                order_book_volumes_scale,
+            )
+
+        price_series = trades_smoothed_dataframe.get_column(
+            'price',
+        )
 
         self.__price_plot_data_item.setData(
-            price_series.to_numpy(),
+            trade_id_numpy_array,
             price_series.to_numpy(),
         )
 
@@ -1022,7 +1025,7 @@ class FinPlotChartWindow(QMainWindow):
 
             if rsi_series is not None:
                 self.__rsi_plot_data_item.setData(
-                    rsi_series.to_numpy(),
+                    trade_id_numpy_array,
                     rsi_series.to_numpy(),
                 )
 
@@ -1031,7 +1034,7 @@ class FinPlotChartWindow(QMainWindow):
 
             if velocity_series is not None:
                 self.__velocity_plot_data_item.setData(
-                    velocity_series.to_numpy(),
+                    trade_id_numpy_array,
                     velocity_series.to_numpy(),
                 )
 

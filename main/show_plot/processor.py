@@ -11,6 +11,7 @@ from decimal import (
 )
 
 import numpy
+import orjson
 import polars
 import polars_talib
 import talib
@@ -28,9 +29,7 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy.orm import (
-    Session,
-)
+from sqlalchemy.sql.functions import percent_rank
 
 from constants.common import (
     CommonConstants,
@@ -304,7 +303,8 @@ class FinPlotChartProcessor(object):
 
             await asyncio.sleep(
                 # 1.0  # s
-                60.0  # s
+                # 60.0  # s
+                600.0  # s
             )
 
     async def update_current_rsi_interval_name(
@@ -406,28 +406,42 @@ class FinPlotChartProcessor(object):
 
         assert trades_dataframe is not None, None
 
-        (
-            bollinger_upper_band_series,
-            bollinger_base_line_series,
-            bollinger_lower_band_series,
-        ) = polars_talib.bbands(
-            trades_dataframe.get_column(
-                'price',
+        trades_dataframe = trades_dataframe.with_columns(
+            polars_talib.bbands(
+                matype=int(
+                    talib.MA_Type.SMA,  # noqa
+                ),
+                real=polars.col(
+                    'price',
+                ),
+                timeperiod=20,
+            ).alias(
+                'bbands',
             ),
-            matype=int(
-                talib.MA_Type.SMA.value,
-            ),
-            timeperiod=20,
+        ).unnest(
+            'bbands',
         )
 
-        if bollinger_base_line_series.height == 0:
-            assert bollinger_lower_band_series.height == 0, None
-            assert bollinger_upper_band_series.height == 0, None
+        bollinger_upper_band_series = trades_dataframe.get_column(
+            'upperband',
+        )
+
+        bollinger_base_line_series = trades_dataframe.get_column(
+            'middleband',
+        )
+
+        bollinger_lower_band_series = trades_dataframe.get_column(
+            'lowerband',
+        )
+
+        if bollinger_base_line_series.is_empty():
+            assert bollinger_lower_band_series.is_empty(), None
+            assert bollinger_upper_band_series.is_empty(), None
 
             return
 
-        assert bollinger_lower_band_series.height > 0, None
-        assert bollinger_upper_band_series.height > 0, None
+        assert bollinger_lower_band_series.len() > 0, None
+        assert bollinger_upper_band_series.len() > 0, None
 
         self.__bollinger_base_line_series = bollinger_base_line_series
         self.__bollinger_lower_band_series = bollinger_lower_band_series
@@ -462,12 +476,12 @@ class FinPlotChartProcessor(object):
             min_trade_id: int
 
             if old_candle_dataframe is not None:
-                min_pandas_trade_id = old_candle_dataframe.get_column(
+                min_polars_trade_id = old_candle_dataframe.get_column(
                     'start_trade_id'
                 ).max()
 
                 min_trade_id = int(
-                    min_pandas_trade_id,
+                    min_polars_trade_id,
                 )
             else:
                 min_trade_id = 0
@@ -618,10 +632,10 @@ class FinPlotChartProcessor(object):
             min_trade_id: int  # TODO: min_trade_id
 
             if trades_dataframe is not None:
-                min_pandas_trade_id = trades_dataframe.get_column('trade_id').max()
+                min_polars_trade_id = trades_dataframe.get_column('trade_id').max()
 
                 min_trade_id = int(
-                    min_pandas_trade_id,
+                    min_polars_trade_id,
                 )
             else:
                 min_trade_id = 0
@@ -920,6 +934,10 @@ class FinPlotChartProcessor(object):
                 trades_dataframe = polars.concat(
                     [trades_dataframe, new_trades_dataframe]
                 )
+
+                trades_dataframe = trades_dataframe.sort(
+                    'trade_id',
+                )
             else:
                 trades_dataframe = new_trades_dataframe
 
@@ -946,7 +964,7 @@ class FinPlotChartProcessor(object):
             f'RSI series were updated by {timer.elapsed:.3f}s',
         )
 
-        with Timer() as timer:
+        with Timer() as timer:  # TODO
             self.__update_trades_smoothed_dataframe_by_level_map()
 
         logger.info(
@@ -982,13 +1000,6 @@ class FinPlotChartProcessor(object):
     ) -> DataFrame | None:
         with Timer() as timer:
             order_book_dataframe = polars.read_database_uri(
-                execute_options={
-                    'max_timestamp_ms': max_timestamp_ms,
-                    'min_timestamp_ms': min_timestamp_ms,
-                    'symbol_id': str(
-                        symbol_id.name,
-                    ),
-                },
                 query=(
                     'SELECT'
                     # Primary key fields
@@ -998,9 +1009,9 @@ class FinPlotChartProcessor(object):
                     ', asks'
                     ', bids'
                     f' FROM {OKXOrderBookData2.__tablename__}'
-                    ' WHERE symbol_id = :symbol_id'
-                    ' AND timestamp_ms >= :min_timestamp_ms'
-                    ' AND timestamp_ms <= :max_timestamp_ms'
+                    f' WHERE symbol_id = {symbol_id.name!r}'
+                    f' AND timestamp_ms >= {min_timestamp_ms!r}'
+                    f' AND timestamp_ms <= {max_timestamp_ms!r}'
                     ' ORDER BY'
                     ' symbol_id ASC'
                     ', timestamp_ms ASC'
@@ -1055,13 +1066,6 @@ class FinPlotChartProcessor(object):
         with Timer() as timer:
             trades_dataframe = polars.read_database_uri(
                 engine='connectorx',
-                execute_options={
-                    'limit': 2_000_000,
-                    'min_trade_id': min_trade_id,
-                    'symbol_id': str(
-                        symbol_id.name,
-                    ),
-                },
                 query=(
                     'SELECT'
                     # Primary key fields
@@ -1073,12 +1077,13 @@ class FinPlotChartProcessor(object):
                     ', timestamp_ms'
                     f' FROM {OKXTradeData2.__tablename__}'
                     ' WHERE'
-                    ' symbol_id = :symbol_id'
-                    ' AND trade_id >= :min_trade_id'
+                    f' symbol_id = {symbol_id.name!r}'
+                    f' AND trade_id >= {min_trade_id!r}'
                     ' ORDER BY'
                     ' symbol_id ASC'
                     ', trade_id DESC'
-                    ' LIMIT :limit'
+                    # f' LIMIT {2_000_000!r}'
+                    f' LIMIT {100_000!r}'
                     ';'
                 ),
                 uri=(
@@ -1110,6 +1115,18 @@ class FinPlotChartProcessor(object):
             )
             .alias(
                 'datetime',
+            ),
+            polars.col(
+                'price',
+            )
+            .cast(
+                polars.Float64,
+            ),
+            polars.col(
+                'quantity',
+            )
+            .cast(
+                polars.Float64,
             )
         )
 
@@ -1191,7 +1208,9 @@ WHERE symbol_id IS NOT NULL;
 
         assert trades_dataframe is not None, None
 
-        price_series = trades_dataframe.get_column('price')
+        price_series = trades_dataframe.get_column(
+            'price',
+        )
 
         max_price = float(price_series.max())
 
@@ -1340,9 +1359,9 @@ WHERE symbol_id IS NOT NULL;
 
             y = min(int((price - min_price) / extreme_lines_scale), height - 1)
 
-            logger.info(
-                f'Price: {price}, start_trade_id: {start_trade_id}, end_trade_id: {end_trade_id}, start_x: {start_x}, end_x: {end_x}, y: {y}'
-            )
+            # logger.info(
+            #     f'Price: {price}, start_trade_id: {start_trade_id}, end_trade_id: {end_trade_id}, start_x: {start_x}, end_x: {end_x}, y: {y}'
+            # )
 
             # for x in range(start_x, end_x):
             #     extreme_lines_array[x, y] = x - start_x
@@ -1461,7 +1480,7 @@ WHERE symbol_id IS NOT NULL;
 
         new_order_book_dataframe: DataFrame = self.__fetch_order_book_dataframe(
             max_timestamp_ms=max_timestamp_ms,
-            min_timestamp_ms=initial_order_book_snapshot_data.min_timestamp_ms,
+            min_timestamp_ms=initial_order_book_snapshot_data.timestamp_ms,
             symbol_id=current_symbol_id,
         )
 
@@ -1506,14 +1525,27 @@ WHERE symbol_id IS NOT NULL;
         order_book_ask_quantity_by_price_map: dict[Decimal, Decimal] = {}
         order_book_bid_quantity_by_price_map: dict[Decimal, Decimal] = {}
 
-        for order_book_data in new_order_book_dataframe.iter_rows(named=True):
-            action_id: OKXOrderBookActionId = order_book_data['action_id']
+        for (
+                timestamp_ms,
+                action_id_raw,
+                asks_raw,
+                bids_raw,
+                datetime_,
+        ) in new_order_book_dataframe.iter_rows(
+                named=False,
+        ):
+            action_id = getattr(
+                OKXOrderBookActionId,
+                action_id_raw,
+            )
 
             if action_id == OKXOrderBookActionId.Snapshot:
                 order_book_ask_quantity_by_price_map.clear()
                 order_book_bid_quantity_by_price_map.clear()
 
-            asks: list[str, str, str, str] = order_book_data['asks']
+            asks: list[str, str, str, str] = orjson.loads(
+                asks_raw,
+            )
 
             for ask_list in asks:
                 price_raw, quantity_raw, _, _ = ask_list
@@ -1534,7 +1566,9 @@ WHERE symbol_id IS NOT NULL;
                         None,
                     )
 
-            bids: list[str, str, str, str] = order_book_data['bids']
+            bids: list[str, str, str, str] = orjson.loads(
+                bids_raw,
+            )
 
             for bid_list in bids:
                 price_raw, quantity_raw, _, _ = bid_list
@@ -1555,29 +1589,19 @@ WHERE symbol_id IS NOT NULL;
                         None,
                     )
 
-            datetime_: datetime = order_book_data['datetime']
-            timestamp_ms = int(
-                datetime_.timestamp() * 1000,  # ms
-            )
-
-            logger.info(
-                f'{timestamp_ms} / {max_timestamp_ms} ({100.0 * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
-            )
-
-            filtered_trades_dataframe: DataFrame = trades_dataframe.filter(
-                polars.col('datetime') <= datetime_
-            )
-
-            if filtered_trades_dataframe.height == 0:
-                logger.warning(
-                    f'Filtered trades dataframe is empty for datetime {datetime_}'
-                )
-
+            if datetime_ < min_datetime:
                 continue
 
-            closest_trade_id = int(
-                filtered_trades_dataframe.get_column('trade_id').max()
+            logger.info(
+                f'{datetime_} / {max_datetime} ({100.0 * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
             )
+
+            idx = datetime_series.search_sorted(
+                element=datetime_,
+                side='left'
+            )
+
+            closest_trade_id = trade_id_series[idx]
 
             x = min(
                 int(
@@ -1647,14 +1671,22 @@ WHERE symbol_id IS NOT NULL;
         if candle_dataframe is None:
             return
 
-        rsi_series = polars_talib.rsi(  # noqa
-            candle_dataframe.get_column(
-                'close_price',
-            ),
-            timeperiod=14,  # 6
+        candle_dataframe = candle_dataframe.with_columns(
+            polars_talib.rsi(
+                real=polars.col(
+                    'close_price',
+                ),
+                timeperiod=14,  # 6
+            ).alias(
+                'rsi',
+            )
         )
 
-        if not rsi_series.size:
+        rsi_series = candle_dataframe.get_column(
+            'rsi',
+        )
+
+        if rsi_series.is_empty():
             return
 
         self.__rsi_series = rsi_series
@@ -1694,17 +1726,19 @@ WHERE symbol_id IS NOT NULL;
                 min_start_trade_id: int
 
                 if old_line_dataframe is not None:
-                    min_pandas_start_trade_id = old_line_dataframe.index.max()
+                    min_polars_start_trade_id = old_line_dataframe.get_column(
+                        'start_trade_id',
+                    ).max()
 
                     min_start_trade_id = int(
-                        min_pandas_start_trade_id,
+                        min_polars_start_trade_id,
                     )
                 else:
                     min_start_trade_id = 0
 
                 for trade_data in trades_dataframe.filter(
-                    polars.col('trade_id') >= min_start_trade_id
-                ).iter_rows(named=True):
+                    polars.col('trade_id',) >= min_start_trade_id
+                ).iter_rows(named=True,):
                     trade_id: int = trade_data['trade_id']
 
                     # if trade_id < min_trade_id:
@@ -1810,19 +1844,23 @@ WHERE symbol_id IS NOT NULL;
 
                         line_raw_data = None  # noqa
             else:
+                break  # TODO: remove
+
                 old_line_dataframe = None
+                min_start_trade_id = 0
 
                 assert previous_line_dataframe is not None, None
 
                 line_raw_data_1: dict[str, typing.Any] | None = None
                 line_raw_data_list_1: list[dict[str, typing.Any]] = []
 
-                first_line_data: typing.NamedTuple | None = None
-                second_line_data: typing.NamedTuple | None = None
+                first_line_data: dict[str, typing.Any] | None = None
+                second_line_data: dict[str, typing.Any] | None = None
 
                 # for line_data in previous_line_dataframe.loc[
-                #     previous_line_dataframe.index >= min_start_trade_id
-                # ].itertuples():
+                #     previous_line_dataframe.get_column('start_trade_id',) >= min_start_trade_id
+                # ].iter_rows(named=True):
+
                 for line_data in previous_line_dataframe.iter_rows(named=True):
                     high_price: float
                     trading_direction: TradingDirection
@@ -1839,12 +1877,12 @@ WHERE symbol_id IS NOT NULL;
                         ]
 
                         line_raw_data_1 = {
-                            'end_timestamp': line_data['end_timestamp'],
+                            'end_datetime': line_data['end_datetime'],
                             'end_trade_id': line_data['end_trade_id'],
                             'end_price': end_price,
                             'high_price': high_price,
                             'low_price': low_price,
-                            'start_timestamp': line_data['start_timestamp'],
+                            'start_datetime': line_data['start_datetime'],
                             'start_trade_id': line_data['start_trade_id'],
                             'start_price': start_price,
                             'quantity': line_data['quantity'],
@@ -1877,7 +1915,7 @@ WHERE symbol_id IS NOT NULL;
 
                         line_raw_data_1.update(
                             {
-                                'end_timestamp': line_data['end_timestamp'],
+                                'end_datetime': line_data['end_datetime'],
                                 'end_trade_id': line_data['end_trade_id'],
                                 'end_price': line_data['end_price'],
                                 # 'high_price': high_price,
@@ -1935,12 +1973,12 @@ WHERE symbol_id IS NOT NULL;
                         ]
 
                         line_raw_data_1 = {
-                            'end_timestamp': first_line_data['end_timestamp'],
+                            'end_datetime': first_line_data['end_datetime'],
                             'end_trade_id': first_line_data['end_trade_id'],
                             'end_price': end_price,
                             'high_price': high_price,
                             'low_price': low_price,
-                            'start_timestamp': first_line_data['start_timestamp'],
+                            'start_datetime': first_line_data['start_datetime'],
                             'start_trade_id': first_line_data['start_trade_id'],
                             'start_price': start_price,
                             'quantity': first_line_data['quantity'],
@@ -2000,12 +2038,12 @@ WHERE symbol_id IS NOT NULL;
                         ]
 
                         line_raw_data_1 = {
-                            'end_timestamp': first_line_data['end_timestamp'],
+                            'end_datetime': first_line_data['end_datetime'],
                             'end_trade_id': first_line_data['end_trade_id'],
                             'end_price': end_price,
                             'high_price': high_price,
                             'low_price': low_price,
-                            'start_timestamp': first_line_data['start_timestamp'],
+                            'start_datetime': first_line_data['start_datetime'],
                             'start_trade_id': first_line_data['start_trade_id'],
                             'start_price': start_price,
                             'quantity': first_line_data['quantity'],
@@ -2065,12 +2103,12 @@ WHERE symbol_id IS NOT NULL;
                         ]
 
                         line_raw_data_1 = {
-                            'end_timestamp': first_line_data['end_timestamp'],
+                            'end_datetime': first_line_data['end_datetime'],
                             'end_trade_id': first_line_data['end_trade_id'],
                             'end_price': end_price,
                             'high_price': high_price,
                             'low_price': low_price,
-                            'start_timestamp': first_line_data['start_timestamp'],
+                            'start_datetime': first_line_data['start_datetime'],
                             'start_trade_id': first_line_data['start_trade_id'],
                             'start_price': start_price,
                             'quantity': first_line_data['quantity'],
@@ -2113,7 +2151,7 @@ WHERE symbol_id IS NOT NULL;
 
                     line_raw_data_1.update(
                         {
-                            'end_timestamp': first_line_data['end_timestamp'],
+                            'end_datetime': first_line_data['end_datetime'],
                             'end_trade_id': first_line_data['end_trade_id'],
                             'end_price': first_line_data['end_price'],
                             'quantity': line_raw_data_1['quantity']
@@ -2138,7 +2176,7 @@ WHERE symbol_id IS NOT NULL;
 
                     line_raw_data_1.update(
                         {
-                            'end_timestamp': second_line_data['end_timestamp'],
+                            'end_datetime': second_line_data['end_datetime'],
                             'end_trade_id': second_line_data['end_trade_id'],
                             'end_price': second_line_data['end_price'],
                             'quantity': line_raw_data_1['quantity']
@@ -2174,12 +2212,12 @@ WHERE symbol_id IS NOT NULL;
                     ]
 
                     line_raw_data_1 = {
-                        'end_timestamp': first_line_data['end_timestamp'],
+                        'end_datetime': first_line_data['end_datetime'],
                         'end_trade_id': first_line_data['end_trade_id'],
                         'end_price': end_price,
                         'high_price': high_price,
                         'low_price': low_price,
-                        'start_timestamp': first_line_data['start_timestamp'],
+                        'start_datetime': first_line_data['start_datetime'],
                         'start_trade_id': first_line_data['start_trade_id'],
                         'start_price': start_price,
                         'quantity': first_line_data['quantity'],
@@ -2216,7 +2254,7 @@ WHERE symbol_id IS NOT NULL;
                     if old_trading_direction == new_trading_direction:
                         line_raw_data.update(
                             {
-                                'end_timestamp': line_raw_data_1['end_timestamp'],
+                                'end_datetime': line_raw_data_1['end_datetime'],
                                 'end_trade_id': line_raw_data_1['end_trade_id'],
                                 'end_price': line_raw_data_1['end_price'],
                                 'quantity': (
@@ -2245,11 +2283,11 @@ WHERE symbol_id IS NOT NULL;
                     line_raw_data = None  # noqa
 
             if line_raw_data_list:
-                new_line_dataframe = polars.DataFrame(line_raw_data_list)
+                new_line_dataframe = polars.DataFrame(
+                    line_raw_data_list,
+                )
 
                 assert new_line_dataframe.height > 0, None
-
-                new_line_dataframe = new_line_dataframe.sort('start_trade_id')
 
                 if old_line_dataframe is not None:
                     line_dataframe = polars.concat(
@@ -2257,6 +2295,10 @@ WHERE symbol_id IS NOT NULL;
                     )
                 else:
                     line_dataframe = new_line_dataframe
+
+                line_dataframe = line_dataframe.sort(
+                    'start_trade_id',
+                )
 
                 line_dataframe_by_level_map[smoothing_level] = line_dataframe
             else:
@@ -2273,25 +2315,25 @@ WHERE symbol_id IS NOT NULL;
             # min_trade_id: int
             #
             # if old_line_dataframe is not None:
-            #     min_pandas_trade_id = old_smoothed_dataframe.index.max()
+            #     min_polars_trade_id = old_smoothed_dataframe.get_column('trade_id',).max()
             #
             #     min_trade_id = int(
-            #         min_pandas_trade_id,
+            #         min_polars_trade_id,
             #     )
             # else:
             #     min_trade_id = 0
 
             trades_smoothed_raw_data_list: list[dict[str, typing.Any]] = []
 
-            last_line_data: typing.NamedTuple | None = None
+            last_line_data: dict[str, typing.Any] | None = None
 
             for line_data in line_dataframe.filter(
-                polars.col('start_trade_id') >= min_start_trade_id  # min_trade_id
+                polars.col('start_trade_id',) >= min_start_trade_id  # min_trade_id
             ).iter_rows(named=True):  # TODO
                 trades_smoothed_raw_data_list.append(
                     {
                         'price': line_data['start_price'],
-                        'timestamp': line_data['start_timestamp'],
+                        'datetime': line_data['start_datetime'],
                         'trade_id': line_data['start_trade_id'],
                     }
                 )
@@ -2302,17 +2344,17 @@ WHERE symbol_id IS NOT NULL;
                 trades_smoothed_raw_data_list.append(
                     {
                         'price': last_line_data['end_price'],
-                        'timestamp': last_line_data['end_timestamp'],
+                        'datetime': last_line_data['end_datetime'],
                         'trade_id': last_line_data['end_trade_id'],
                     },
                 )
 
             if trades_smoothed_raw_data_list:
-                new_smoothed_dataframe = polars.DataFrame(trades_smoothed_raw_data_list)
+                new_smoothed_dataframe = polars.DataFrame(
+                    trades_smoothed_raw_data_list,
+                )
 
                 assert new_smoothed_dataframe.height > 0, None
-
-                new_smoothed_dataframe = new_smoothed_dataframe.sort('trade_id')
 
                 smoothed_dataframe: DataFrame
 
@@ -2322,6 +2364,10 @@ WHERE symbol_id IS NOT NULL;
                     )
                 else:
                     smoothed_dataframe = new_smoothed_dataframe
+
+                smoothed_dataframe = smoothed_dataframe.sort(
+                    'trade_id',
+                )
 
                 trades_smoothed_dataframe_by_level_map[smoothing_level] = (
                     smoothed_dataframe
@@ -2334,11 +2380,13 @@ WHERE symbol_id IS NOT NULL;
             self.__candle_dataframe_by_interval_name_map
         )
 
-        candle_dataframe_1m = candle_dataframe_by_interval_name_map.get(
+        velocity_candle_dataframe = candle_dataframe_by_interval_name_map.get(
             PlotConstants.VelocityIntervalName,
         )
 
-        if candle_dataframe_1m is None:
+        if velocity_candle_dataframe is None:
             return
 
-        self.__velocity_series = candle_dataframe_1m.trades_count
+        self.__velocity_series = velocity_candle_dataframe.get_column(
+            'trades_count',
+        )

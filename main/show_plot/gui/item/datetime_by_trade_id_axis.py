@@ -4,7 +4,7 @@ from datetime import (
     datetime,
 )
 
-import pandas
+import polars
 import pyqtgraph
 
 if typing.TYPE_CHECKING:
@@ -52,17 +52,26 @@ class DateTimeByTradeIDAxisItem(pyqtgraph.AxisItem):
             tick_string = f'{trade_id}'
 
             if trades_dataframe is not None:
-                if trade_id in trades_dataframe.index:
-                    row = trades_dataframe.loc[trade_id]
+                trade_id_series = trades_dataframe.get_column(
+                    'trade_id',
+                )
 
-                    timestamp: pandas.Timestamp = row.timestamp_ms
+                idx = trade_id_series.search_sorted(
+                    element=trade_id,
+                    side='any',
+                )
+
+                if idx < trade_id_series.len() and trade_id_series[idx] == trade_id:
+                    datetime_series = trades_dataframe.get_column(
+                        'datetime',
+                    )
+
+                    datetime_: datetime = datetime_series[idx]
 
                     try:
                         tick_string = '\n'.join(
                             (
-                                datetime.fromtimestamp(
-                                    timestamp.value / 10**9,
-                                ).isoformat(),
+                                datetime_.isoformat(),
                                 tick_string,
                             )
                         )
