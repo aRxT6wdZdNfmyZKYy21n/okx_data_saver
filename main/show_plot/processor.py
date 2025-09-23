@@ -29,7 +29,6 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy.sql.functions import percent_rank
 
 from constants.common import (
     CommonConstants,
@@ -71,6 +70,9 @@ logger = logging.getLogger(
 
 _DEBUG_SMOOTHING_LEVEL = None
 # _DEBUG_SMOOTHING_LEVEL = 'Smoothed (2)'
+
+
+_IS_ORDER_BOOK_VOLUME_ENABLED = False
 
 
 class FinPlotChartProcessor(object):
@@ -1082,8 +1084,11 @@ class FinPlotChartProcessor(object):
                     ' ORDER BY'
                     ' symbol_id ASC'
                     ', trade_id DESC'
+                    f' LIMIT {15_000_000!r}'
+                    # f' LIMIT {10_000_000!r}'
+                    # f' LIMIT {5_000_000!r}'
                     # f' LIMIT {2_000_000!r}'
-                    f' LIMIT {100_000!r}'
+                    # f' LIMIT {100_000!r}'
                     ';'
                 ),
                 uri=(
@@ -1439,52 +1444,51 @@ WHERE symbol_id IS NOT NULL;
         if not delta_timestamp_ms:
             return
 
-        postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
+        if _IS_ORDER_BOOK_VOLUME_ENABLED:
+            postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
 
-        async with postgres_db_session_maker() as session:
-            async with session.begin():
-                result = await session.execute(
-                    select(
-                        OKXOrderBookData2,
-                    )
-                    .where(
-                        and_(
-                            OKXOrderBookData2.symbol_id == current_symbol_id,
-                            OKXOrderBookData2.timestamp_ms <= min_timestamp_ms,
-                            OKXOrderBookData2.action_id
-                            == OKXOrderBookActionId.Snapshot,
+            async with postgres_db_session_maker() as session:
+                async with session.begin():
+                    result = await session.execute(
+                        select(
+                            OKXOrderBookData2,
+                        )
+                        .where(
+                            and_(
+                                OKXOrderBookData2.symbol_id == current_symbol_id,
+                                OKXOrderBookData2.timestamp_ms <= min_timestamp_ms,
+                                OKXOrderBookData2.action_id
+                                == OKXOrderBookActionId.Snapshot,
+                            )
+                        )
+                        .order_by(
+                            OKXOrderBookData2.symbol_id.asc(),
+                            OKXOrderBookData2.timestamp_ms.desc(),  # TODO: make index
+                        )
+                        .limit(
+                            1,
                         )
                     )
-                    .order_by(
-                        OKXOrderBookData2.symbol_id.asc(),
-                        OKXOrderBookData2.timestamp_ms.desc(),  # TODO: make index
-                    )
-                    .limit(
-                        1,
-                    )
+
+                    initial_order_book_snapshot_data = result.scalar_one_or_none()
+
+            if initial_order_book_snapshot_data is None:
+                logger.info(
+                    'Could not find initial order book snapshot data'
+                    f' for symbol ID {current_symbol_id.name} and max timestamp (ms) {min_timestamp_ms}'
+                )
+            else:
+                logger.info(
+                    f'Found initial order book snapshot data: {initial_order_book_snapshot_data}'
                 )
 
-                initial_order_book_snapshot_data = result.scalar_one_or_none()
+                new_order_book_dataframe: DataFrame = self.__fetch_order_book_dataframe(
+                    max_timestamp_ms=max_timestamp_ms,
+                    min_timestamp_ms=initial_order_book_snapshot_data.timestamp_ms,
+                    symbol_id=current_symbol_id,
+                )
 
-        if initial_order_book_snapshot_data is None:
-            logger.info(
-                'Could not find initial order book snapshot data'
-                f'for symbol ID {current_symbol_id} and max timestamp (ms) {min_timestamp_ms}'
-            )
-
-            return
-
-        logger.info(
-            f'Found initial order book snapshot data: {initial_order_book_snapshot_data}'
-        )
-
-        new_order_book_dataframe: DataFrame = self.__fetch_order_book_dataframe(
-            max_timestamp_ms=max_timestamp_ms,
-            min_timestamp_ms=initial_order_book_snapshot_data.timestamp_ms,
-            symbol_id=current_symbol_id,
-        )
-
-        logger.info(f'new_order_book_dataframe: {new_order_book_dataframe}')
+                logger.info(f'new_order_book_dataframe: {new_order_book_dataframe}')
 
         # delta_price / delta_trade_id = height / width;
         # width = height * (delta_trade_id / delta_price);
@@ -1520,123 +1524,124 @@ WHERE symbol_id IS NOT NULL;
             )
         )
 
-        logger.info('Filling order book volumes asks and bids arrays...')
+        if _IS_ORDER_BOOK_VOLUME_ENABLED:
+            logger.info('Filling order book volumes asks and bids arrays...')
 
-        order_book_ask_quantity_by_price_map: dict[Decimal, Decimal] = {}
-        order_book_bid_quantity_by_price_map: dict[Decimal, Decimal] = {}
+            order_book_ask_quantity_by_price_map: dict[Decimal, Decimal] = {}
+            order_book_bid_quantity_by_price_map: dict[Decimal, Decimal] = {}
 
-        for (
-                timestamp_ms,
-                action_id_raw,
-                asks_raw,
-                bids_raw,
-                datetime_,
-        ) in new_order_book_dataframe.iter_rows(
-                named=False,
-        ):
-            action_id = getattr(
-                OKXOrderBookActionId,
-                action_id_raw,
-            )
-
-            if action_id == OKXOrderBookActionId.Snapshot:
-                order_book_ask_quantity_by_price_map.clear()
-                order_book_bid_quantity_by_price_map.clear()
-
-            asks: list[str, str, str, str] = orjson.loads(
-                asks_raw,
-            )
-
-            for ask_list in asks:
-                price_raw, quantity_raw, _, _ = ask_list
-
-                price = Decimal(
-                    price_raw,
+            for (
+                    timestamp_ms,
+                    action_id_raw,
+                    asks_raw,
+                    bids_raw,
+                    datetime_,
+            ) in new_order_book_dataframe.iter_rows(
+                    named=False,
+            ):
+                action_id = getattr(
+                    OKXOrderBookActionId,
+                    action_id_raw,
                 )
 
-                quantity = Decimal(
-                    quantity_raw,
+                if action_id == OKXOrderBookActionId.Snapshot:
+                    order_book_ask_quantity_by_price_map.clear()
+                    order_book_bid_quantity_by_price_map.clear()
+
+                asks: list[str, str, str, str] = orjson.loads(
+                    asks_raw,
                 )
 
-                if quantity:
-                    order_book_ask_quantity_by_price_map[price] = quantity
-                else:
-                    order_book_ask_quantity_by_price_map.pop(
-                        price,
-                        None,
+                for ask_list in asks:
+                    price_raw, quantity_raw, _, _ = ask_list
+
+                    price = Decimal(
+                        price_raw,
                     )
 
-            bids: list[str, str, str, str] = orjson.loads(
-                bids_raw,
-            )
-
-            for bid_list in bids:
-                price_raw, quantity_raw, _, _ = bid_list
-
-                price = Decimal(
-                    price_raw,
-                )
-
-                quantity = Decimal(
-                    quantity_raw,
-                )
-
-                if quantity:
-                    order_book_bid_quantity_by_price_map[price] = quantity
-                else:
-                    order_book_bid_quantity_by_price_map.pop(
-                        price,
-                        None,
+                    quantity = Decimal(
+                        quantity_raw,
                     )
 
-            if datetime_ < min_datetime:
-                continue
+                    if quantity:
+                        order_book_ask_quantity_by_price_map[price] = quantity
+                    else:
+                        order_book_ask_quantity_by_price_map.pop(
+                            price,
+                            None,
+                        )
 
-            logger.info(
-                f'{datetime_} / {max_datetime} ({100.0 * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
-            )
+                bids: list[str, str, str, str] = orjson.loads(
+                    bids_raw,
+                )
 
-            idx = datetime_series.search_sorted(
-                element=datetime_,
-                side='left'
-            )
+                for bid_list in bids:
+                    price_raw, quantity_raw, _, _ = bid_list
 
-            closest_trade_id = trade_id_series[idx]
+                    price = Decimal(
+                        price_raw,
+                    )
 
-            x = min(
-                int(
-                    (closest_trade_id - min_trade_id) / order_book_volumes_scale,
-                ),
-                width - 1,
-            )
+                    quantity = Decimal(
+                        quantity_raw,
+                    )
 
-            for price, quantity in order_book_ask_quantity_by_price_map.items():
-                volume = price * quantity
+                    if quantity:
+                        order_book_bid_quantity_by_price_map[price] = quantity
+                    else:
+                        order_book_bid_quantity_by_price_map.pop(
+                            price,
+                            None,
+                        )
 
-                y = min(
+                if datetime_ < min_datetime:
+                    continue
+
+                logger.info(
+                    f'{datetime_} / {max_datetime} ({100.0 * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
+                )
+
+                idx = datetime_series.search_sorted(
+                    element=datetime_,
+                    side='left'
+                )
+
+                closest_trade_id = trade_id_series[idx]
+
+                x = min(
                     int(
-                        (float(price) - min_price) / order_book_volumes_scale,
+                        (closest_trade_id - min_trade_id) / order_book_volumes_scale,
                     ),
-                    height - 1,
+                    width - 1,
                 )
 
-                order_book_volumes_asks_array[x, y] = float(
-                    volume,
-                )
+                for price, quantity in order_book_ask_quantity_by_price_map.items():
+                    volume = price * quantity
 
-            for price, quantity in order_book_bid_quantity_by_price_map.items():
-                volume = price * quantity
+                    y = min(
+                        int(
+                            (float(price) - min_price) / order_book_volumes_scale,
+                        ),
+                        height - 1,
+                    )
 
-                y = min(
-                    int(
-                        (float(price) - min_price) / order_book_volumes_scale,
-                    ),
-                    height - 1,
-                )
+                    order_book_volumes_asks_array[x, y] = float(
+                        volume,
+                    )
 
-                order_book_volumes_bids_array[x, y] = float(
-                    volume,
-                )
+                for price, quantity in order_book_bid_quantity_by_price_map.items():
+                    volume = price * quantity
+
+                    y = min(
+                        int(
+                            (float(price) - min_price) / order_book_volumes_scale,
+                        ),
+                        height - 1,
+                    )
+
+                    order_book_volumes_bids_array[x, y] = float(
+                        volume,
+                    )
 
         self.__order_book_volumes_asks_array = order_book_volumes_asks_array
         self.__order_book_volumes_bids_array = order_book_volumes_bids_array
