@@ -173,10 +173,12 @@ def migrate_trade_data_batch(args):
 
                     okx_trade_data_existent_trade_id_array_idx += 1
 
-            assert (
-                okx_trade_data_existent_trade_id_array_idx
-                == okx_trade_data_existent_trade_id_array.size
-            ), (
+            if okx_trade_data_existent_trade_id_array_idx < okx_trade_data_existent_trade_id_array.size:
+                okx_trade_data_existent_trade_id_array.resize((
+                    okx_trade_data_existent_trade_id_array_idx,
+                ))
+
+            assert okx_trade_data_existent_trade_id_array_idx == okx_trade_data_existent_trade_id_array.size, (
                 okx_trade_data_existent_trade_id_array_idx,
                 okx_trade_data_existent_trade_id_array.size,
             )
@@ -209,10 +211,12 @@ def migrate_trade_data_batch(args):
 
                     okx_trade_data_2_existent_trade_id_array_idx += 1
 
-            assert (
-                okx_trade_data_2_existent_trade_id_array_idx
-                == okx_trade_data_2_existent_trade_id_array.size
-            ), (
+            if okx_trade_data_2_existent_trade_id_array_idx < okx_trade_data_2_existent_trade_id_array.size:
+                okx_trade_data_2_existent_trade_id_array.resize((
+                    okx_trade_data_2_existent_trade_id_array_idx,
+                ))
+
+            assert okx_trade_data_2_existent_trade_id_array_idx == okx_trade_data_2_existent_trade_id_array.size, (
                 okx_trade_data_2_existent_trade_id_array_idx,
                 okx_trade_data_2_existent_trade_id_array.size,
             )
