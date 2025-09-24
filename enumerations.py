@@ -1,7 +1,7 @@
 from enum import (
-    auto,
     IntEnum,
     StrEnum,
+    auto,
 )
 
 

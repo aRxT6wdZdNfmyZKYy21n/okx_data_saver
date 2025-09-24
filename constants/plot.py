@@ -1,4 +1,4 @@
-class PlotConstants(object):
+class PlotConstants:
     __slots__ = ()
 
     IntervalNames = [

@@ -1,11 +1,10 @@
 import codecs
 import os
-import typing
 
 import orjson
 
 
-class JsonUtils(object):
+class JsonUtils:
     @staticmethod
     def read(
         path: str,
@@ -23,7 +22,7 @@ class JsonUtils(object):
     def read_if_exists(
         cls,
         path: str,
-        default: typing.Type,
+        default: type,
     ):
         if not os.path.exists(
             path,

@@ -1,7 +1,7 @@
 from sqlalchemy import (
-    Column,
-    BigInteger,
     JSON,
+    BigInteger,
+    Column,
     PrimaryKeyConstraint,
     Text,
 )

@@ -2,7 +2,6 @@ import asyncio
 import logging
 import traceback
 import typing
-
 from decimal import (
     Decimal,
 )
@@ -22,7 +21,6 @@ from sqlalchemy import (
     select,
     update,
 )
-
 from sqlalchemy.dialects.postgresql import (
     insert,
 )
@@ -30,11 +28,9 @@ from sqlalchemy.dialects.postgresql import (
 from main.save_trades import (
     schemas,
 )
-
 from main.save_trades.globals import (
     g_globals,
 )
-
 
 logger = logging.getLogger(
     __name__,

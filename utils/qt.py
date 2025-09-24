@@ -4,19 +4,17 @@ import typing
 from PyQt6.QtCore import (
     Qt,
 )
-
 from PyQt6.QtWidgets import (
     QComboBox,
     QLabel,
 )
-
 
 logger = logging.getLogger(
     __name__,
 )
 
 
-class QtUtils(object):
+class QtUtils:
     @staticmethod
     def create_label(
         label_text: str,

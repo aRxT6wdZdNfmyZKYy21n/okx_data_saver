@@ -5,15 +5,12 @@ import traceback
 from aiogram import (
     Bot as AioGramBot,
 )
-
 from aiogram.client.default import (
     DefaultBotProperties as AioGramDefaultBotProperties,
 )
-
 from aiogram.enums import (
     ParseMode,
 )
-
 
 _CHAT_ID = -1002403348867
 
@@ -23,7 +20,7 @@ logger = logging.getLogger(
 )
 
 
-class TelegramUtils(object):
+class TelegramUtils:
     __slots__ = ()
 
     @staticmethod

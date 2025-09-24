@@ -1,11 +1,10 @@
 import typing
-
 from datetime import (
     timedelta,
 )
 
 
-class CommonConstants(object):
+class CommonConstants:
     __slots__ = ()
 
     # A coroutine function with any args returning any awaitable result

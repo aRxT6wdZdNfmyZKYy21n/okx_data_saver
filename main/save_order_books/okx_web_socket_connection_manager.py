@@ -1,5 +1,8 @@
 import asyncio
 import logging
+import traceback
+import typing
+import uuid
 from collections import (
     defaultdict,
 )
@@ -8,10 +11,6 @@ from decimal import (
 )
 
 import orjson
-import traceback
-import typing
-import uuid
-
 import websockets.asyncio.client
 from aiogram.utils.text_decorations import (
     markdown_decoration,
@@ -39,7 +38,7 @@ class _WebSocketConnectionTimeoutError(Exception):
     pass
 
 
-class OKXWebSocketConnectionManager(object):
+class OKXWebSocketConnectionManager:
     __slots__ = (
         '__ask_quantity_by_price_map_by_symbol_name_map',
         '__bid_quantity_by_price_map_by_symbol_name_map',
@@ -62,11 +61,11 @@ class OKXWebSocketConnectionManager(object):
         super().__init__()
 
         self.__ask_quantity_by_price_map_by_symbol_name_map: (
-            typing.DefaultDict[str, dict[Decimal, Decimal]] | None
+            defaultdict[str, dict[Decimal, Decimal]] | None
         ) = None
 
         self.__bid_quantity_by_price_map_by_symbol_name_map: (
-            typing.DefaultDict[str, dict[Decimal, Decimal]] | None
+            defaultdict[str, dict[Decimal, Decimal]] | None
         ) = None
 
         self.__on_new_order_book_data_event = AsyncEvent(

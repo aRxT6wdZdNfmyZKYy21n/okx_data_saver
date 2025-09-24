@@ -1,11 +1,9 @@
 import asyncio
 import traceback
 import typing
-
 from concurrent.futures import (
     Future,
 )
-
 
 # TODO: AsyncUtils
 
@@ -55,7 +53,7 @@ def run_coroutine_threadsafe_with_exceptions_logging(
 
 def create_task_with_exceptions_logging_threadsafe(
     coroutine: typing.Coroutine,
-) -> typing.Union[Future]:
+) -> Future:
     event_loop = asyncio.get_running_loop()
 
     return run_coroutine_threadsafe_with_exceptions_logging(

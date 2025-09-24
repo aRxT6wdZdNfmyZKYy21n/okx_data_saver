@@ -1,19 +1,11 @@
 __all__ = ('g_globals',)
 
-import asyncio
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
+    AsyncSession,
     async_sessionmaker,
     create_async_engine,
-    AsyncSession,
-)
-
-from constants.common import (
-    CommonConstants,
-)
-from main.save_order_books.okx_web_socket_connection_manager import (
-    OKXWebSocketConnectionManager,
 )
 
 from settings import (
@@ -21,7 +13,7 @@ from settings import (
 )
 
 
-class Globals(object):
+class Globals:
     __slots__ = (
         '__postgres_db_engine',
         '__postgres_db_session_maker',

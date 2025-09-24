@@ -3,10 +3,9 @@ from decimal import (
 )
 
 from sqlalchemy import (
-    Column,
     BigInteger,
     Boolean,
-    Integer,
+    Column,
     Numeric,
     PrimaryKeyConstraint,
     Text,

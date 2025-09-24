@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import sys
-import traceback
 import typing
 from decimal import Decimal
 
@@ -15,12 +14,10 @@ except ImportError:
 
 from PyQt6.QtWidgets import QApplication
 from qasync import QEventLoop
-
 from sqlalchemy import (
     select,
     update,
 )
-
 from sqlalchemy.dialects.postgresql import (
     insert,
 )
@@ -28,18 +25,15 @@ from sqlalchemy.dialects.postgresql import (
 from main.save_candles import (
     schemas,
 )
-
 from main.save_candles.globals import (
     g_globals,
 )
 from main.show_plot.processor import (
     FinPlotChartProcessor,
 )
-
 from utils.time import (
     TimeUtils,
 )
-
 
 logger = logging.getLogger(
     __name__,

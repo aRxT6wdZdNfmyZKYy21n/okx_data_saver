@@ -4,6 +4,7 @@ chrono
 connectorx
 git+https://github.com/aRxT6wdZdNfmyZKYy21n/finplot.git
 httpx
+lz4
 numpy
 orjson
 pandas
@@ -15,6 +16,7 @@ pydantic-settings
 PyQt6
 pyqtgraph
 qasync
+redis[hiredis]
 SQLAlchemy[asyncio]
 TA-Lib
 websockets

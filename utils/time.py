@@ -1,10 +1,10 @@
 from datetime import (
-    datetime,
     UTC,
+    datetime,
 )
 
 
-class TimeUtils(object):
+class TimeUtils:
     __slots__ = ()
 
     @staticmethod

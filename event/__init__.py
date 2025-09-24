@@ -1,19 +1,18 @@
+import inspect
 import logging
 import traceback
 import typing
-import inspect
 
 from constants.common import (
     CommonConstants,
 )
-
 
 logger = logging.getLogger(
     __name__,
 )
 
 
-class Event(object):
+class Event:
     __slots__ = (
         '__name',
         '__sync_delegates',

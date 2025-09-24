@@ -7,7 +7,7 @@ from enumerations import (
 )
 
 
-class TradingUtils(object):
+class TradingUtils:
     @staticmethod
     def get_direction(
         price_1: float | Decimal,

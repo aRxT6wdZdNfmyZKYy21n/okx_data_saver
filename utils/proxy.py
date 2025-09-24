@@ -1,10 +1,9 @@
 import codecs
 import os
 import os.path
-import typing
 
 
-class ProxyUtils(object):
+class ProxyUtils:
     @staticmethod
     def get_socks5_proxy_urls(
         socks5_proxies_file_names: list[str],

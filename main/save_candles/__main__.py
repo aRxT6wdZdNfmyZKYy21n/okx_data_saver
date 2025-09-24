@@ -19,7 +19,6 @@ from sqlalchemy import (
     select,
     update,
 )
-
 from sqlalchemy.dialects.postgresql import (
     insert,
 )
@@ -27,15 +26,12 @@ from sqlalchemy.dialects.postgresql import (
 from main.save_candles import (
     schemas,
 )
-
 from main.save_candles.globals import (
     g_globals,
 )
-
 from utils.time import (
     TimeUtils,
 )
-
 
 logger = logging.getLogger(
     __name__,

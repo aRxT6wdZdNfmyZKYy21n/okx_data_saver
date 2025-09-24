@@ -3,7 +3,7 @@ from enumerations import (
 )
 
 
-class SymbolConstants(object):
+class SymbolConstants:
     __slots__ = ()
 
     NameById = {

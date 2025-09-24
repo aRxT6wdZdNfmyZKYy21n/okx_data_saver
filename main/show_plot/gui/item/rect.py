@@ -1,14 +1,11 @@
-from pyqtgraph import Point
-
 import pyqtgraph
-
 from PyQt6.QtCore import (
     QRectF,
 )
-
 from PyQt6.QtGui import (
     QColor,
 )
+from pyqtgraph import Point
 
 
 class RectItem(pyqtgraph.GraphicsObject):

@@ -1,16 +1,14 @@
-from pyqtgraph import Point
-
 import pyqtgraph
-
 from PyQt6.QtGui import (
     QColor,
 )
-
+from pyqtgraph import (
+    Point,
+)
 
 from main.show_plot.gui.item.rect import (
     RectItem,
 )
-
 
 _CANDLE_BEAR_BODY_COLOR = QColor(
     0xF2,

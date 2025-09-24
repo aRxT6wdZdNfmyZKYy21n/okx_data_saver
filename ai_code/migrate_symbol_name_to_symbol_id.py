@@ -9,22 +9,21 @@
 import asyncio
 import logging
 import multiprocessing as mp
-
-import numpy
 import os
 import sys
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 
+import numpy
 from sqlalchemy import (
     and_,
     func,
     select,
 )
 from sqlalchemy.ext.asyncio import (
-    create_async_engine,
-    async_sessionmaker,
     AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
 )
 
 try:
@@ -38,22 +37,27 @@ from constants.symbol import (
 )
 from main.save_candles.schemas import (
     Base as BaseOKXCandleData,
-    OKXCandleData15m,
-    OKXCandleData15m2,
+)
+from main.save_candles.schemas import (
     OKXCandleData1H,
     OKXCandleData1H2,
+    OKXCandleData15m,
+    OKXCandleData15m2,
 )
 from main.save_order_books.schemas import (
     Base as BaseOKXOrderBookData,
+)
+from main.save_order_books.schemas import (
     OKXOrderBookData,
     OKXOrderBookData2,
 )
 from main.save_trades.schemas import (
     Base as BaseOKXTradeData,
+)
+from main.save_trades.schemas import (
     OKXTradeData,
     OKXTradeData2,
 )
-
 
 # Настройка логирования
 logging.basicConfig(
@@ -173,12 +177,18 @@ def migrate_trade_data_batch(args):
 
                     okx_trade_data_existent_trade_id_array_idx += 1
 
-            if okx_trade_data_existent_trade_id_array_idx < okx_trade_data_existent_trade_id_array.size:
-                okx_trade_data_existent_trade_id_array.resize((
-                    okx_trade_data_existent_trade_id_array_idx,
-                ))
+            if (
+                okx_trade_data_existent_trade_id_array_idx
+                < okx_trade_data_existent_trade_id_array.size
+            ):
+                okx_trade_data_existent_trade_id_array.resize(
+                    (okx_trade_data_existent_trade_id_array_idx,)
+                )
 
-            assert okx_trade_data_existent_trade_id_array_idx == okx_trade_data_existent_trade_id_array.size, (
+            assert (
+                okx_trade_data_existent_trade_id_array_idx
+                == okx_trade_data_existent_trade_id_array.size
+            ), (
                 okx_trade_data_existent_trade_id_array_idx,
                 okx_trade_data_existent_trade_id_array.size,
             )
@@ -211,12 +221,18 @@ def migrate_trade_data_batch(args):
 
                     okx_trade_data_2_existent_trade_id_array_idx += 1
 
-            if okx_trade_data_2_existent_trade_id_array_idx < okx_trade_data_2_existent_trade_id_array.size:
-                okx_trade_data_2_existent_trade_id_array.resize((
-                    okx_trade_data_2_existent_trade_id_array_idx,
-                ))
+            if (
+                okx_trade_data_2_existent_trade_id_array_idx
+                < okx_trade_data_2_existent_trade_id_array.size
+            ):
+                okx_trade_data_2_existent_trade_id_array.resize(
+                    (okx_trade_data_2_existent_trade_id_array_idx,)
+                )
 
-            assert okx_trade_data_2_existent_trade_id_array_idx == okx_trade_data_2_existent_trade_id_array.size, (
+            assert (
+                okx_trade_data_2_existent_trade_id_array_idx
+                == okx_trade_data_2_existent_trade_id_array.size
+            ), (
                 okx_trade_data_2_existent_trade_id_array_idx,
                 okx_trade_data_2_existent_trade_id_array.size,
             )

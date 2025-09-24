@@ -13,11 +13,9 @@ except ImportError:
 from main.save_order_books import (
     schemas,
 )
-
 from main.save_order_books.globals import (
     g_globals,
 )
-
 
 logger = logging.getLogger(
     __name__,

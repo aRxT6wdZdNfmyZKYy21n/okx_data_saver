@@ -9,56 +9,58 @@
 import asyncio
 import logging
 import multiprocessing as mp
-from decimal import Decimal
-
-import numpy
-import os
 import sys
 import traceback
 from concurrent.futures import ProcessPoolExecutor
+from decimal import (
+    Decimal,
+)
 
 import orjson
 import polars
 from sqlalchemy import (
-    and_,
     func,
     select,
 )
 from sqlalchemy.ext.asyncio import (
-    create_async_engine,
-    async_sessionmaker,
     AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
 )
 
-from enumerations import SymbolId, OKXOrderBookActionId
+from enumerations import (
+    OKXOrderBookActionId,
+    SymbolId,
+)
 
 try:
     import uvloop
 except ImportError:
     uvloop = asyncio
 
-from constants.okx import OKXConstants
-from constants.symbol import (
-    SymbolConstants,
-)
 from main.save_candles.schemas import (
     Base as BaseOKXCandleData,
-    OKXCandleData15m,
-    OKXCandleData15m2,
+)
+from main.save_candles.schemas import (
     OKXCandleData1H,
     OKXCandleData1H2,
+    OKXCandleData15m,
+    OKXCandleData15m2,
 )
 from main.save_order_books.schemas import (
     Base as BaseOKXOrderBookData,
+)
+from main.save_order_books.schemas import (
     OKXOrderBookData,
     OKXOrderBookData2,
 )
 from main.save_trades.schemas import (
     Base as BaseOKXTradeData,
+)
+from main.save_trades.schemas import (
     OKXTradeData,
     OKXTradeData2,
 )
-
 
 # Настройка логирования
 logging.basicConfig(
@@ -85,7 +87,7 @@ def check_trade_data_batch(args):
         from settings import (
             settings,
         )
-        
+
         # Формируем URI для подключения к БД
         uri = (
             'postgresql'
@@ -100,7 +102,7 @@ def check_trade_data_batch(args):
             '/'
             f'{settings.POSTGRES_DB_NAME}'
         )
-        
+
         # Загружаем батч данных из таблицы
         dataframe = polars.read_database_uri(
             query=(
@@ -122,7 +124,7 @@ def check_trade_data_batch(args):
             engine='connectorx',
             uri=uri,
         )
-        
+
         checked_count = 0
 
         is_buy: bool
@@ -133,8 +135,15 @@ def check_trade_data_batch(args):
         trade_id: int
 
         # Проверяем каждую строку из таблицы
-        for symbol_id_raw, trade_id, is_buy, price, quantity, timestamp_ms in dataframe.iter_rows(
-                named=False,
+        for (
+            symbol_id_raw,
+            trade_id,
+            is_buy,
+            price,
+            quantity,
+            timestamp_ms,
+        ) in dataframe.iter_rows(
+            named=False,
         ):
             assert type(symbol_id_raw) is str, (type(symbol_id_raw),)
             assert type(trade_id) is int, (type(trade_id),)
@@ -146,7 +155,7 @@ def check_trade_data_batch(args):
             symbol_id: SymbolId | None = getattr(
                 SymbolId,
                 symbol_id_raw,
-                None
+                None,
             )
 
             if symbol_id is None:
@@ -192,7 +201,7 @@ def check_trade_data_batch(args):
 
             if checked_count % 10000 == 0:
                 print(
-                    f'[check_trade_data_batch] checked {checked_count} rows'
+                    f'[check_trade_data_batch] checked {checked_count} rows',
                 )
 
         return checked_count
@@ -209,7 +218,7 @@ def check_order_book_data_batch(args):
     async def _check_batch() -> int:
         # Импортируем settings только когда нужно
         from settings import settings
-        
+
         # Формируем URI для подключения к БД
         uri = (
             'postgresql'
@@ -224,7 +233,7 @@ def check_order_book_data_batch(args):
             '/'
             f'{settings.POSTGRES_DB_NAME}'
         )
-        
+
         # Загружаем батч данных из таблицы
         dataframe = polars.read_database_uri(
             query=(
@@ -244,7 +253,7 @@ def check_order_book_data_batch(args):
             engine='connectorx',
             uri=uri,
         )
-        
+
         checked_count = 0
 
         action_id_raw: str
@@ -254,8 +263,14 @@ def check_order_book_data_batch(args):
         timestamp_ms: int
 
         # Проверяем каждую строку из таблицы
-        for symbol_id_raw, timestamp_ms, action_id_raw, asks_raw, bids_raw in dataframe.iter_rows(
-                named=False,
+        for (
+            symbol_id_raw,
+            timestamp_ms,
+            action_id_raw,
+            asks_raw,
+            bids_raw,
+        ) in dataframe.iter_rows(
+            named=False,
         ):
             assert type(symbol_id_raw) is str, (type(symbol_id_raw),)
             assert type(timestamp_ms) is int, (type(timestamp_ms),)
@@ -326,7 +341,7 @@ def check_order_book_data_batch(args):
 
             if checked_count % 10000 == 0:
                 print(
-                    f'[check_order_book_data_batch] checked {checked_count} rows'
+                    f'[check_order_book_data_batch] checked {checked_count} rows',
                 )
 
         return checked_count
@@ -343,7 +358,7 @@ def check_candle_data_15m_batch(args):
     async def _check_batch() -> int:
         # Импортируем settings только когда нужно
         from settings import settings
-        
+
         # Формируем URI для подключения к БД
         uri = (
             'postgresql'
@@ -358,7 +373,7 @@ def check_candle_data_15m_batch(args):
             '/'
             f'{settings.POSTGRES_DB_NAME}'
         )
-        
+
         # Загружаем батч данных из таблицы
         dataframe = polars.read_database_uri(
             query=(
@@ -380,9 +395,9 @@ def check_candle_data_15m_batch(args):
             engine='connectorx',
             uri=uri,
         )
-        
+
         checked_count = 0
-        
+
         # Проверяем каждую строку из таблицы
         for row in dataframe.iter_rows(named=False):
             # TODO: Здесь будет ваша логика проверки полей
@@ -403,7 +418,7 @@ def check_candle_data_1h_batch(args):
     async def _check_batch() -> int:
         # Импортируем settings только когда нужно
         from settings import settings
-        
+
         # Формируем URI для подключения к БД
         uri = (
             'postgresql'
@@ -418,7 +433,7 @@ def check_candle_data_1h_batch(args):
             '/'
             f'{settings.POSTGRES_DB_NAME}'
         )
-        
+
         # Загружаем батч данных из новой таблицы
         dataframe = polars.read_database_uri(
             query=(
@@ -440,9 +455,9 @@ def check_candle_data_1h_batch(args):
             engine='connectorx',
             uri=uri,
         )
-        
+
         checked_count = 0
-        
+
         # Проверяем каждую строку из таблицы
         for row in dataframe.iter_rows(named=False):
             # TODO: Здесь будет ваша логика проверки полей
@@ -557,7 +572,9 @@ class DatabaseMigrator:
             )
 
             # Подготавливаем аргументы для каждого процесса
-            args_list = [(self.database_url, offset, limit) for offset, limit in batches]
+            args_list = [
+                (self.database_url, offset, limit) for offset, limit in batches
+            ]
 
             # Запускаем многопроцессную проверку
             with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:
@@ -596,7 +613,9 @@ class DatabaseMigrator:
             )
 
             # Подготавливаем аргументы для каждого процесса
-            args_list = [(self.database_url, offset, limit) for offset, limit in batches]
+            args_list = [
+                (self.database_url, offset, limit) for offset, limit in batches
+            ]
 
             # Запускаем многопроцессную проверку
             with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as executor:

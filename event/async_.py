@@ -5,11 +5,9 @@ import typing
 from constants.common import (
     CommonConstants,
 )
-
 from event import (
     Event,
 )
-
 from utils.async_ import (
     create_task_with_exceptions_logging,
 )

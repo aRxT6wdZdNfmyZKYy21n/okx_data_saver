@@ -1,16 +1,12 @@
 import typing
-
 from datetime import (
     datetime,
 )
 
-import polars
 import pyqtgraph
 
 if typing.TYPE_CHECKING:
-    from main.show_plot.processor import (
-        FinPlotChartProcessor,
-    )
+    pass
 
 
 class DateTimeByTradeIDAxisItem(pyqtgraph.AxisItem):

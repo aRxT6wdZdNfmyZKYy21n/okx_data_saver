@@ -3,8 +3,8 @@ import logging
 import traceback
 import typing
 from datetime import (
-    datetime,
     UTC,
+    datetime,
 )
 from decimal import (
     Decimal,
@@ -15,14 +15,12 @@ import orjson
 import polars
 import polars_talib
 import talib
-
+from chrono import (
+    Timer,
+)
 from polars import (
     DataFrame,
     Series,
-)
-
-from chrono import (
-    Timer,
 )
 from sqlalchemy import (
     and_,
@@ -53,7 +51,6 @@ from main.save_trades.schemas import (
 from main.show_plot.globals import (
     g_globals,
 )
-
 from main.show_plot.gui.window import (
     FinPlotChartWindow,
 )
@@ -75,7 +72,7 @@ _DEBUG_SMOOTHING_LEVEL = None
 _IS_ORDER_BOOK_VOLUME_ENABLED = False
 
 
-class FinPlotChartProcessor(object):
+class FinPlotChartProcessor:
     __slots__ = (
         '__bollinger_base_line_series',
         '__bollinger_lower_band_series',
@@ -1123,16 +1120,14 @@ class FinPlotChartProcessor(object):
             ),
             polars.col(
                 'price',
-            )
-            .cast(
+            ).cast(
                 polars.Float64,
             ),
             polars.col(
                 'quantity',
-            )
-            .cast(
+            ).cast(
                 polars.Float64,
-            )
+            ),
         )
 
         trades_dataframe = trades_dataframe.sort(
@@ -1531,13 +1526,13 @@ WHERE symbol_id IS NOT NULL;
             order_book_bid_quantity_by_price_map: dict[Decimal, Decimal] = {}
 
             for (
-                    timestamp_ms,
-                    action_id_raw,
-                    asks_raw,
-                    bids_raw,
-                    datetime_,
+                timestamp_ms,
+                action_id_raw,
+                asks_raw,
+                bids_raw,
+                datetime_,
             ) in new_order_book_dataframe.iter_rows(
-                    named=False,
+                named=False,
             ):
                 action_id = getattr(
                     OKXOrderBookActionId,
@@ -1603,7 +1598,7 @@ WHERE symbol_id IS NOT NULL;
 
                 idx = datetime_series.search_sorted(
                     element=datetime_,
-                    side='left'
+                    side='left',
                 )
 
                 closest_trade_id = trade_id_series[idx]
@@ -1742,8 +1737,13 @@ WHERE symbol_id IS NOT NULL;
                     min_start_trade_id = 0
 
                 for trade_data in trades_dataframe.filter(
-                    polars.col('trade_id',) >= min_start_trade_id
-                ).iter_rows(named=True,):
+                    polars.col(
+                        'trade_id',
+                    )
+                    >= min_start_trade_id
+                ).iter_rows(
+                    named=True,
+                ):
                     trade_id: int = trade_data['trade_id']
 
                     # if trade_id < min_trade_id:
@@ -2333,7 +2333,10 @@ WHERE symbol_id IS NOT NULL;
             last_line_data: dict[str, typing.Any] | None = None
 
             for line_data in line_dataframe.filter(
-                polars.col('start_trade_id',) >= min_start_trade_id  # min_trade_id
+                polars.col(
+                    'start_trade_id',
+                )
+                >= min_start_trade_id  # min_trade_id
             ).iter_rows(named=True):  # TODO
                 trades_smoothed_raw_data_list.append(
                     {

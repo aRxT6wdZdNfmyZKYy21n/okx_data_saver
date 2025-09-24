@@ -9,36 +9,30 @@ from collections import (
 from datetime import (
     datetime,
 )
-
 from functools import (
     partial,
 )
 
 import numpy
-import polars
+import pyqtgraph
 from chrono import (
     Timer,
 )
-from qasync import (
-    asyncSlot,
-)
-
-import pyqtgraph
-
 from PyQt6.QtCore import (
     QPointF,
     Qt,
 )
-
 from PyQt6.QtGui import (
     QColor,
 )
-
 from PyQt6.QtWidgets import (
     QGridLayout,
     QMainWindow,
     QVBoxLayout,
     QWidget,
+)
+from qasync import (
+    asyncSlot,
 )
 
 from constants.plot import (
@@ -53,7 +47,6 @@ from main.show_plot.gui.item.datetime_by_trade_id_axis import (
 from utils.async_ import (
     create_task_with_exceptions_logging,
 )
-
 from utils.qt import (
     QtUtils,
 )

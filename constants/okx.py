@@ -3,7 +3,7 @@ from enumerations import (
 )
 
 
-class OKXConstants(object):
+class OKXConstants:
     __slots__ = ()
 
     OrderBookActionNameById = {

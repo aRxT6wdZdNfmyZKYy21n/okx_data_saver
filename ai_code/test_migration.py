@@ -5,7 +5,6 @@
 """
 
 import sys
-import os
 
 
 def test_imports():
@@ -42,7 +41,7 @@ def test_migration_script_syntax():
         current_dir = os.path.dirname(__file__)
         script_path = os.path.join(current_dir, 'migrate_symbol_name_to_symbol_id.py')
 
-        with open(script_path, 'r', encoding='utf-8') as f:
+        with open(script_path, encoding='utf-8') as f:
             source = f.read()
 
         # Парсим код для проверки синтаксиса
@@ -110,9 +109,9 @@ def test_settings_import():
 def test_schemas():
     """Тест схем."""
     try:
-        from main.save_trades.schemas import OKXTradeData2
+        from main.save_candles.schemas import OKXCandleData1H2, OKXCandleData15m2
         from main.save_order_books.schemas import OKXOrderBookData2
-        from main.save_candles.schemas import OKXCandleData15m2, OKXCandleData1H2
+        from main.save_trades.schemas import OKXTradeData2
 
         print('✓ Импорт новых схем успешен')
 
