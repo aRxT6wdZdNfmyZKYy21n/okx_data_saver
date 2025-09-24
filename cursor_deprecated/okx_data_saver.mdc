@@ -1,281 +1,463 @@
-# План миграции с pandas на polars для okx_data_saver
+# План переноса методов обработки данных из main/show_plot/processor.py в main/process_data/__main__.py
 
 ## Обзор изменений
 
-Данный план описывает пошаговую миграцию кода с библиотеки pandas на polars в файлах `main/show_plot/processor.py` и `main/show_plot/gui/window.py`. Polars предоставляет более быструю работу с данными и лучшую производительность для больших датасетов.
+Данный план описывает пошаговый перенос метода `__update_trades_dataframe` и всех связанных с ним методов из `main/show_plot/processor.py` в `main/process_data/__main__.py` с использованием Redis для хранения данных.
 
-## Основные различия между pandas и polars
+## Цели переноса
 
-### 1. Импорты и типы данных
-- **pandas**: `DataFrame`, `Series`, `pandas.Timestamp`
-- **polars**: `pl.DataFrame`, `pl.Series`, `pl.Datetime`
+1. **Разделение ответственности**: Вынести обработку данных из UI-компонента в отдельный сервис
+2. **Кэширование в Redis**: Сохранять обработанные данные в Redis для быстрого доступа
+3. **Ограничение размера**: Учитывать ограничение Redis в 512 МБ на строку
+4. **Асинхронная обработка**: Обеспечить независимую обработку данных от UI
 
-### 2. Основные операции
-- **pandas**: `.loc[]`, `.itertuples()`, `.index`, `.array`
-- **polars**: `.filter()`, `.iter_rows()`, `.get_column()`, `.to_numpy()`
+## Методы для переноса
 
-### 3. Создание DataFrame
-- **pandas**: `DataFrame.from_records()`
-- **polars**: `pl.DataFrame()`
+### Основные методы:
+- `__update_trades_dataframe()` - главный метод обновления данных о сделках
+- `__fetch_trades_dataframe()` - получение данных о сделках из БД
+- `__fetch_order_book_dataframe()` - получение данных о стакане заявок
 
-### 4. Работа с индексами
-- **pandas**: `.set_index()`, `.index`
-- **polars**: `.with_columns()`, `.get_column()`
+### Методы обработки данных:
+- `__update_bollinger_series()` - обновление полос Боллинджера
+- `__update_candle_dataframe_by_interval_name_map()` - обновление свечных данных
+- `__update_rsi_series()` - обновление RSI индикатора
+- `__update_trades_smoothed_dataframe_by_level_map()` - обновление сглаженных данных
+- `__update_extreme_lines()` - обновление экстремальных линий
+- `__update_order_book_volumes()` - обновление объемов стакана
+- `__update_velocity_series()` - обновление серии скорости
 
-## Пошаговый план миграции
+### Вспомогательные методы:
+- `__update_current_available_symbol_name_set()` - обновление доступных символов
 
-### Этап 1: Подготовка и установка зависимостей
+## Пошаговый план переноса
 
-1. **Добавить polars в requirements.txt**
-   ```txt
-   polars>=0.20.0
-   ```
+### Этап 1: Подготовка инфраструктуры Redis
 
-2. **Обновить импорты в processor.py**
-   ```python
-   # Заменить
-   import pandas
-   from pandas import DataFrame, Series
+- [ ] **1.1** Добавить Redis в настройки приложения
+  - Добавить поля для Redis в `settings.py`
+  - `REDIS_HOST: str`
+  - `REDIS_PORT: int`
+  - `REDIS_PASSWORD: SecretStr | None`
+  - `REDIS_DB: int`
 
-   # На
-   import polars as pl
-   from polars import DataFrame, Series
-   ```
+- [ ] **1.2** Добавить Redis в зависимости
+  - Добавить `redis>=4.5.0` в `requirements.txt`
+  - Добавить `redis[hiredis]` для лучшей производительности
+  - Добавить `lz4` для быстрого сжатия (альтернатива)
+  - xz входит в стандартную библиотеку Python (lzma)
 
-3. **Обновить импорты в window.py**
-   ```python
-   # Заменить
-   import pandas
+- [ ] **1.3** Создать утилиты для работы с Redis
+  - Создать `utils/redis.py` с классами для работы с Redis
+  - Реализовать методы сериализации/десериализации с `polars.write_ipc()`
+  - Добавить методы для разбивки больших данных на части
+  - Создать `utils/serialization.py` с утилитами IPC сериализации
 
-   # На
-   import polars as pl
-   ```
+### Этап 2: Создание схем данных для Redis
 
-### Этап 2: Миграция типов данных и аннотаций
+- [ ] **2.1** Определить структуру ключей Redis
+  - `trades:{symbol_id}:data` - основные данные о сделках
+  - `trades:{symbol_id}:bollinger` - полосы Боллинджера
+  - `trades:{symbol_id}:candles:{interval}` - свечные данные по интервалам
+  - `trades:{symbol_id}:rsi` - RSI данные
+  - `trades:{symbol_id}:smoothed:{level}` - сглаженные данные по уровням
+  - `trades:{symbol_id}:extreme_lines` - экстремальные линии
+  - `trades:{symbol_id}:order_book_volumes` - объемы стакана
+  - `trades:{symbol_id}:velocity` - данные скорости
+  - `trades:{symbol_id}:metadata` - метаданные (min/max цены, trade_id и т.д.)
 
-4. **Обновить типы в processor.py**
-   ```python
-   # Заменить все упоминания
-   pandas.DataFrame → pl.DataFrame
-   pandas.Series → pl.Series
-   pandas.Timestamp → pl.Datetime
-   ```
+- [ ] **2.2** Создать схемы сериализации
+  - Использовать `polars.write_ipc()` для сериализации DataFrame в Apache Arrow IPC формат
+  - Реализовать сжатие данных (xz) поверх IPC данных для максимальной эффективности
+  - Добавить версионирование схем данных
+  - Создать утилиты `serialize_dataframe()` и `deserialize_dataframe()`
 
-5. **Обновить типы в window.py**
-   ```python
-   # Заменить
-   pandas.Timestamp → pl.Datetime
-   pandas.Series → pl.Series
-   ```
+### Этап 3: Перенос методов получения данных
 
-### Этап 3: Миграция создания DataFrame
+- [ ] **3.1** Перенести `__fetch_trades_dataframe()` в `main/process_data/__main__.py`
+  - Адаптировать метод для работы в контексте `DataProcessingDaemon`
+  - Добавить кэширование результатов в Redis
+  - Реализовать инкрементальное обновление данных
 
-6. **Заменить DataFrame.from_records() в processor.py**
-   ```python
-   # Было
-   new_candle_dataframe = DataFrame.from_records(
-       candle_raw_data_list,
-       columns=[...]
-   )
+- [ ] **3.2** Перенести `__fetch_order_book_dataframe()` в `main/process_data/__main__.py`
+  - Адаптировать для работы с Redis
+  - Добавить обработку больших объемов данных
 
-   # Станет
-   new_candle_dataframe = pl.DataFrame(candle_raw_data_list)
-   ```
+- [ ] **3.3** Создать метод `__update_current_available_symbol_name_set()` в `DataProcessingDaemon`
+  - Перенести логику получения доступных символов
+  - Сохранять результат в Redis
 
-7. **Заменить pandas.read_sql_query() в processor.py**
-   ```python
-   # Было
-   for order_book_dataframe_chunk in pandas.read_sql_query(...)
+### Этап 4: Перенос методов обработки данных
 
-   # Станет
-   for order_book_dataframe_chunk in pl.read_database(...)
-   ```
+- [ ] **4.1** Перенести `__update_bollinger_series()`
+  - Адаптировать для работы с Redis
+  - Сохранять результат в `trades:{symbol_id}:bollinger`
+  - Реализовать разбивку на части при превышении лимита
 
-### Этап 4: Миграция операций с данными
+- [ ] **4.2** Перенести `__update_candle_dataframe_by_interval_name_map()`
+  - Сохранять данные по интервалам в отдельные ключи
+  - `trades:{symbol_id}:candles:{interval_name}`
+  - Реализовать инкрементальное обновление свечей
 
-8. **Заменить операции с индексами в processor.py**
-   ```python
-   # Было
-   trades_dataframe.loc[trades_dataframe.index >= min_trade_id]
+- [ ] **4.3** Перенести `__update_rsi_series()`
+  - Сохранять в `trades:{symbol_id}:rsi`
+  - Учитывать зависимость от свечных данных
 
-   # Станет
-   trades_dataframe.filter(pl.col("trade_id") >= min_trade_id)
-   ```
+- [ ] **4.4** Перенести `__update_trades_smoothed_dataframe_by_level_map()`
+  - Сохранять по уровням сглаживания
+  - `trades:{symbol_id}:smoothed:{level}`
+  - Реализовать сложную логику обработки
 
-9. **Заменить itertuples() в processor.py**
-   ```python
-   # Было
-   for trade_data in trades_dataframe.itertuples():
-       trade_id = trade_data.Index
+- [ ] **4.5** Перенести `__update_extreme_lines()`
+  - Сохранять в `trades:{symbol_id}:extreme_lines`
+  - Обрабатывать большие массивы данных
 
-   # Станет
-   for row in trades_dataframe.iter_rows(named=True):
-       trade_id = row["trade_id"]
-   ```
+- [ ] **4.6** Перенести `__update_order_book_volumes()`
+  - Сохранять в `trades:{symbol_id}:order_book_volumes`
+  - Реализовать обработку объемов стакана
 
-10. **Заменить операции с Series в processor.py**
-    ```python
-    # Было
-    price_series.max()
-    price_series.min()
-    price_series.size
+- [ ] **4.7** Перенести `__update_velocity_series()`
+  - Сохранять в `trades:{symbol_id}:velocity`
+  - Учитывать зависимость от свечных данных
 
-    # Станет
-    price_series.max()
-    price_series.min()
-    price_series.height  # или len(price_series)
-    ```
+### Этап 5: Создание основного метода обработки
 
-### Этап 5: Миграция работы с временными метками
+- [ ] **5.1** Создать метод `__process_trades_data()` в `DataProcessingDaemon`
+  - Объединить все методы обработки данных
+  - Реализовать последовательность вызовов
+  - Добавить обработку ошибок и логирование
 
-11. **Заменить pandas.to_datetime() в processor.py**
-    ```python
-    # Было
-    new_candle_dataframe.end_timestamp_ms = pandas.to_datetime(
-        new_candle_dataframe.end_timestamp_ms,
-        unit='ms'
-    )
+- [ ] **5.2** Создать метод `__save_processed_data_to_redis()`
+  - Сохранять все обработанные данные в Redis
+  - Реализовать разбивку больших данных на части
+  - Добавить метаданные о времени обработки
 
-    # Станет
-    new_candle_dataframe = new_candle_dataframe.with_columns(
-        pl.col("end_timestamp_ms").cast(pl.Datetime("ms"))
-    )
-    ```
+- [ ] **5.3** Создать метод `__load_processed_data_from_redis()`
+  - Загружать данные из Redis для UI
+  - Реализовать десериализацию данных
+  - Добавить кэширование в памяти
 
-12. **Заменить работу с Timestamp в window.py**
-    ```python
-    # Было
-    start_timestamp: pandas.Timestamp = candle_row_data.start_timestamp_ms
-    start_timestamp_ms = int(start_timestamp.timestamp() * 1000)
+### Этап 6: Адаптация UI для работы с Redis
 
-    # Станет
-    start_timestamp: pl.Datetime = candle_row_data.start_timestamp_ms
-    start_timestamp_ms = int(start_timestamp.timestamp() * 1000)
-    ```
+- [ ] **6.1** Модифицировать `FinPlotChartProcessor` в `processor.py`
+  - Заменить `__update_trades_dataframe()` на загрузку из Redis
+  - Реализовать `__load_trades_dataframe_from_redis()`
+  - Добавить обработку отсутствующих данных
 
-### Этап 6: Миграция операций сортировки и индексации
+- [ ] **6.2** Создать методы загрузки данных из Redis
+  - `__load_bollinger_series_from_redis()`
+  - `__load_candle_dataframe_from_redis()`
+  - `__load_rsi_series_from_redis()`
+  - `__load_smoothed_dataframe_from_redis()`
+  - `__load_extreme_lines_from_redis()`
+  - `__load_order_book_volumes_from_redis()`
+  - `__load_velocity_series_from_redis()`
 
-13. **Заменить set_index() и sort_values() в processor.py**
-    ```python
-    # Было
-    new_candle_dataframe.set_index('start_trade_id', inplace=True)
-    new_candle_dataframe.sort_values('start_trade_id', inplace=True)
+- [ ] **6.3** Обновить методы получения данных
+  - Модифицировать все `get_*` методы для работы с Redis
+  - Добавить fallback на локальные данные при отсутствии в Redis
+  - Реализовать асинхронную загрузку данных
 
-    # Станет
-    new_candle_dataframe = new_candle_dataframe.sort('start_trade_id')
-    # В polars нет концепции индекса, используем колонки напрямую
-    ```
+### Этап 7: Реализация разбивки данных на части
 
-14. **Заменить combine_first() в processor.py**
-    ```python
-    # Было
-    candle_dataframe = old_candle_dataframe.combine_first(new_candle_dataframe)
+- [ ] **7.1** Создать утилиты для разбивки больших данных
+  - Реализовать `split_dataframe_by_size()` для разбивки по размеру
+  - Добавить `split_dataframe_by_rows()` для разбивки по количеству строк
+  - Создать методы объединения частей данных
 
-    # Станет
-    candle_dataframe = pl.concat([old_candle_dataframe, new_candle_dataframe])
-    # Или использовать join операции для более сложной логики
-    ```
+- [ ] **7.2** Реализовать индексацию частей данных
+  - Создать индекс частей в Redis
+  - `trades:{symbol_id}:parts_index` - список частей данных
+  - Добавить метаданные о размерах частей
 
-### Этап 7: Миграция операций с массивами
+- [ ] **7.3** Адаптировать методы загрузки для работы с частями
+  - Реализовать загрузку только необходимых частей
+  - Добавить ленивую загрузку данных
+  - Оптимизировать использование памяти
 
-15. **Заменить .array и .index в window.py**
-    ```python
-    # Было
-    self.__price_plot_data_item.setData(
-        price_series.index,
-        price_series.array
-    )
+### Этап 8: Оптимизация производительности
 
-    # Станет
-    self.__price_plot_data_item.setData(
-        price_series.get_column("trade_id").to_numpy(),
-        price_series.get_column("price").to_numpy()
-    )
-    ```
+- [ ] **8.1** Реализовать кэширование в памяти
+  - Добавить LRU кэш для часто используемых данных
+  - Реализовать инвалидацию кэша при обновлении данных
+  - Добавить метрики использования кэша
 
-### Этап 8: Миграция операций с DataFrame в GUI
+- [ ] **8.2** Оптимизировать работу с Redis
+  - Использовать pipeline для множественных операций
+  - Реализовать асинхронные операции с Redis
+  - Добавить connection pooling
 
-16. **Заменить itertuples() в window.py**
-    ```python
-    # Было
-    for candle_row_data in candle_dataframe.itertuples():
-        start_trade_id = candle_row_data.Index
+- [ ] **8.3** Реализовать сжатие данных
+  - Добавить gzip сжатие для больших данных
+  - Реализовать lz4 для быстрого сжатия
+  - Добавить выбор алгоритма сжатия по типу данных
 
-    # Станет
-    for row in candle_dataframe.iter_rows(named=True):
-        start_trade_id = row["start_trade_id"]
-    ```
+### Этап 9: Обработка ошибок и мониторинг
 
-17. **Заменить операции с Timestamp в window.py**
-    ```python
-    # Было
-    start_timestamp.value
-    end_timestamp.value - start_timestamp.value
+- [ ] **9.1** Добавить обработку ошибок Redis
+  - Реализовать retry логику для операций Redis
+  - Добавить fallback на локальные данные
+  - Создать уведомления об ошибках
 
-    # Станет
-    start_timestamp.timestamp() * 1000  # если нужно в миллисекундах
-    (end_timestamp - start_timestamp).total_seconds() * 1000
-    ```
+- [ ] **9.2** Реализовать мониторинг производительности
+  - Добавить метрики времени обработки данных
+  - Реализовать мониторинг использования Redis
+  - Создать дашборд для отслеживания состояния
 
-### Этап 9: Обновление операций с Series
+- [ ] **9.3** Добавить логирование
+  - Расширить логирование операций с Redis
+  - Добавить трейсинг для отладки
+  - Реализовать структурированное логирование
 
-18. **Заменить операции с Series в processor.py**
-    ```python
-    # Было
-    bollinger_base_line_series.index
-    bollinger_base_line_series.array
+### Этап 10: Тестирование и валидация
 
-    # Станет
-    bollinger_base_line_series.get_column("index").to_numpy()
-    bollinger_base_line_series.get_column("values").to_numpy()
-    ```
+- [ ] **10.1** Создать unit тесты
+  - Тесты для методов обработки данных
+  - Тесты для работы с Redis
+  - Тесты для разбивки данных на части
 
-### Этап 10: Тестирование и оптимизация
+- [ ] **10.2** Создать интеграционные тесты
+  - Тесты полного цикла обработки данных
+  - Тесты взаимодействия с UI
+  - Тесты производительности
 
-19. **Создать тесты для проверки корректности миграции**
-    - Сравнить результаты операций pandas vs polars
-    - Проверить производительность
-    - Убедиться в корректности отображения графиков
+- [ ] **10.3** Валидация данных
+  - Сравнение результатов до и после переноса
+  - Проверка корректности отображения графиков
+  - Валидация производительности
 
-20. **Оптимизировать производительность**
-    - Использовать lazy evaluation polars где возможно
-    - Оптимизировать операции с большими датасетами
-    - Проверить использование памяти
+### Этап 11: Документация и развертывание
 
-## Дополнительные соображения
+- [ ] **11.1** Обновить документацию
+  - Описать новую архитектуру
+  - Документировать настройки Redis
+  - Создать руководство по развертыванию
 
-### Производительность
-- Polars обычно быстрее pandas для больших датасетов
-- Lazy evaluation может значительно ускорить операции
-- Лучшая работа с памятью
+- [ ] **11.2** Создать скрипты развертывания
+  - Скрипты для настройки Redis
+  - Docker compose для локальной разработки
+  - Скрипты миграции данных
 
-### Совместимость
-- Некоторые операции могут работать по-разному
-- Необходимо тщательное тестирование
-- Возможны изменения в API
+- [ ] **11.3** Подготовить план отката
+  - Сохранить возможность возврата к старой версии
+  - Создать скрипты миграции данных обратно
+  - Подготовить процедуры восстановления
 
-### Откат
-- Сохранить оригинальные файлы
-- Создать ветку для миграции
-- Подготовить план отката при проблемах
+## Анализ подхода к сериализации
+
+### Преимущества использования `polars.write_ipc()`
+
+1. **Нативная поддержка Polars**: 
+   - Оптимизированная сериализация без потери метаданных
+   - Сохранение типов данных и схемы DataFrame
+   - Быстрая сериализация/десериализация
+
+2. **Формат Apache Arrow IPC**:
+   - Кроссплатформенная совместимость
+   - Эффективное сжатие данных
+   - Поддержка lazy evaluation
+   - Оптимизация для аналитических операций
+
+3. **Производительность**:
+   - Быстрее чем pickle для больших DataFrame
+   - Меньше памяти при сериализации
+   - Поддержка streaming для больших данных
+
+4. **Совместимость с ограничениями Redis**:
+   - Возможность разбивки на части с сохранением структуры
+   - Эффективное сжатие (до 80-90% от исходного размера с xz)
+   - Возможность частичной загрузки данных
+   - Критично для соблюдения лимита 512 МБ на ключ
+
+### Сравнение методов сериализации
+
+| Метод | Размер | Скорость | Совместимость | Метаданные |
+|-------|--------|----------|---------------|------------|
+| `write_ipc()` | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| `to_parquet()` | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
+| `pickle` | ⭐⭐ | ⭐⭐⭐ | ⭐⭐ | ⭐⭐⭐ |
+| `to_json()` | ⭐ | ⭐⭐ | ⭐⭐⭐ | ⭐⭐ |
+
+### Обоснование выбора xz для сжатия
+
+**Почему xz лучше gzip для финансовых данных:**
+
+1. **Критичность размера данных**:
+   - До 15 миллионов записей на символ
+   - Ограничение Redis: 512 МБ на ключ
+   - xz сжимает на 20-30% лучше gzip
+
+2. **Паттерн использования**:
+   - Данные обновляются каждые 15 секунд (не в реальном времени)
+   - UI загружает данные периодически, а не постоянно
+   - Можно позволить больше времени на сжатие ради экономии места
+
+3. **Экономия ресурсов Redis**:
+   - Лучшее сжатие = меньше ключей Redis
+   - Меньше сетевого трафика
+   - Более эффективное использование памяти
+
+4. **Производительность в контексте**:
+   - Сжатие происходит в фоне (DataProcessingDaemon)
+   - Разжатие происходит при загрузке в UI (редко)
+   - Экономия места критичнее скорости сжатия
+
+## Технические детали
+
+### Структура данных в Redis
+
+```python
+# Основные данные о сделках (сжатые IPC данные)
+trades:{symbol_id}:data -> {
+    "dataframe_ipc": "compressed_ipc_bytes",  # xz(polars.write_ipc())
+    "metadata": {
+        "min_trade_id": int,
+        "max_trade_id": int,
+        "min_price": float,
+        "max_price": float,
+        "last_updated": timestamp,
+        "compression": "xz",
+        "schema_version": "1.0"
+    }
+}
+
+# Полосы Боллинджера (каждая серия как отдельный IPC)
+trades:{symbol_id}:bollinger -> {
+    "upper_band_ipc": "compressed_ipc_bytes",
+    "middle_band_ipc": "compressed_ipc_bytes", 
+    "lower_band_ipc": "compressed_ipc_bytes",
+    "metadata": {
+        "last_updated": timestamp,
+        "compression": "xz",
+        "compression_ratio": float
+    }
+}
+
+# Свечные данные по интервалам
+trades:{symbol_id}:candles:{interval} -> {
+    "dataframe_ipc": "compressed_ipc_bytes",
+    "metadata": {
+        "interval": str,
+        "last_updated": timestamp,
+        "compression": "xz",
+        "compression_ratio": float
+    }
+}
+```
+
+### Утилиты сериализации
+
+```python
+import polars as pl
+import io
+import lzma  # xz compression
+import lz4.frame
+
+def serialize_dataframe(df: pl.DataFrame, compression: str = "xz") -> bytes:
+    """Сериализация Polars DataFrame в сжатые IPC данные"""
+    # Сериализация в IPC формат
+    buffer = io.BytesIO()
+    df.write_ipc(buffer)
+    ipc_data = buffer.getvalue()
+    
+    # Применение сжатия
+    if compression == "xz":
+        # xz обеспечивает лучшее сжатие для финансовых данных
+        compressed_data = lzma.compress(ipc_data, preset=6)  # баланс скорость/сжатие
+    elif compression == "lz4":
+        # lz4 для быстрого сжатия когда размер не критичен
+        compressed_data = lz4.frame.compress(ipc_data)
+    elif compression == "none":
+        compressed_data = ipc_data
+    else:
+        raise ValueError(f"Unsupported compression: {compression}")
+    
+    return compressed_data
+
+def deserialize_dataframe(data: bytes, compression: str = "xz") -> pl.DataFrame:
+    """Десериализация сжатых IPC данных в Polars DataFrame"""
+    # Распаковка сжатия
+    if compression == "xz":
+        ipc_data = lzma.decompress(data)
+    elif compression == "lz4":
+        ipc_data = lz4.frame.decompress(data)
+    elif compression == "none":
+        ipc_data = data
+    else:
+        raise ValueError(f"Unsupported compression: {compression}")
+    
+    # Десериализация из IPC формата
+    buffer = io.BytesIO(ipc_data)
+    return pl.read_ipc(buffer)
+
+def split_dataframe_by_size(df: pl.DataFrame, max_size_bytes: int = 400_000_000) -> list[pl.DataFrame]:
+    """Разбивка DataFrame на части по размеру в байтах"""
+    if len(serialize_dataframe(df)) <= max_size_bytes:
+        return [df]
+    
+    # Простая разбивка по количеству строк
+    total_rows = df.height
+    chunk_size = total_rows // 2  # Начинаем с половины
+    
+    chunks = []
+    start = 0
+    
+    while start < total_rows:
+        end = min(start + chunk_size, total_rows)
+        chunk = df.slice(start, end - start)
+        
+        # Если чанк все еще слишком большой, уменьшаем размер
+        while len(serialize_dataframe(chunk)) > max_size_bytes and chunk.height > 1:
+            chunk = chunk.slice(0, chunk.height // 2)
+        
+        chunks.append(chunk)
+        start += chunk.height
+    
+    return chunks
+
+def merge_dataframe_chunks(chunks: list[pl.DataFrame]) -> pl.DataFrame:
+    """Объединение частей DataFrame обратно в один"""
+    if not chunks:
+        return pl.DataFrame()
+    return pl.concat(chunks)
+```
+
+### Ограничения и решения
+
+1. **Ограничение Redis 512 МБ на строку**:
+   - Разбивка больших DataFrame на части
+   - Сжатие данных перед сохранением
+   - Использование множественных ключей
+
+2. **Производительность**:
+   - Асинхронная обработка данных
+   - Кэширование в памяти
+   - Оптимизация запросов к Redis
+
+3. **Надежность**:
+   - Обработка ошибок Redis
+   - Fallback на локальные данные
+   - Retry логика
 
 ## Ожидаемые результаты
 
-1. **Улучшение производительности** - особенно для больших датасетов
-2. **Лучшее использование памяти** - polars более эффективен
-3. **Современный API** - более выразительный и функциональный
-4. **Лучшая типизация** - polars лучше интегрируется с type hints
-
-## Риски и митигация
-
-1. **Изменение поведения** - тщательное тестирование
-2. **Совместимость с pyqtgraph** - проверка интеграции
-3. **Производительность GUI** - мониторинг отзывчивости
-4. **Сложность миграции** - пошаговый подход с тестированием
+1. **Улучшение архитектуры**: Четкое разделение между обработкой данных и UI
+2. **Повышение производительности**: Кэширование в Redis и оптимизация обработки
+3. **Масштабируемость**: Возможность обработки больших объемов данных
+4. **Надежность**: Устойчивость к ошибкам и возможность восстановления
 
 ## Временные рамки
 
-- **Этапы 1-3**: 1-2 дня (подготовка и базовые изменения)
-- **Этапы 4-8**: 3-5 дней (основная миграция)
-- **Этапы 9-10**: 2-3 дня (тестирование и оптимизация)
-- **Общее время**: 1-2 недели
+- **Этапы 1-3**: 2-3 дня (инфраструктура и получение данных)
+- **Этапы 4-5**: 4-5 дней (перенос методов обработки)
+- **Этапы 6-7**: 3-4 дня (адаптация UI и разбивка данных)
+- **Этапы 8-9**: 2-3 дня (оптимизация и мониторинг)
+- **Этапы 10-11**: 2-3 дня (тестирование и документация)
+- **Общее время**: 2-3 недели
+
+## Риски и митигация
+
+1. **Сложность разбивки данных**: Тщательное тестирование алгоритмов разбивки
+2. **Производительность Redis**: Мониторинг и оптимизация
+3. **Совместимость с UI**: Постепенная миграция с возможностью отката
+4. **Потеря данных**: Реализация надежных механизмов сохранения и восстановления
