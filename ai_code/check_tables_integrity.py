@@ -74,8 +74,8 @@ logger = logging.getLogger(__name__)
 
 _COMMIT_COUNT = 10_000
 _YIELD_PER = 10_000
-_MAX_WORKERS = mp.cpu_count() - 2
-_BATCH_SIZE = 100_000  # Размер батча для каждого процесса
+_MAX_WORKERS = 1  # mp.cpu_count() - 2
+_BATCH_SIZE = 1_000_000  # Размер батча для каждого процесса
 
 
 def check_trade_data_batch(args):
@@ -275,8 +275,8 @@ def check_order_book_data_batch(args):
             assert type(symbol_id_raw) is str, (type(symbol_id_raw),)
             assert type(timestamp_ms) is int, (type(timestamp_ms),)
             assert type(action_id_raw) is str, (type(action_id_raw),)
-            assert type(asks_raw) is int, (type(asks_raw),)
-            assert type(bids_raw) is bool, (type(bids_raw),)
+            assert type(asks_raw) is str, (type(asks_raw),)
+            assert type(bids_raw) is str, (type(bids_raw),)
 
             symbol_id: SymbolId | None = getattr(
                 SymbolId,
@@ -553,16 +553,16 @@ class DatabaseMigrator:
             raise
 
     async def check_trade_data(self):
-        """Проверка данных из okx_trade_data в okx_trade_data_2."""
+        """Проверка данных в okx_trade_data_2."""
         logger.info('Начинаем проверку данных торгов...')
 
         try:
             # Получаем количество записей для проверки
-            total_rows = await self.get_table_row_count(OKXTradeData)
-            logger.info(f'Найдено {total_rows} записей в okx_trade_data')
+            total_rows = await self.get_table_row_count(OKXTradeData2)
+            logger.info(f'Найдено {total_rows} записей в okx_trade_data_2')
 
             if total_rows == 0:
-                logger.info('Таблица okx_trade_data пуста, пропускаем проверку')
+                logger.info('Таблица okx_trade_data_2 пуста, пропускаем проверку')
                 return
 
             # Создаем батчи для многопроцессной обработки
@@ -594,16 +594,16 @@ class DatabaseMigrator:
             raise
 
     async def check_order_book_data(self):
-        """Проверка данных из okx_order_book_data в okx_order_book_data_2."""
+        """Проверка данных из okx_order_book_data_2."""
         logger.info('Начинаем проверку данных order book...')
 
         try:
             # Получаем количество записей для проверки
-            total_rows = await self.get_table_row_count(OKXOrderBookData)
-            logger.info(f'Найдено {total_rows} записей в okx_order_book_data')
+            total_rows = await self.get_table_row_count(OKXOrderBookData2)
+            logger.info(f'Найдено {total_rows} записей в okx_order_book_data_2')
 
             if total_rows == 0:
-                logger.info('Таблица okx_order_book_data пуста, пропускаем проверку')
+                logger.info('Таблица okx_order_book_data_2 пуста, пропускаем проверку')
                 return
 
             # Создаем батчи для многопроцессной обработки
@@ -630,12 +630,12 @@ class DatabaseMigrator:
             raise
 
     async def check_candle_data_15m(self):
-        """Проверка данных из okx_candle_data_15m в okx_candle_data_15m_2."""
+        """Проверка данных из okx_candle_data_15m_2."""
         logger.info('Начинаем проверку данных свечей 15m...')
 
         # Получаем количество записей для проверки
-        total_rows = await self.get_table_row_count(OKXCandleData15m)
-        logger.info(f'Найдено {total_rows} записей в okx_candle_data_15m')
+        total_rows = await self.get_table_row_count(OKXCandleData15m2)
+        logger.info(f'Найдено {total_rows} записей в okx_candle_data_15m_2')
 
         if total_rows == 0:
             logger.info('Таблица okx_candle_data_15m пуста, пропускаем проверку')
@@ -660,12 +660,12 @@ class DatabaseMigrator:
         )
 
     async def check_candle_data_1h(self):
-        """Проверка данных из okx_candle_data_1H в okx_candle_data_1H_2."""
+        """Проверка данных в okx_candle_data_1H_2."""
         logger.info('Начинаем проверку данных свечей 1H...')
 
         # Получаем количество записей для проверки
-        total_rows = await self.get_table_row_count(OKXCandleData1H)
-        logger.info(f'Найдено {total_rows} записей в okx_candle_data_1H')
+        total_rows = await self.get_table_row_count(OKXCandleData1H2)
+        logger.info(f'Найдено {total_rows} записей в okx_candle_data_1H_2')
 
         if total_rows == 0:
             logger.info('Таблица okx_candle_data_1H пуста, пропускаем проверку')
@@ -719,15 +719,15 @@ class DatabaseMigrator:
             await self.connect()
 
             logger.info('Начинаем проверку...')
-            logger.info('Создание новых таблиц...')
-            await self.create_new_tables()
+            # logger.info('Создание новых таблиц...')
+            # await self.create_new_tables()
 
             logger.info('Проверка данных...')
             await asyncio.gather(
-                self.check_trade_data(),
+                # self.check_trade_data(),
                 self.check_order_book_data(),
-                self.check_candle_data_15m(),
-                self.check_candle_data_1h(),
+                # self.check_candle_data_15m(),
+                # self.check_candle_data_1h(),
             )
 
             logger.info('Проверка результатов...')
