@@ -6,6 +6,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from enumerations import (
+    SymbolId,
+)
+
 
 class DataFrameMetadata(BaseModel):
     """Метаданные для DataFrame в Redis."""
@@ -25,20 +29,20 @@ class TradesDataMetadata(DataFrameMetadata):
     max_trade_id: int = Field(..., description='Максимальный ID сделки')
     min_price: float = Field(..., description='Минимальная цена')
     max_price: float = Field(..., description='Максимальная цена')
-    symbol_id: str = Field(..., description='ID символа')
+    symbol_id: SymbolId = Field(..., description='ID символа')
 
 
 class BollingerMetadata(DataFrameMetadata):
     """Метаданные для полос Боллинджера."""
 
-    symbol_id: str = Field(..., description='ID символа')
+    symbol_id: SymbolId = Field(..., description='ID символа')
     timeperiod: int = Field(default=20, description='Период для расчета')
 
 
 class CandlesMetadata(DataFrameMetadata):
     """Метаданные для свечных данных."""
 
-    symbol_id: str = Field(..., description='ID символа')
+    symbol_id: SymbolId = Field(..., description='ID символа')
     interval: str = Field(..., description='Интервал свечей')
     min_trade_id: int = Field(..., description='Минимальный ID сделки')
     max_trade_id: int = Field(..., description='Максимальный ID сделки')
@@ -47,7 +51,7 @@ class CandlesMetadata(DataFrameMetadata):
 class RSIMetadata(DataFrameMetadata):
     """Метаданные для RSI данных."""
 
-    symbol_id: str = Field(..., description='ID символа')
+    symbol_id: SymbolId = Field(..., description='ID символа')
     interval: str = Field(..., description='Интервал для расчета RSI')
     timeperiod: int = Field(default=14, description='Период для расчета RSI')
 
@@ -55,7 +59,7 @@ class RSIMetadata(DataFrameMetadata):
 class SmoothedMetadata(DataFrameMetadata):
     """Метаданные для сглаженных данных."""
 
-    symbol_id: str = Field(..., description='ID символа')
+    symbol_id: SymbolId = Field(..., description='ID символа')
     level: str = Field(..., description='Уровень сглаживания')
     min_trade_id: int = Field(..., description='Минимальный ID сделки')
     max_trade_id: int = Field(..., description='Максимальный ID сделки')
@@ -64,7 +68,7 @@ class SmoothedMetadata(DataFrameMetadata):
 class ExtremeLinesMetadata(DataFrameMetadata):
     """Метаданные для экстремальных линий."""
 
-    symbol_id: str = Field(..., description='ID символа')
+    symbol_id: SymbolId = Field(..., description='ID символа')
     width: int = Field(..., description='Ширина массива')
     height: int = Field(..., description='Высота массива')
     scale: float = Field(..., description='Масштаб')
@@ -75,7 +79,7 @@ class ExtremeLinesMetadata(DataFrameMetadata):
 class OrderBookVolumesMetadata(DataFrameMetadata):
     """Метаданные для объемов стакана."""
 
-    symbol_id: str = Field(..., description='ID символа')
+    symbol_id: SymbolId = Field(..., description='ID символа')
     width: int = Field(..., description='Ширина массива')
     height: int = Field(..., description='Высота массива')
     scale: float = Field(..., description='Масштаб')
@@ -86,14 +90,14 @@ class OrderBookVolumesMetadata(DataFrameMetadata):
 class VelocityMetadata(DataFrameMetadata):
     """Метаданные для данных скорости."""
 
-    symbol_id: str = Field(..., description='ID символа')
+    symbol_id: SymbolId = Field(..., description='ID символа')
     interval: str = Field(..., description='Интервал для расчета скорости')
 
 
 class SymbolMetadata(BaseModel):
     """Общие метаданные символа."""
 
-    symbol_id: str = Field(..., description='ID символа')
+    symbol_id: SymbolId = Field(..., description='ID символа')
     symbol_name: str = Field(..., description='Название символа')
     last_updated: datetime = Field(..., description='Время последнего обновления')
     has_trades_data: bool = Field(default=False, description='Есть ли данные о сделках')
@@ -113,7 +117,7 @@ class SymbolMetadata(BaseModel):
 class ProcessingStatus(BaseModel):
     """Статус обработки данных."""
 
-    symbol_id: str = Field(..., description='ID символа')
+    symbol_id: SymbolId = Field(..., description='ID символа')
     status: str = Field(..., description='Статус обработки')
     last_processed: datetime | None = Field(
         None, description='Время последней обработки'

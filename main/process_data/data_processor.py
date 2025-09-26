@@ -15,6 +15,9 @@ from polars import DataFrame
 
 from constants.common import CommonConstants
 from constants.plot import PlotConstants
+from enumerations import (
+    SymbolId,
+)
 from main.process_data.performance_optimizer import g_performance_optimizer
 from main.process_data.redis_service import g_redis_data_service
 
@@ -29,12 +32,12 @@ class DataProcessor:
 
     async def process_trades_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         trades_df: DataFrame,
     ) -> None:
         """Обработка данных о сделках и создание всех производных данных."""
         logger.info(
-            f'Processing trades data for {symbol_id}: {trades_df.height} records'
+            f'Processing trades data for {symbol_id.name}: {trades_df.height} records'
         )
 
         # Обработка полос Боллинджера
@@ -80,12 +83,12 @@ class DataProcessor:
         )
 
         logger.info(
-            f'Completed processing trades data for {symbol_id}',
+            f'Completed processing trades data for {symbol_id.name}',
         )
 
     async def _process_bollinger_bands(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         trades_df: DataFrame,
     ) -> None:
         """Обработка полос Боллинджера."""
@@ -117,7 +120,7 @@ class DataProcessor:
 
     async def _process_candles_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         trades_df: DataFrame,
     ) -> None:
         """Обработка свечных данных по интервалам."""
@@ -133,7 +136,7 @@ class DataProcessor:
 
     async def _process_candles_for_interval(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         trades_df: DataFrame,
         interval_name: str,
     ) -> None:
@@ -147,7 +150,8 @@ class DataProcessor:
 
         # Получаем существующие данные из Redis
         existing_candles = await self.redis_service.load_candles_data(
-            symbol_id, interval_name
+            symbol_id,
+            interval_name,
         )
         min_trade_id = 0
 
@@ -247,14 +251,14 @@ class DataProcessor:
 
     async def _process_rsi_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         trades_df: DataFrame,
     ) -> None:
         """Обработка RSI данных."""
         with Timer() as timer:
             # Получаем свечные данные для расчета RSI с кэшированием
             candles_df = await g_performance_optimizer.get_cached_data(
-                key=f'candles:{symbol_id}:1m',
+                key=f'candles:{symbol_id.value}:1m',
                 loader_func=self.redis_service.load_candles_data,
                 symbol_id=symbol_id,
                 interval='1m',
@@ -282,7 +286,7 @@ class DataProcessor:
 
     async def _process_smoothed_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         trades_df: DataFrame,
     ) -> None:
         """Обработка сглаженных данных."""
@@ -292,7 +296,8 @@ class DataProcessor:
             for level in PlotConstants.TradesSmoothingLevels:
                 if level != 'Raw (0)':
                     existing_data = await self.redis_service.load_smoothed_data(
-                        symbol_id, level
+                        symbol_id,
+                        level,
                     )
                     if existing_data is not None:
                         smoothed_data[level] = existing_data
@@ -341,7 +346,7 @@ class DataProcessor:
 
     async def _process_extreme_lines(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         trades_df: DataFrame,
     ) -> None:
         """Обработка экстремальных линий."""
@@ -387,7 +392,7 @@ class DataProcessor:
 
     async def _process_order_book_volumes(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         trades_df: DataFrame,
     ) -> None:
         """Обработка объемов стакана."""
@@ -436,13 +441,16 @@ class DataProcessor:
 
     async def _process_velocity_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         trades_df: DataFrame,
     ) -> None:
         """Обработка данных скорости."""
         with Timer() as timer:
             # Получаем свечные данные для расчета скорости
-            candles_df = await self.redis_service.load_candles_data(symbol_id, '1m')
+            candles_df = await self.redis_service.load_candles_data(
+                symbol_id,
+                '1m',
+            )
 
             if candles_df is not None and candles_df.height > 0:
                 velocity_series = candles_df.get_column('trades_count')

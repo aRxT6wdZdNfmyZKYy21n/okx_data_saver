@@ -28,47 +28,47 @@ METADATA_TTL: Final[int] = 604800
 SCHEMA_VERSION: Final[str] = '1.0'
 
 
-def get_trades_data_key(symbol_id: str) -> str:
+def get_trades_data_key(symbol_id: SymbolId) -> str:
     """Получение ключа для основных данных о сделках."""
     return f'{TRADES_PREFIX}:{symbol_id}:data'
 
 
-def get_bollinger_key(symbol_id: str) -> str:
+def get_bollinger_key(symbol_id: SymbolId) -> str:
     """Получение ключа для полос Боллинджера."""
     return f'{TRADES_PREFIX}:{symbol_id}:{BOLLINGER_PREFIX}'
 
 
-def get_candles_key(symbol_id: str, interval: str) -> str:
+def get_candles_key(symbol_id: SymbolId, interval: str) -> str:
     """Получение ключа для свечных данных по интервалу."""
     return f'{TRADES_PREFIX}:{symbol_id}:{CANDLES_PREFIX}:{interval}'
 
 
-def get_rsi_key(symbol_id: str) -> str:
+def get_rsi_key(symbol_id: SymbolId) -> str:
     """Получение ключа для RSI данных."""
     return f'{TRADES_PREFIX}:{symbol_id}:{RSI_PREFIX}'
 
 
-def get_smoothed_key(symbol_id: str, level: str) -> str:
+def get_smoothed_key(symbol_id: SymbolId, level: str) -> str:
     """Получение ключа для сглаженных данных по уровню."""
     return f'{TRADES_PREFIX}:{symbol_id}:{SMOOTHED_PREFIX}:{level}'
 
 
-def get_extreme_lines_key(symbol_id: str) -> str:
+def get_extreme_lines_key(symbol_id: SymbolId) -> str:
     """Получение ключа для экстремальных линий."""
     return f'{TRADES_PREFIX}:{symbol_id}:{EXTREME_LINES_PREFIX}'
 
 
-def get_order_book_volumes_key(symbol_id: str) -> str:
+def get_order_book_volumes_key(symbol_id: SymbolId) -> str:
     """Получение ключа для объемов стакана."""
     return f'{TRADES_PREFIX}:{symbol_id}:{ORDER_BOOK_VOLUMES_PREFIX}'
 
 
-def get_velocity_key(symbol_id: str) -> str:
+def get_velocity_key(symbol_id: SymbolId) -> str:
     """Получение ключа для данных скорости."""
     return f'{TRADES_PREFIX}:{symbol_id}:{VELOCITY_PREFIX}'
 
 
-def get_metadata_key(symbol_id: str) -> str:
+def get_metadata_key(symbol_id: SymbolId) -> str:
     """Получение ключа для метаданных символа."""
     return f'{TRADES_PREFIX}:{symbol_id}:{METADATA_PREFIX}'
 

@@ -115,8 +115,9 @@ asyncio.run(main())
 ```
 
 ### Загрузка данных в UI
+
 ```python
-from main.show_plot.redis_processor import g_redis_processor
+from main.show_plot.processor import g_redis_processor
 
 # Загрузка всех данных для символа
 await g_redis_processor.load_all_data_for_symbol('BTC-USDT')

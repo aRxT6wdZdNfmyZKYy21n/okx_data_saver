@@ -7,6 +7,9 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from enumerations import (
+    SymbolId,
+)
 from enumerations.compression import CompressionAlgorithm
 from main.process_data.redis_service import g_redis_data_service
 from utils.redis import g_redis_manager
@@ -202,31 +205,45 @@ class PerformanceOptimizer:
             logger.error(f'Error cleaning up old data: {e}')
             return 0
 
-    async def optimize_data_compression(self, symbol_id: str):
+    async def optimize_data_compression(
+        self,
+        symbol_id: SymbolId,
+    ):
         """Оптимизация сжатия данных для символа."""
         try:
             # Получаем данные о сделках
-            trades_data = await self.redis_service.load_trades_data(symbol_id)
+            trades_data = await self.redis_service.load_trades_data(
+                symbol_id,
+            )
 
             if trades_data is None:
-                logger.warning(f'No trades data found for {symbol_id}')
+                logger.warning(f'No trades data found for {symbol_id.name}')
                 return False
 
             # Анализируем размер данных
             original_size = len(
-                serialize_dataframe(trades_data, compression=CompressionAlgorithm.NONE)
+                serialize_dataframe(
+                    trades_data,
+                    compression=CompressionAlgorithm.NONE,
+                )
             )
             xz_size = len(
-                serialize_dataframe(trades_data, compression=CompressionAlgorithm.XZ)
+                serialize_dataframe(
+                    trades_data,
+                    compression=CompressionAlgorithm.XZ,
+                )
             )
             lz4_size = len(
-                serialize_dataframe(trades_data, compression=CompressionAlgorithm.LZ4)
+                serialize_dataframe(
+                    trades_data,
+                    compression=CompressionAlgorithm.LZ4,
+                )
             )
 
             compression_ratio_xz = xz_size / original_size if original_size > 0 else 0
             compression_ratio_lz4 = lz4_size / original_size if original_size > 0 else 0
 
-            logger.info(f'Compression analysis for {symbol_id}:')
+            logger.info(f'Compression analysis for {symbol_id.name}:')
             logger.info(f'  Original: {original_size:,} bytes')
             logger.info(f'  XZ: {xz_size:,} bytes (ratio: {compression_ratio_xz:.3f})')
             logger.info(
@@ -235,14 +252,14 @@ class PerformanceOptimizer:
 
             # Выбираем лучший алгоритм сжатия
             if compression_ratio_xz < compression_ratio_lz4:
-                logger.info(f'XZ compression is better for {symbol_id}')
+                logger.info(f'XZ compression is better for {symbol_id.name}')
                 return CompressionAlgorithm.XZ
             else:
-                logger.info(f'LZ4 compression is better for {symbol_id}')
+                logger.info(f'LZ4 compression is better for {symbol_id.name}')
                 return CompressionAlgorithm.LZ4
 
         except Exception as e:
-            logger.error(f'Error optimizing compression for {symbol_id}: {e}')
+            logger.error(f'Error optimizing compression for {symbol_id.name}: {e}')
             return None
 
 

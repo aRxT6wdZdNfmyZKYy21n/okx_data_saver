@@ -22,7 +22,10 @@ from constants.redis import (
     get_trades_data_key,
     get_velocity_key,
 )
-from enumerations import CompressionAlgorithm
+from enumerations import (
+    CompressionAlgorithm,
+    SymbolId,
+)
 from main.process_data.schemas import (
     BollingerMetadata,
     CandlesMetadata,
@@ -48,7 +51,7 @@ class RedisDataService:
 
     async def save_trades_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         trades_df: polars.DataFrame,
         min_trade_id: int,
         max_trade_id: int,
@@ -56,7 +59,9 @@ class RedisDataService:
         max_price: float,
     ) -> TradesDataMetadata:
         """Сохранение данных о сделках."""
-        key = get_trades_data_key(symbol_id)
+        key = get_trades_data_key(
+            symbol_id,
+        )
 
         # Сохраняем DataFrame
         metadata = await self.redis.save_dataframe(
@@ -84,27 +89,32 @@ class RedisDataService:
         )
 
         logger.info(
-            f'Saved trades data for {symbol_id}: {trades_metadata.total_size} bytes'
+            f'Saved trades data for {symbol_id.name}: {trades_metadata.total_size} bytes'
         )
         return trades_metadata
 
     async def load_trades_data(
-        self, symbol_id: str
+        self,
+        symbol_id: SymbolId,
     ) -> Any | None:  # Optional[polars.DataFrame]
         """Загрузка данных о сделках."""
-        key = get_trades_data_key(symbol_id)
+        key = get_trades_data_key(
+            symbol_id,
+        )
         return await self.redis.load_dataframe(key)
 
     async def save_bollinger_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         upper_band: Any,  # polars.Series
         middle_band: Any,  # polars.Series
         lower_band: Any,  # polars.Series
         timeperiod: int = 20,
     ) -> BollingerMetadata:
         """Сохранение полос Боллинджера."""
-        key = get_bollinger_key(symbol_id)
+        key = get_bollinger_key(
+            symbol_id,
+        )
 
         # Создаем DataFrame из серий
         import polars
@@ -140,12 +150,13 @@ class RedisDataService:
         )
 
         logger.info(
-            f'Saved bollinger data for {symbol_id}: {bollinger_metadata.total_size} bytes'
+            f'Saved bollinger data for {symbol_id.name}: {bollinger_metadata.total_size} bytes'
         )
         return bollinger_metadata
 
     async def load_bollinger_data(
-        self, symbol_id: str
+        self,
+        symbol_id: SymbolId,
     ) -> Any | None:  # Optional[polars.DataFrame]
         """Загрузка полос Боллинджера."""
         key = get_bollinger_key(symbol_id)
@@ -153,14 +164,17 @@ class RedisDataService:
 
     async def save_candles_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         interval: str,
         candles_df: Any,  # polars.DataFrame
         min_trade_id: int,
         max_trade_id: int,
     ) -> CandlesMetadata:
         """Сохранение свечных данных."""
-        key = get_candles_key(symbol_id, interval)
+        key = get_candles_key(
+            symbol_id,
+            interval,
+        )
 
         # Сохраняем DataFrame
         metadata = await self.redis.save_dataframe(
@@ -187,27 +201,34 @@ class RedisDataService:
         )
 
         logger.info(
-            f'Saved candles data for {symbol_id}:{interval}: {candles_metadata.total_size} bytes',
+            f'Saved candles data for {symbol_id.name}:{interval}: {candles_metadata.total_size} bytes',
         )
 
         return candles_metadata
 
     async def load_candles_data(
-        self, symbol_id: str, interval: str
+        self,
+        symbol_id: SymbolId,
+        interval: str,
     ) -> Any | None:  # Optional[polars.DataFrame]
         """Загрузка свечных данных."""
-        key = get_candles_key(symbol_id, interval)
+        key = get_candles_key(
+            symbol_id,
+            interval,
+        )
         return await self.redis.load_dataframe(key)
 
     async def save_rsi_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         interval: str,
         rsi_series: Any,  # polars.Series
         timeperiod: int = 14,
     ) -> RSIMetadata:
         """Сохранение RSI данных."""
-        key = get_rsi_key(symbol_id)
+        key = get_rsi_key(
+            symbol_id,
+        )
 
         # Создаем DataFrame из серии
         import polars
@@ -238,21 +259,24 @@ class RedisDataService:
         )
 
         logger.info(
-            f'Saved RSI data for {symbol_id}:{interval}: {rsi_metadata.total_size} bytes'
+            f'Saved RSI data for {symbol_id.name}:{interval}: {rsi_metadata.total_size} bytes'
         )
 
         return rsi_metadata
 
     async def load_rsi_data(
-        self, symbol_id: str
+        self,
+        symbol_id: SymbolId,
     ) -> Any | None:  # Optional[polars.DataFrame]
         """Загрузка RSI данных."""
-        key = get_rsi_key(symbol_id)
+        key = get_rsi_key(
+            symbol_id,
+        )
         return await self.redis.load_dataframe(key)
 
     async def save_smoothed_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         level: str,
         smoothed_df: Any,  # polars.DataFrame
         min_trade_id: int,
@@ -286,12 +310,14 @@ class RedisDataService:
         )
 
         logger.info(
-            f'Saved smoothed data for {symbol_id}:{level}: {smoothed_metadata.total_size} bytes'
+            f'Saved smoothed data for {symbol_id.name}:{level}: {smoothed_metadata.total_size} bytes'
         )
         return smoothed_metadata
 
     async def load_smoothed_data(
-        self, symbol_id: str, level: str
+        self,
+        symbol_id: SymbolId,
+        level: str,
     ) -> Any | None:  # Optional[polars.DataFrame]
         """Загрузка сглаженных данных."""
         key = get_smoothed_key(symbol_id, level)
@@ -299,7 +325,7 @@ class RedisDataService:
 
     async def save_extreme_lines_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         extreme_lines_array: Any,  # numpy.ndarray
         width: int,
         height: int,
@@ -308,7 +334,9 @@ class RedisDataService:
         min_price: float,
     ) -> ExtremeLinesMetadata:
         """Сохранение экстремальных линий."""
-        key = get_extreme_lines_key(symbol_id)
+        key = get_extreme_lines_key(
+            symbol_id,
+        )
 
         # Конвертируем numpy array в DataFrame
         import polars
@@ -344,15 +372,19 @@ class RedisDataService:
         )
 
         logger.info(
-            f'Saved extreme lines data for {symbol_id}: {extreme_lines_metadata.total_size} bytes'
+            f'Saved extreme lines data for {symbol_id.name}: {extreme_lines_metadata.total_size} bytes'
         )
         return extreme_lines_metadata
 
     async def load_extreme_lines_data(
-        self, symbol_id: str
+        self,
+        symbol_id: SymbolId,
     ) -> Any | None:  # Optional[numpy.ndarray]
         """Загрузка экстремальных линий."""
-        key = get_extreme_lines_key(symbol_id)
+        key = get_extreme_lines_key(
+            symbol_id,
+        )
+
         df = await self.redis.load_dataframe(key)
 
         if df is None:
@@ -366,7 +398,7 @@ class RedisDataService:
 
     async def save_order_book_volumes_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         asks_array: Any,  # numpy.ndarray
         bids_array: Any,  # numpy.ndarray
         width: int,
@@ -376,7 +408,9 @@ class RedisDataService:
         min_price: float,
     ) -> OrderBookVolumesMetadata:
         """Сохранение объемов стакана."""
-        key = get_order_book_volumes_key(symbol_id)
+        key = get_order_book_volumes_key(
+            symbol_id,
+        )
 
         # Конвертируем numpy arrays в DataFrame
         import polars
@@ -419,17 +453,20 @@ class RedisDataService:
         )
 
         logger.info(
-            f'Saved order book volumes data for {symbol_id}: {order_book_metadata.total_size} bytes'
+            f'Saved order book volumes data for {symbol_id.name}: {order_book_metadata.total_size} bytes'
         )
         return order_book_metadata
 
     async def load_order_book_volumes_data(
-        self, symbol_id: str
+        self,
+        symbol_id: SymbolId,
     ) -> tuple[
         Any | None, Any | None
     ]:  # tuple[Optional[numpy.ndarray], Optional[numpy.ndarray]]
         """Загрузка объемов стакана."""
-        key = get_order_book_volumes_key(symbol_id)
+        key = get_order_book_volumes_key(
+            symbol_id,
+        )
         df = await self.redis.load_dataframe(key)
 
         if df is None:
@@ -445,12 +482,14 @@ class RedisDataService:
 
     async def save_velocity_data(
         self,
-        symbol_id: str,
+        symbol_id: SymbolId,
         interval: str,
-        velocity_series: Any,  # polars.Series
+        velocity_series: polars.Series,
     ) -> VelocityMetadata:
         """Сохранение данных скорости."""
-        key = get_velocity_key(symbol_id)
+        key = get_velocity_key(
+            symbol_id,
+        )
 
         # Создаем DataFrame из серии
         import polars
@@ -480,15 +519,18 @@ class RedisDataService:
         )
 
         logger.info(
-            f'Saved velocity data for {symbol_id}:{interval}: {velocity_metadata.total_size} bytes'
+            f'Saved velocity data for {symbol_id.name}:{interval}: {velocity_metadata.total_size} bytes'
         )
         return velocity_metadata
 
     async def load_velocity_data(
-        self, symbol_id: str
+        self,
+        symbol_id: SymbolId,
     ) -> Any | None:  # Optional[polars.DataFrame]
         """Загрузка данных скорости."""
-        key = get_velocity_key(symbol_id)
+        key = get_velocity_key(
+            symbol_id,
+        )
         return await self.redis.load_dataframe(key)
 
     async def save_available_symbols(self, symbol_names: list[str]) -> None:
@@ -525,17 +567,25 @@ class RedisDataService:
 
         logger.info(f'Saved symbol metadata for {symbol_metadata.symbol_id}')
 
-    async def load_symbol_metadata(self, symbol_id: str) -> SymbolMetadata | None:
+    async def load_symbol_metadata(
+        self,
+        symbol_id: SymbolId,
+    ) -> SymbolMetadata | None:
         """Загрузка метаданных символа."""
-        key = get_metadata_key(symbol_id)
+        key = get_metadata_key(
+            symbol_id,
+        )
         data = await self.redis.__redis.get(key)
         if data:
             return SymbolMetadata.model_validate_json(data)
         return None
 
-    async def save_processing_status(self, status: ProcessingStatus) -> None:
+    async def save_processing_status(
+        self,
+        status: ProcessingStatus,
+    ) -> None:
         """Сохранение статуса обработки."""
-        key = f'processing_status:{status.symbol_id}'
+        key = f'processing_status:{status.symbol_id.value}'
 
         await self.redis.set(
             key,
@@ -543,12 +593,15 @@ class RedisDataService:
         )
 
         logger.debug(
-            f'Saved processing status for {status.symbol_id}: {status.status}',
+            f'Saved processing status for {status.symbol_id.name}: {status.status}',
         )
 
-    async def load_processing_status(self, symbol_id: str) -> ProcessingStatus | None:
+    async def load_processing_status(
+        self,
+        symbol_id: SymbolId,
+    ) -> ProcessingStatus | None:
         """Загрузка статуса обработки."""
-        key = f'processing_status:{symbol_id}'
+        key = f'processing_status:{symbol_id.value}'
         data = await self.redis.__redis.get(key)
         if data:
             return ProcessingStatus.model_validate_json(data)
