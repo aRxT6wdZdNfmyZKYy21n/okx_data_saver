@@ -1,8 +1,23 @@
+"""
+Перечисления для системы обработки данных.
+"""
+
 from enum import (
     IntEnum,
     StrEnum,
     auto,
 )
+
+from enumerations.compression import (
+    CompressionAlgorithm,
+)
+
+__all__ = [
+    'CompressionAlgorithm',
+    'OKXOrderBookActionId',
+    'SymbolId',
+    'TradingDirection',
+]
 
 
 class OKXOrderBookActionId(IntEnum):

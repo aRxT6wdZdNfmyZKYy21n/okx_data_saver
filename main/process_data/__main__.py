@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import traceback
 from datetime import UTC, datetime
 
 import polars
@@ -14,6 +13,8 @@ from constants.symbol import (
 from enumerations import (
     SymbolId,
 )
+from main.process_data.data_processor import g_data_processor
+from main.process_data.monitoring import g_error_handler, g_system_monitor
 from main.process_data.redis_service import g_redis_data_service
 from main.process_data.schemas import ProcessingStatus, SymbolMetadata
 from main.save_order_books.schemas import (
@@ -59,12 +60,21 @@ class DataProcessingDaemon:
     ) -> None:
         while True:
             try:
+                # Запускаем проверки здоровья системы
+                health_checks = await g_system_monitor.run_health_checks()
+
+                if not health_checks.get('redis', False):
+                    logger.error('Redis health check failed, skipping update')
+                    await asyncio.sleep(60)  # Пауза при проблемах с Redis
+                    continue
+
                 await self.__update()
             except Exception as exception:
-                logger.error(
-                    'Could not update'
-                    ': handled exception'
-                    f': {"".join(traceback.format_exception(exception))}'
+                # Обрабатываем ошибку через систему мониторинга
+                g_error_handler.handle_error(
+                    operation='update_loop',
+                    error=exception,
+                    context={'loop_iteration': True},
                 )
 
             await asyncio.sleep(
@@ -74,6 +84,9 @@ class DataProcessingDaemon:
     async def __update(
         self,
     ) -> None:
+        # Обновляем список доступных символов
+        await self.__update_current_available_symbol_name_set()
+
         async with asyncio.TaskGroup() as task_group:
             for symbol_name in _SYMBOL_NAMES:
                 task_group.create_task(
@@ -83,14 +96,16 @@ class DataProcessingDaemon:
                 )
 
     async def __update_symbol(self, symbol_name: str) -> None:
+        """Обновление данных для конкретного символа."""
         symbol_id = SymbolConstants.IdByName[symbol_name]
+        start_time = datetime.now(UTC)
 
         # Обновляем статус обработки
         await self.__redis_data_service.save_processing_status(
             ProcessingStatus(
                 symbol_id=symbol_id.name,
                 status='processing',
-                last_processed=datetime.now(UTC),
+                last_processed=start_time,
                 error_message=None,
                 processing_time_seconds=None,
             )
@@ -104,49 +119,40 @@ class DataProcessingDaemon:
             )
 
             if trades_df is not None and trades_df.height > 0:
-                # Сохраняем данные о сделках
-                price_series = trades_df.get_column('price')
-                min_price = float(price_series.min())
-                max_price = float(price_series.max())
-                min_trade_id = int(trades_df.get_column('trade_id').min())
-                max_trade_id = int(trades_df.get_column('trade_id').max())
-
-                await self.__redis_data_service.save_trades_data(
-                    symbol_id=symbol_id.name,
-                    trades_df=trades_df,
-                    min_trade_id=min_trade_id,
-                    max_trade_id=max_trade_id,
-                    min_price=min_price,
-                    max_price=max_price,
-                )
-
-                # Обновляем метаданные символа
-                symbol_metadata = SymbolMetadata(
-                    symbol_id=symbol_id.name,
+                # Обрабатываем все данные символа
+                await self.__process_symbol_data(
+                    symbol_id=symbol_id,
                     symbol_name=symbol_name,
-                    last_updated=datetime.now(UTC),
-                    has_trades_data=True,
+                    trades_df=trades_df,
                 )
-                await self.__redis_data_service.save_symbol_metadata(symbol_metadata,)
 
                 logger.info(
                     f'Processed trades data for {symbol_name}: {trades_df.height} records',
                 )
 
             # Обновляем статус обработки
+            processing_time = (datetime.now(UTC) - start_time).total_seconds()
             await self.__redis_data_service.save_processing_status(
                 ProcessingStatus(
                     symbol_id=symbol_id.name,
                     status='completed',
                     last_processed=datetime.now(UTC),
                     error_message=None,
-                    processing_time_seconds=None,
+                    processing_time_seconds=processing_time,
                 )
             )
         except Exception as exception:
-            logger.error(
-                f'Error processing {symbol_name}'
-                f': {"".join(traceback.format_exception(exception))}',
+            processing_time = (datetime.now(UTC) - start_time).total_seconds()
+
+            # Обрабатываем ошибку через систему мониторинга
+            g_error_handler.handle_error(
+                operation=f'update_symbol_{symbol_name}',
+                error=exception,
+                context={
+                    'symbol_id': symbol_id.name,
+                    'symbol_name': symbol_name,
+                    'processing_time': processing_time,
+                },
             )
 
             await self.__redis_data_service.save_processing_status(
@@ -155,9 +161,54 @@ class DataProcessingDaemon:
                     status='error',
                     last_processed=datetime.now(UTC),
                     error_message=str(exception),
-                    processing_time_seconds=None,
+                    processing_time_seconds=processing_time,
                 )
             )
+
+    async def __process_symbol_data(
+        self,
+        symbol_id: SymbolId,
+        symbol_name: str,
+        trades_df: DataFrame,
+    ) -> None:
+        """Полная обработка данных символа."""
+        # Сохраняем основные данные о сделках
+        price_series = trades_df.get_column('price')
+        min_price = float(price_series.min())
+        max_price = float(price_series.max())
+        min_trade_id = int(trades_df.get_column('trade_id').min())
+        max_trade_id = int(trades_df.get_column('trade_id').max())
+
+        await self.__redis_data_service.save_trades_data(
+            symbol_id=symbol_id.name,
+            trades_df=trades_df,
+            min_trade_id=min_trade_id,
+            max_trade_id=max_trade_id,
+            min_price=min_price,
+            max_price=max_price,
+        )
+
+        # Обрабатываем все производные данные
+        await g_data_processor.process_trades_data(
+            symbol_id=symbol_id.name,
+            trades_df=trades_df,
+        )
+
+        # Обновляем метаданные символа
+        symbol_metadata = SymbolMetadata(
+            symbol_id=symbol_id.name,
+            symbol_name=symbol_name,
+            last_updated=datetime.now(UTC),
+            has_trades_data=True,
+            has_bollinger=True,
+            has_candles=True,
+            has_rsi=True,
+            has_smoothed=True,
+            has_extreme_lines=True,
+            has_order_book_volumes=True,
+            has_velocity=True,
+        )
+        await self.__redis_data_service.save_symbol_metadata(symbol_metadata)
 
     @staticmethod
     async def __fetch_trades_dataframe(

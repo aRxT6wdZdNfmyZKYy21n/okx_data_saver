@@ -7,6 +7,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+import polars
+
 from constants.redis import (
     MAX_PART_SIZE_BYTES,
     get_available_symbols_key,
@@ -20,6 +22,7 @@ from constants.redis import (
     get_trades_data_key,
     get_velocity_key,
 )
+from enumerations import CompressionAlgorithm
 from main.process_data.schemas import (
     BollingerMetadata,
     CandlesMetadata,
@@ -32,7 +35,7 @@ from main.process_data.schemas import (
     TradesDataMetadata,
     VelocityMetadata,
 )
-from utils.redis import redis_manager
+from utils.redis import g_redis_manager
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +44,12 @@ class RedisDataService:
     """Сервис для работы с данными в Redis."""
 
     def __init__(self):
-        self.redis = redis_manager
+        self.redis = g_redis_manager
 
     async def save_trades_data(
         self,
         symbol_id: str,
-        trades_df: Any,  # polars.DataFrame
+        trades_df: polars.DataFrame,
         min_trade_id: int,
         max_trade_id: int,
         min_price: float,
@@ -58,8 +61,8 @@ class RedisDataService:
         # Сохраняем DataFrame
         metadata = await self.redis.save_dataframe(
             key=key,
-            df=trades_df,
-            compression='xz',
+            dataframe=trades_df,
+            compression=CompressionAlgorithm.XZ,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -75,8 +78,8 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis._redis.set(
-            f'{key}:metadata',
+        await self.redis.set_metadata(
+            key,
             trades_metadata.model_dump_json(),
         )
 
@@ -117,8 +120,8 @@ class RedisDataService:
         # Сохраняем DataFrame
         metadata = await self.redis.save_dataframe(
             key=key,
-            df=bollinger_df,
-            compression='xz',
+            dataframe=bollinger_df,
+            compression=CompressionAlgorithm.XZ,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -131,8 +134,8 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis._redis.set(
-            f'{key}:metadata',
+        await self.redis.set_metadata(
+            key,
             bollinger_metadata.model_dump_json(),
         )
 
@@ -162,8 +165,8 @@ class RedisDataService:
         # Сохраняем DataFrame
         metadata = await self.redis.save_dataframe(
             key=key,
-            df=candles_df,
-            compression='xz',
+            dataframe=candles_df,
+            compression=CompressionAlgorithm.XZ,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -178,14 +181,15 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis._redis.set(
-            f'{key}:metadata',
+        await self.redis.set_metadata(
+            key,
             candles_metadata.model_dump_json(),
         )
 
         logger.info(
-            f'Saved candles data for {symbol_id}:{interval}: {candles_metadata.total_size} bytes'
+            f'Saved candles data for {symbol_id}:{interval}: {candles_metadata.total_size} bytes',
         )
+
         return candles_metadata
 
     async def load_candles_data(
@@ -213,8 +217,8 @@ class RedisDataService:
         # Сохраняем DataFrame
         metadata = await self.redis.save_dataframe(
             key=key,
-            df=rsi_df,
-            compression='xz',
+            dataframe=rsi_df,
+            compression=CompressionAlgorithm.XZ,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -228,14 +232,15 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis._redis.set(
-            f'{key}:metadata',
+        await self.redis.set_metadata(
+            key,
             rsi_metadata.model_dump_json(),
         )
 
         logger.info(
             f'Saved RSI data for {symbol_id}:{interval}: {rsi_metadata.total_size} bytes'
         )
+
         return rsi_metadata
 
     async def load_rsi_data(
@@ -259,8 +264,8 @@ class RedisDataService:
         # Сохраняем DataFrame
         metadata = await self.redis.save_dataframe(
             key=key,
-            df=smoothed_df,
-            compression='xz',
+            dataframe=smoothed_df,
+            compression=CompressionAlgorithm.XZ,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -275,8 +280,8 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis._redis.set(
-            f'{key}:metadata',
+        await self.redis.set_metadata(
+            key,
             smoothed_metadata.model_dump_json(),
         )
 
@@ -315,8 +320,8 @@ class RedisDataService:
         # Сохраняем DataFrame
         metadata = await self.redis.save_dataframe(
             key=key,
-            df=extreme_lines_df,
-            compression='xz',
+            dataframe=extreme_lines_df,
+            compression=CompressionAlgorithm.XZ,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -333,8 +338,8 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis._redis.set(
-            f'{key}:metadata',
+        await self.redis.set_metadata(
+            key,
             extreme_lines_metadata.model_dump_json(),
         )
 
@@ -390,8 +395,8 @@ class RedisDataService:
         # Сохраняем DataFrame
         metadata = await self.redis.save_dataframe(
             key=key,
-            df=order_book_df,
-            compression='xz',
+            dataframe=order_book_df,
+            compression=CompressionAlgorithm.XZ,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -408,8 +413,8 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis._redis.set(
-            f'{key}:metadata',
+        await self.redis.set_metadata(
+            key,
             order_book_metadata.model_dump_json(),
         )
 
@@ -455,8 +460,8 @@ class RedisDataService:
         # Сохраняем DataFrame
         metadata = await self.redis.save_dataframe(
             key=key,
-            df=velocity_df,
-            compression='xz',
+            dataframe=velocity_df,
+            compression=CompressionAlgorithm.XZ,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -469,8 +474,8 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis._redis.set(
-            f'{key}:metadata',
+        await self.redis.set_metadata(
+            key,
             velocity_metadata.model_dump_json(),
         )
 
@@ -489,27 +494,41 @@ class RedisDataService:
     async def save_available_symbols(self, symbol_names: list[str]) -> None:
         """Сохранение списка доступных символов."""
         key = get_available_symbols_key()
-        await self.redis._redis.set(key, json.dumps(symbol_names))
-        logger.info(f'Saved available symbols: {len(symbol_names)} symbols')
+
+        await self.redis.set(
+            key,
+            json.dumps(symbol_names),
+        )  # TODO
+
+        logger.info(
+            f'Saved available symbols: {len(symbol_names)} symbols',
+        )
 
     async def load_available_symbols(self) -> list[str]:
         """Загрузка списка доступных символов."""
         key = get_available_symbols_key()
-        data = await self.redis._redis.get(key)
+        data = await self.redis.__redis.get(key)
         if data:
             return json.loads(data)
         return []
 
     async def save_symbol_metadata(self, symbol_metadata: SymbolMetadata) -> None:
         """Сохранение метаданных символа."""
-        key = get_metadata_key(symbol_metadata.symbol_id)
-        await self.redis._redis.set(key, symbol_metadata.model_dump_json())
+        key = get_metadata_key(
+            symbol_metadata.symbol_id,
+        )
+
+        await self.redis.set(
+            key,
+            symbol_metadata.model_dump_json(),
+        )
+
         logger.info(f'Saved symbol metadata for {symbol_metadata.symbol_id}')
 
     async def load_symbol_metadata(self, symbol_id: str) -> SymbolMetadata | None:
         """Загрузка метаданных символа."""
         key = get_metadata_key(symbol_id)
-        data = await self.redis._redis.get(key)
+        data = await self.redis.__redis.get(key)
         if data:
             return SymbolMetadata.model_validate_json(data)
         return None
@@ -517,17 +536,23 @@ class RedisDataService:
     async def save_processing_status(self, status: ProcessingStatus) -> None:
         """Сохранение статуса обработки."""
         key = f'processing_status:{status.symbol_id}'
-        await self.redis._redis.set(key, status.model_dump_json())
-        logger.debug(f'Saved processing status for {status.symbol_id}: {status.status}')
 
-    async def load_processing_status(
-        self, symbol_id: str
-    ) -> ProcessingStatus | None:
+        await self.redis.set(
+            key,
+            status.model_dump_json(),
+        )
+
+        logger.debug(
+            f'Saved processing status for {status.symbol_id}: {status.status}',
+        )
+
+    async def load_processing_status(self, symbol_id: str) -> ProcessingStatus | None:
         """Загрузка статуса обработки."""
         key = f'processing_status:{symbol_id}'
-        data = await self.redis._redis.get(key)
+        data = await self.redis.__redis.get(key)
         if data:
             return ProcessingStatus.model_validate_json(data)
+
         return None
 
 

@@ -52,9 +52,7 @@ from utils.qt import (
 )
 
 if typing.TYPE_CHECKING:
-    from main.show_plot.processor import (
-        FinPlotChartProcessor,
-    )
+    pass
 
 
 _IS_NEED_DRAW_PRICE_PLOT_WITH_POINTS = False

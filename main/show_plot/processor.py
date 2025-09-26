@@ -202,37 +202,37 @@ class FinPlotChartProcessor:
         return self.__min_trade_price
 
     def get_extreme_lines_array(
-        self,
+            self,
     ) -> numpy.ndarray | None:
         return self.__extreme_lines_array
 
     def get_extreme_lines_position(
-        self,
+            self,
     ) -> tuple[float, float] | None:
         return self.__extreme_lines_position
 
     def get_extreme_lines_scale(
-        self,
+            self,
     ) -> float | None:
         return self.__extreme_lines_scale
 
     def get_order_book_volumes_asks_array(
-        self,
+            self,
     ) -> numpy.ndarray | None:
         return self.__order_book_volumes_asks_array
 
     def get_order_book_volumes_bids_array(
-        self,
+            self,
     ) -> numpy.ndarray | None:
         return self.__order_book_volumes_bids_array
 
     def get_order_book_volumes_position(
-        self,
+            self,
     ) -> tuple[float, float] | None:
         return self.__order_book_volumes_position
 
     def get_order_book_volumes_scale(
-        self,
+            self,
     ) -> float | None:
         return self.__order_book_volumes_scale
 
@@ -412,8 +412,8 @@ class FinPlotChartProcessor:
                 ),
                 real=polars.col(
                     'price',
-                ),
-                timeperiod=20,
+            ),
+            timeperiod=20,
             ).alias(
                 'bbands',
             ),
@@ -640,9 +640,9 @@ class FinPlotChartProcessor:
                 min_trade_id = 0
 
             new_trades_dataframe: DataFrame = self.__fetch_trades_dataframe(
-                min_trade_id=min_trade_id,
-                symbol_id=current_symbol_id,
-            )
+                            min_trade_id=min_trade_id,
+                            symbol_id=current_symbol_id,
+                    )
 
             if new_trades_dataframe.height == 0:
                 return
@@ -993,9 +993,9 @@ class FinPlotChartProcessor:
 
     @staticmethod
     def __fetch_order_book_dataframe(
-        max_timestamp_ms: int,
-        min_timestamp_ms: int,
-        symbol_id: SymbolId,
+            max_timestamp_ms: int,
+            min_timestamp_ms: int,
+            symbol_id: SymbolId,
     ) -> DataFrame | None:
         with Timer() as timer:
             order_book_dataframe = polars.read_database_uri(
@@ -1059,8 +1059,8 @@ class FinPlotChartProcessor:
 
     @staticmethod
     def __fetch_trades_dataframe(
-        min_trade_id: int,
-        symbol_id: SymbolId,
+            min_trade_id: int,
+            symbol_id: SymbolId,
     ) -> DataFrame | None:
         with Timer() as timer:
             trades_dataframe = polars.read_database_uri(
@@ -1202,7 +1202,7 @@ WHERE symbol_id IS NOT NULL;
         # window.auto_range_price_plot()
 
     def __update_extreme_lines(
-        self,
+            self,
     ) -> None:
         trades_dataframe = self.__trades_dataframe
 
@@ -1256,8 +1256,8 @@ WHERE symbol_id IS NOT NULL;
 
         extreme_lines_array = numpy.zeros(
             (
-                width,
-                height,
+            width,
+            height,
             )
         )
 
@@ -1291,7 +1291,7 @@ WHERE symbol_id IS NOT NULL;
             )
 
             for price, extreme_line_raw_data in tuple(
-                active_extreme_line_raw_data_by_price_map.items(),
+                    active_extreme_line_raw_data_by_price_map.items(),
             ):
                 if not (left_price <= price <= right_price):
                     continue
@@ -1302,8 +1302,8 @@ WHERE symbol_id IS NOT NULL;
 
                 extreme_line_raw_data.update(
                     {
-                        'end_trade_id': start_trade_id,  # end_trade_id,
-                        'price': price,
+                    'end_trade_id': start_trade_id,  # end_trade_id,
+                    'price': price,
                     }
                 )
 
@@ -1320,14 +1320,14 @@ WHERE symbol_id IS NOT NULL;
 
             active_extreme_line_raw_data_by_price_map.update(
                 {
-                    end_price: {
-                        'end_trade_id': None,
-                        'start_trade_id': end_trade_id,
-                    },
-                    start_price: {
-                        'end_trade_id': None,
-                        'start_trade_id': start_trade_id,
-                    },
+                end_price: {
+                    'end_trade_id': None,
+                    'start_trade_id': end_trade_id,
+                },
+                start_price: {
+                    'end_trade_id': None,
+                    'start_trade_id': start_trade_id,
+                },
                 }
             )
 
@@ -1337,8 +1337,8 @@ WHERE symbol_id IS NOT NULL;
         ) in active_extreme_line_raw_data_by_price_map.items():
             extreme_line_raw_data.update(
                 {
-                    'end_trade_id': max_trade_id,
-                    'price': price,
+                'end_trade_id': max_trade_id,
+                'price': price,
                 }
             )
 
@@ -1384,7 +1384,7 @@ WHERE symbol_id IS NOT NULL;
         self.__extreme_lines_scale = extreme_lines_scale
 
     async def __update_order_book_volumes(
-        self,
+            self,
     ) -> None:
         current_symbol_name = self.__current_symbol_name
         if current_symbol_name is None:
@@ -1440,47 +1440,47 @@ WHERE symbol_id IS NOT NULL;
             return
 
         if _IS_ORDER_BOOK_VOLUME_ENABLED:
-            postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
+        postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
 
-            async with postgres_db_session_maker() as session:
-                async with session.begin():
-                    result = await session.execute(
-                        select(
-                            OKXOrderBookData2,
-                        )
-                        .where(
-                            and_(
-                                OKXOrderBookData2.symbol_id == current_symbol_id,
-                                OKXOrderBookData2.timestamp_ms <= min_timestamp_ms,
+        async with postgres_db_session_maker() as session:
+            async with session.begin():
+                result = await session.execute(
+                    select(
+                        OKXOrderBookData2,
+                    )
+                    .where(
+                        and_(
+                            OKXOrderBookData2.symbol_id == current_symbol_id,
+                            OKXOrderBookData2.timestamp_ms <= min_timestamp_ms,
                                 OKXOrderBookData2.action_id
                                 == OKXOrderBookActionId.Snapshot,
-                            )
-                        )
-                        .order_by(
-                            OKXOrderBookData2.symbol_id.asc(),
-                            OKXOrderBookData2.timestamp_ms.desc(),  # TODO: make index
-                        )
-                        .limit(
-                            1,
                         )
                     )
-
-                    initial_order_book_snapshot_data = result.scalar_one_or_none()
-
-            if initial_order_book_snapshot_data is None:
-                logger.info(
-                    'Could not find initial order book snapshot data'
-                    f' for symbol ID {current_symbol_id.name} and max timestamp (ms) {min_timestamp_ms}'
+                    .order_by(
+                        OKXOrderBookData2.symbol_id.asc(),
+                        OKXOrderBookData2.timestamp_ms.desc(),  # TODO: make index
+                    )
+                    .limit(
+                        1,
+                    )
                 )
+
+                initial_order_book_snapshot_data = result.scalar_one_or_none()
+
+                if initial_order_book_snapshot_data is None:
+                    logger.info(
+                        'Could not find initial order book snapshot data'
+                    f' for symbol ID {current_symbol_id.name} and max timestamp (ms) {min_timestamp_ms}'
+                    )
             else:
                 logger.info(
                     f'Found initial order book snapshot data: {initial_order_book_snapshot_data}'
                 )
 
                 new_order_book_dataframe: DataFrame = self.__fetch_order_book_dataframe(
-                    max_timestamp_ms=max_timestamp_ms,
+                        max_timestamp_ms=max_timestamp_ms,
                     min_timestamp_ms=initial_order_book_snapshot_data.timestamp_ms,
-                    symbol_id=current_symbol_id,
+                        symbol_id=current_symbol_id,
                 )
 
                 logger.info(f'new_order_book_dataframe: {new_order_book_dataframe}')
@@ -1507,23 +1507,23 @@ WHERE symbol_id IS NOT NULL;
 
         order_book_volumes_asks_array = numpy.zeros(
             (
-                width,
-                height,
+            width,
+            height,
             )
         )
 
         order_book_volumes_bids_array = numpy.zeros(
             (
-                width,
-                height,
+            width,
+            height,
             )
         )
 
         if _IS_ORDER_BOOK_VOLUME_ENABLED:
             logger.info('Filling order book volumes asks and bids arrays...')
 
-            order_book_ask_quantity_by_price_map: dict[Decimal, Decimal] = {}
-            order_book_bid_quantity_by_price_map: dict[Decimal, Decimal] = {}
+        order_book_ask_quantity_by_price_map: dict[Decimal, Decimal] = {}
+        order_book_bid_quantity_by_price_map: dict[Decimal, Decimal] = {}
 
             for (
                 timestamp_ms,
@@ -1539,60 +1539,60 @@ WHERE symbol_id IS NOT NULL;
                     action_id_raw,
                 )
 
-                if action_id == OKXOrderBookActionId.Snapshot:
-                    order_book_ask_quantity_by_price_map.clear()
-                    order_book_bid_quantity_by_price_map.clear()
+            if action_id == OKXOrderBookActionId.Snapshot:
+                order_book_ask_quantity_by_price_map.clear()
+                order_book_bid_quantity_by_price_map.clear()
 
                 asks: list[str, str, str, str] = orjson.loads(
                     asks_raw,
                 )
 
-                for ask_list in asks:
-                    price_raw, quantity_raw, _, _ = ask_list
+            for ask_list in asks:
+                price_raw, quantity_raw, _, _ = ask_list
 
-                    price = Decimal(
-                        price_raw,
+                price = Decimal(
+                    price_raw,
+                )
+
+                quantity = Decimal(
+                    quantity_raw,
+                )
+
+                if quantity:
+                    order_book_ask_quantity_by_price_map[price] = quantity
+                else:
+                    order_book_ask_quantity_by_price_map.pop(
+                        price,
+                        None,
                     )
-
-                    quantity = Decimal(
-                        quantity_raw,
-                    )
-
-                    if quantity:
-                        order_book_ask_quantity_by_price_map[price] = quantity
-                    else:
-                        order_book_ask_quantity_by_price_map.pop(
-                            price,
-                            None,
-                        )
 
                 bids: list[str, str, str, str] = orjson.loads(
                     bids_raw,
                 )
 
-                for bid_list in bids:
-                    price_raw, quantity_raw, _, _ = bid_list
+            for bid_list in bids:
+                price_raw, quantity_raw, _, _ = bid_list
 
-                    price = Decimal(
-                        price_raw,
+                price = Decimal(
+                    price_raw,
+                )
+
+                quantity = Decimal(
+                    quantity_raw,
+                )
+
+                if quantity:
+                    order_book_bid_quantity_by_price_map[price] = quantity
+                else:
+                    order_book_bid_quantity_by_price_map.pop(
+                        price,
+                        None,
                     )
-
-                    quantity = Decimal(
-                        quantity_raw,
-                    )
-
-                    if quantity:
-                        order_book_bid_quantity_by_price_map[price] = quantity
-                    else:
-                        order_book_bid_quantity_by_price_map.pop(
-                            price,
-                            None,
-                        )
 
                 if datetime_ < min_datetime:
                     continue
 
-                logger.info(
+            logger.info(
                     f'{datetime_} / {max_datetime} ({100.0 * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
                 )
 
@@ -1603,40 +1603,40 @@ WHERE symbol_id IS NOT NULL;
 
                 closest_trade_id = trade_id_series[idx]
 
-                x = min(
-                    int(
+            x = min(
+                int(
                         (closest_trade_id - min_trade_id) / order_book_volumes_scale,
+                ),
+                width - 1,
+            )
+
+            for price, quantity in order_book_ask_quantity_by_price_map.items():
+                volume = price * quantity
+
+                y = min(
+                    int(
+                            (float(price) - min_price) / order_book_volumes_scale,
                     ),
-                    width - 1,
+                    height - 1,
                 )
 
-                for price, quantity in order_book_ask_quantity_by_price_map.items():
-                    volume = price * quantity
+                order_book_volumes_asks_array[x, y] = float(
+                    volume,
+                )
 
-                    y = min(
-                        int(
+            for price, quantity in order_book_bid_quantity_by_price_map.items():
+                volume = price * quantity
+
+                y = min(
+                    int(
                             (float(price) - min_price) / order_book_volumes_scale,
-                        ),
-                        height - 1,
-                    )
+                    ),
+                    height - 1,
+                )
 
-                    order_book_volumes_asks_array[x, y] = float(
-                        volume,
-                    )
-
-                for price, quantity in order_book_bid_quantity_by_price_map.items():
-                    volume = price * quantity
-
-                    y = min(
-                        int(
-                            (float(price) - min_price) / order_book_volumes_scale,
-                        ),
-                        height - 1,
-                    )
-
-                    order_book_volumes_bids_array[x, y] = float(
-                        volume,
-                    )
+                order_book_volumes_bids_array[x, y] = float(
+                    volume,
+                )
 
         self.__order_book_volumes_asks_array = order_book_volumes_asks_array
         self.__order_book_volumes_bids_array = order_book_volumes_bids_array
@@ -1676,7 +1676,7 @@ WHERE symbol_id IS NOT NULL;
                 real=polars.col(
                     'close_price',
                 ),
-                timeperiod=14,  # 6
+            timeperiod=14,  # 6
             ).alias(
                 'rsi',
             )

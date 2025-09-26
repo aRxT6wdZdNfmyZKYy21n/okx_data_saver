@@ -8,16 +8,14 @@ import lzma
 import lz4.frame
 import polars
 
-from constants.redis import (
-    COMPRESSION_LZ4,
-    COMPRESSION_NONE,
-    COMPRESSION_XZ,
+from enumerations.compression import (
+    CompressionAlgorithm,
 )
 
 
 def serialize_dataframe(
     df: polars.DataFrame,
-    compression: str = 'xz',
+    compression: CompressionAlgorithm,
 ) -> bytes:
     """
     Сериализация Polars DataFrame в сжатые IPC данные.
@@ -34,23 +32,28 @@ def serialize_dataframe(
     """
     # Сериализация в IPC формат
     buffer = io.BytesIO()
-    df.write_ipc(buffer)
+
+    df.write_ipc(
+        buffer,
+    )
+
     ipc_data = buffer.getvalue()
 
     # Применение сжатия
-    if compression == COMPRESSION_XZ:
+
+    if compression == CompressionAlgorithm.XZ:
         # xz обеспечивает лучшее сжатие для финансовых данных
         compressed_data = lzma.compress(
             ipc_data,
             # preset=6,  # баланс скорость/сжатие
             preset=lzma.PRESET_EXTREME,  # Максимальное сжатие
         )
-    elif compression == COMPRESSION_LZ4:
+    elif compression == CompressionAlgorithm.LZ4:
         # lz4 для быстрого сжатия когда размер не критичен
         compressed_data = lz4.frame.compress(
             ipc_data,
         )
-    elif compression == COMPRESSION_NONE:
+    elif compression == CompressionAlgorithm.NONE:
         compressed_data = ipc_data
     else:
         raise ValueError(
@@ -60,7 +63,10 @@ def serialize_dataframe(
     return compressed_data
 
 
-def deserialize_dataframe(data: bytes, compression: str = 'xz') -> polars.DataFrame:
+def deserialize_dataframe(
+    data: bytes,
+    compression: CompressionAlgorithm,
+) -> polars.DataFrame:
     """
     Десериализация сжатых IPC данных в Polars DataFrame.
 
@@ -75,14 +81,14 @@ def deserialize_dataframe(data: bytes, compression: str = 'xz') -> polars.DataFr
         ValueError: Если указан неподдерживаемый алгоритм сжатия
     """
     # Распаковка сжатия
-    if compression == 'xz':
+    if compression == CompressionAlgorithm.XZ:
         ipc_data = lzma.decompress(data)
-    elif compression == 'lz4':
+    elif compression == CompressionAlgorithm.LZ4:
         ipc_data = lz4.frame.decompress(data)
-    elif compression == 'none':
+    elif compression == CompressionAlgorithm.NONE:
         ipc_data = data
     else:
-        raise ValueError(f'Unsupported compression: {compression}')
+        raise ValueError(f'Unsupported compression: {compression.name}')
 
     # Десериализация из IPC формата
     buffer = io.BytesIO(ipc_data)
@@ -90,7 +96,8 @@ def deserialize_dataframe(data: bytes, compression: str = 'xz') -> polars.DataFr
 
 
 def split_dataframe_by_size(
-    df: polars.DataFrame, max_size_bytes: int = 400_000_000
+    df: polars.DataFrame,
+    max_size_bytes: int,
 ) -> list[polars.DataFrame]:
     """
     Разбивка DataFrame на части по размеру в байтах.
@@ -126,22 +133,27 @@ def split_dataframe_by_size(
     return chunks
 
 
-def merge_dataframe_chunks(chunks: list[polars.DataFrame]) -> polars.DataFrame:
+def merge_dataframe_chunks(
+    dataframe_chunks: list[polars.DataFrame],
+) -> polars.DataFrame:
     """
     Объединение частей DataFrame обратно в один.
 
     Args:
-        chunks: Список частей DataFrame
+        dataframe_chunks: Список частей DataFrame
 
     Returns:
         Объединенный DataFrame
     """
-    if not chunks:
-        return polars.DataFrame()
-    return polars.concat(chunks)
+    assert dataframe_chunks, None
+
+    return polars.concat(dataframe_chunks)
 
 
-def get_compression_ratio(original_size: int, compressed_size: int) -> float:
+def get_compression_ratio(
+    original_size: int,
+    compressed_size: int,
+) -> float:
     """
     Вычисление коэффициента сжатия.
 
@@ -154,10 +166,14 @@ def get_compression_ratio(original_size: int, compressed_size: int) -> float:
     """
     if original_size == 0:
         return 0.0
+
     return compressed_size / original_size
 
 
-def estimate_dataframe_size(df: polars.DataFrame, compression: str = 'xz') -> int:
+def estimate_dataframe_size(
+    df: polars.DataFrame,
+    compression: CompressionAlgorithm,
+) -> int:
     """
     Оценка размера DataFrame после сжатия.
 

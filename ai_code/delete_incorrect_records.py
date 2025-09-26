@@ -31,7 +31,6 @@ try:
 except ImportError:
     uvloop = asyncio
 
-from constants.okx import OKXConstants
 from constants.symbol import (
     SymbolConstants,
 )
@@ -431,9 +430,7 @@ def clean_order_book_data_batch(args):
             timestamp_ms_to_delete = []
 
             async with session_factory() as session_read:
-                for (
-                    timestamp_ms
-                ) in okx_order_book_data_2_existent_timestamp_ms_array:
+                for timestamp_ms in okx_order_book_data_2_existent_timestamp_ms_array:
                     timestamp_ms = int(
                         timestamp_ms,
                     )
@@ -473,9 +470,7 @@ def clean_order_book_data_batch(args):
 
                         error_count += 1
 
-                        timestamp_ms_to_delete.append(
-                            timestamp_ms
-                        )
+                        timestamp_ms_to_delete.append(timestamp_ms)
 
                         continue
 

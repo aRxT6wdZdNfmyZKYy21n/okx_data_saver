@@ -217,33 +217,43 @@ def check_order_book_data_batch(args):
 
     async def _check_batch() -> int:
         # Импортируем settings только когда нужно
-        from settings import settings
 
         # Создаем engine и session factory
         engine = create_async_engine(
             database_url,
             echo=True,
         )
-        
+
         session_factory = async_sessionmaker(
-            engine, expire_on_commit=False,
+            engine,
+            expire_on_commit=False,
         )
 
         checked_count = 0
 
         async with session_factory() as session:
             # Создаем запрос для получения батча данных
-            query = select(
-                OKXOrderBookData2.symbol_id,
-                OKXOrderBookData2.timestamp_ms,
-                OKXOrderBookData2.action_id,
-                OKXOrderBookData2.asks,
-                OKXOrderBookData2.bids,
-            ).order_by(
-                OKXOrderBookData2.symbol_id.asc(),
-                OKXOrderBookData2.timestamp_ms.asc(),
-            ).offset(offset,).limit(limit,).execution_options(
-                yield_per=_YIELD_PER,
+            query = (
+                select(
+                    OKXOrderBookData2.symbol_id,
+                    OKXOrderBookData2.timestamp_ms,
+                    OKXOrderBookData2.action_id,
+                    OKXOrderBookData2.asks,
+                    OKXOrderBookData2.bids,
+                )
+                .order_by(
+                    OKXOrderBookData2.symbol_id.asc(),
+                    OKXOrderBookData2.timestamp_ms.asc(),
+                )
+                .offset(
+                    offset,
+                )
+                .limit(
+                    limit,
+                )
+                .execution_options(
+                    yield_per=_YIELD_PER,
+                )
             )
 
             result = await session.stream(
