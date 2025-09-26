@@ -54,6 +54,9 @@ from main.show_plot.globals import (
 from main.show_plot.gui.window import (
     FinPlotChartWindow,
 )
+from main.show_plot.redis_data_adapter import (
+    g_redis_data_adapter,
+)
 from settings import (
     settings,
 )
@@ -626,370 +629,100 @@ class FinPlotChartProcessor:
         current_symbol_id = SymbolConstants.IdByName[current_symbol_name]
 
         async with self.__trades_dataframe_update_lock:
-            trades_dataframe = self.__trades_dataframe
+            # Загружаем данные из Redis
+            trades_dataframe = await g_redis_data_adapter.load_trades_dataframe(current_symbol_id)
 
-            min_trade_id: int  # TODO: min_trade_id
-
-            if trades_dataframe is not None:
-                min_polars_trade_id = trades_dataframe.get_column('trade_id').max()
-
-                min_trade_id = int(
-                    min_polars_trade_id,
-                )
-            else:
-                min_trade_id = 0
-
-            new_trades_dataframe: DataFrame = self.__fetch_trades_dataframe(
-                min_trade_id=min_trade_id,
-                symbol_id=current_symbol_id,
-            )
-
-            if new_trades_dataframe.height == 0:
+            if trades_dataframe is None:
+                logger.warning(f"No trades data available in Redis for {current_symbol_name}")
                 return
 
-            price_series: Series = new_trades_dataframe.get_column(
-                'price',
-            )
+            # Обновляем цены
+            price_series: Series = trades_dataframe.get_column('price')
 
             new_max_trade_price = price_series.max()
-
             if new_max_trade_price is not None:
                 max_trade_price = self.__max_trade_price
-
                 if max_trade_price is None or (max_trade_price < new_max_trade_price):
-                    self.__max_trade_price = (
-                        max_trade_price  # noqa
-                    ) = new_max_trade_price
+                    self.__max_trade_price = new_max_trade_price
 
             new_min_trade_price = price_series.min()
-
             if new_min_trade_price is not None:
                 min_trade_price = self.__min_trade_price
-
                 if min_trade_price is None or (min_trade_price > new_min_trade_price):
-                    self.__min_trade_price = (
-                        min_trade_price  # noqa
-                    ) = new_min_trade_price
-
-            # new_trades_dataframe = DataFrame.from_records(
-            #     # [
-            #     #     {
-            #     #         'price': 100000.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533919,
-            #     #         'trade_id': 1,
-            #     #     },
-            #     #     {
-            #     #         'price': 99900.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533920,
-            #     #         'trade_id': 2,
-            #     #     },
-            #     #     {
-            #     #         'price': 99900.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533921,
-            #     #         'trade_id': 3,
-            #     #     },
-            #     #     {
-            #     #         'price': 99800.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533922,
-            #     #         'trade_id': 4,
-            #     #     },
-            #     #     {
-            #     #         'price': 99800.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533923,
-            #     #         'trade_id': 5,
-            #     #     },
-            #     #     {
-            #     #         'price': 99800.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533924,
-            #     #         'trade_id': 6,
-            #     #     },
-            #     #     {
-            #     #         'price': 99700.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533925,
-            #     #         'trade_id': 7,
-            #     #     },
-            #     #     {
-            #     #         'price': 99700.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533926,
-            #     #         'trade_id': 8,
-            #     #     },
-            #     #     {
-            #     #         'price': 99600.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533927,
-            #     #         'trade_id': 9,
-            #     #     },
-            #     #     {
-            #     #         'price': 99600.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533928,
-            #     #         'trade_id': 10,
-            #     #     },
-            #     #     {
-            #     #         'price': 99500.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533929,
-            #     #         'trade_id': 11,
-            #     #     },
-            #     #     {
-            #     #         'price': 99600.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533930,
-            #     #         'trade_id': 12,
-            #     #     },
-            #     # ],
-            #     # [
-            #     #     {
-            #     #         'price': 115924.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533919,
-            #     #         'trade_id': 1,
-            #     #     },
-            #     #     {
-            #     #         'price': 115922.33,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533920,
-            #     #         'trade_id': 2,
-            #     #     },
-            #     #     {
-            #     #         'price': 115922.33,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533921,
-            #     #         'trade_id': 3,
-            #     #     },
-            #     #     {
-            #     #         'price': 115922.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533922,
-            #     #         'trade_id': 4,
-            #     #     },
-            #     #     {
-            #     #         'price': 115922.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533923,
-            #     #         'trade_id': 5,
-            #     #     },
-            #     #     {
-            #     #         'price': 115940.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533924,
-            #     #         'trade_id': 6,
-            #     #     },
-            #     #     {
-            #     #         'price': 115940.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533925,
-            #     #         'trade_id': 7,
-            #     #     },
-            #     #     {
-            #     #         'price': 115944.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533926,
-            #     #         'trade_id': 8,
-            #     #     },
-            #     #     {
-            #     #         'price': 115944.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533927,
-            #     #         'trade_id': 9,
-            #     #     },
-            #     #     {
-            #     #         'price': 115948.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533928,
-            #     #         'trade_id': 10,
-            #     #     },
-            #     #     {
-            #     #         'price': 115948.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533929,
-            #     #         'trade_id': 11,
-            #     #     },
-            #     #     {
-            #     #         'price': 115952.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533930,
-            #     #         'trade_id': 12,
-            #     #     },
-            #     #     {
-            #     #         'price': 115952.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533931,
-            #     #         'trade_id': 13,
-            #     #     },
-            #     #     {
-            #     #         'price': 115954.9,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533932,
-            #     #         'trade_id': 14,
-            #     #     },
-            #     #     {
-            #     #         'price': 115952.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533933,
-            #     #         'trade_id': 15,
-            #     #     },
-            #     # ],
-            #     # [
-            #     #     {
-            #     #         'price': 115430.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533919,
-            #     #         'trade_id': 1,
-            #     #     },
-            #     #     {
-            #     #         'price': 116150.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533920,
-            #     #         'trade_id': 2,
-            #     #     },
-            #     #     {
-            #     #         'price': 115800.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533921,
-            #     #         'trade_id': 3,
-            #     #     },
-            #     #     {
-            #     #         'price': 116300.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533922,
-            #     #         'trade_id': 4,
-            #     #     },
-            #     #     {
-            #     #         'price': 115000.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533923,
-            #     #         'trade_id': 5,
-            #     #     },
-            #     #     {
-            #     #         'price': 115600.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533924,
-            #     #         'trade_id': 6,
-            #     #     },
-            #     #     {
-            #     #         'price': 115050.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533925,
-            #     #         'trade_id': 7,
-            #     #     },
-            #     #     {
-            #     #         'price': 115700.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533926,
-            #     #         'trade_id': 8,
-            #     #     },
-            #     #     {
-            #     #         'price': 115500.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533927,
-            #     #         'trade_id': 9,
-            #     #     },
-            #     #     {
-            #     #         'price': 115735.0,
-            #     #         'quantity': 1.0,
-            #     #         'timestamp_ms': 1758136533928,
-            #     #         'trade_id': 10,
-            #     #     },
-            #     # ],
-            #     columns=[
-            #         'price',
-            #         'quantity',
-            #         'timestamp_ms',
-            #         'trade_id',
-            #     ],
-            # )
-
-            # new_trades_dataframe = pandas.read_csv(
-            #     'data/1.csv',
-            # )
-
-            # assert new_trades_dataframe.size, None
-            #
-            # new_trades_dataframe.timestamp_ms = pandas.to_datetime(
-            #     new_trades_dataframe.timestamp_ms,
-            #     unit='ms',
-            # )
-            #
-            # new_trades_dataframe.set_index(
-            #     'trade_id',
-            #     inplace=True,
-            # )
-            #
-            # new_trades_dataframe.sort_values(
-            #     'trade_id',
-            #     inplace=True,
-            # )
-
-            if trades_dataframe is not None:
-                trades_dataframe = polars.concat(
-                    [trades_dataframe, new_trades_dataframe]
-                )
-
-                trades_dataframe = trades_dataframe.sort(
-                    'trade_id',
-                )
-            else:
-                trades_dataframe = new_trades_dataframe
+                    self.__min_trade_price = new_min_trade_price
 
             self.__trades_dataframe = trades_dataframe
 
-        with Timer() as timer:
-            self.__update_bollinger_series()
-
-        logger.info(
-            f'Bollinger series were updated by {timer.elapsed:.3f}s',
-        )
-
-        with Timer() as timer:
-            self.__update_candle_dataframe_by_interval_name_map()
-
-        logger.info(
-            f'Candle dataframe by interval name map was updated by {timer.elapsed:.3f}s'
-        )
-
-        with Timer() as timer:
-            self.__update_rsi_series()
-
-        logger.info(
-            f'RSI series were updated by {timer.elapsed:.3f}s',
-        )
-
-        with Timer() as timer:  # TODO
-            self.__update_trades_smoothed_dataframe_by_level_map()
-
-        logger.info(
-            f'Trades smoothed dataframe by level map was updated by {timer.elapsed:.3f}s'
-        )
-
-        with Timer() as timer:
-            self.__update_extreme_lines()
-
-        logger.info(f'Extreme lines were updated by {timer.elapsed:.3f}s')
-
-        with Timer() as timer:
-            await self.__update_order_book_volumes()
-
-        logger.info(f'Order book volumes were updated by {timer.elapsed:.3f}s')
-
-        with Timer() as timer:
-            self.__update_velocity_series()
-
-        logger.info(
-            f'Velocity series were updated by {timer.elapsed:.3f}s',
-        )
+        # Загружаем все производные данные из Redis
+        await self.__load_all_derived_data_from_redis(current_symbol_id)
 
         await self.__window.plot(
             is_need_run_once=True,
         )
+
+    async def __load_all_derived_data_from_redis(
+        self, symbol_id: SymbolId
+    ) -> None:
+        """Загрузка всех производных данных из Redis."""
+        
+        # Загружаем полосы Боллинджера
+        with Timer() as timer:
+            upper_band, middle_band, lower_band = await g_redis_data_adapter.load_bollinger_data(symbol_id)
+            if upper_band is not None and middle_band is not None and lower_band is not None:
+                self.__bollinger_upper_band_series = upper_band
+                self.__bollinger_base_line_series = middle_band
+                self.__bollinger_lower_band_series = lower_band
+        logger.info(f'Bollinger data loaded from Redis in {timer.elapsed:.3f}s')
+
+        # Загружаем свечные данные
+        with Timer() as timer:
+            for interval_name in PlotConstants.IntervalNames:
+                candles_df = await g_redis_data_adapter.load_candle_dataframe(symbol_id, interval_name)
+                if candles_df is not None:
+                    self.__candle_dataframe_by_interval_name_map[interval_name] = candles_df
+        logger.info(f'Candles data loaded from Redis in {timer.elapsed:.3f}s')
+
+        # Загружаем RSI данные
+        with Timer() as timer:
+            rsi_series = await g_redis_data_adapter.load_rsi_data(symbol_id)
+            if rsi_series is not None:
+                self.__rsi_series = rsi_series
+        logger.info(f'RSI data loaded from Redis in {timer.elapsed:.3f}s')
+
+        # Загружаем сглаженные данные
+        with Timer() as timer:
+            for smoothing_level in PlotConstants.TradesSmoothingLevels:
+                if smoothing_level != 'Raw (0)':  # Пропускаем сырые данные
+                    smoothed_df = await g_redis_data_adapter.load_smoothed_dataframe(symbol_id, smoothing_level)
+                    if smoothed_df is not None:
+                        self.__trades_smoothed_dataframe_by_level_map[smoothing_level] = smoothed_df
+        logger.info(f'Smoothed data loaded from Redis in {timer.elapsed:.3f}s')
+
+        # Загружаем экстремальные линии
+        with Timer() as timer:
+            extreme_lines_array, position, scale = await g_redis_data_adapter.load_extreme_lines_data(symbol_id)
+            if extreme_lines_array is not None:
+                self.__extreme_lines_array = extreme_lines_array
+                self.__extreme_lines_position = position
+                self.__extreme_lines_scale = scale
+        logger.info(f'Extreme lines data loaded from Redis in {timer.elapsed:.3f}s')
+
+        # Загружаем объемы стакана
+        with Timer() as timer:
+            asks_array, bids_array, position, scale = await g_redis_data_adapter.load_order_book_volumes_data(symbol_id)
+            if asks_array is not None and bids_array is not None:
+                self.__order_book_volumes_asks_array = asks_array
+                self.__order_book_volumes_bids_array = bids_array
+                self.__order_book_volumes_position = position
+                self.__order_book_volumes_scale = scale
+        logger.info(f'Order book volumes data loaded from Redis in {timer.elapsed:.3f}s')
+
+        # Загружаем данные скорости
+        with Timer() as timer:
+            velocity_series = await g_redis_data_adapter.load_velocity_data(symbol_id)
+            if velocity_series is not None:
+                self.__velocity_series = velocity_series
+        logger.info(f'Velocity data loaded from Redis in {timer.elapsed:.3f}s')
 
     @staticmethod
     def __fetch_order_book_dataframe(
@@ -1139,13 +872,22 @@ class FinPlotChartProcessor:
     async def __update_current_available_symbol_name_set(
         self,
     ) -> None:
-        current_available_symbol_name_set: set[str] | None = None
+        # Загружаем доступные символы из Redis
+        symbol_names = await g_redis_data_adapter.load_available_symbols()
+        
+        if symbol_names is not None:
+            self.__current_available_symbol_name_set = set(symbol_names)
+            logger.info(f"Loaded {len(symbol_names)} available symbols from Redis")
+        else:
+            # Fallback: загружаем из базы данных если Redis недоступен
+            logger.warning("Redis unavailable, loading symbols from database")
+            current_available_symbol_name_set: set[str] | None = None
 
-        postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
+            postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
 
-        async with postgres_db_session_maker() as session:
-            recursive_cte_full_query = text(
-                """
+            async with postgres_db_session_maker() as session:
+                recursive_cte_full_query = text(
+                    """
 WITH RECURSIVE symbol_id_cte(symbol_id) AS 
 (
   (
@@ -1167,31 +909,31 @@ WITH RECURSIVE symbol_id_cte(symbol_id) AS
 SELECT symbol_id
 FROM symbol_id_cte
 WHERE symbol_id IS NOT NULL;
-                """
-            )
-
-            result = await session.execute(
-                recursive_cte_full_query,
-            )
-
-            for row in result:
-                symbol_id_raw: str = row.symbol_id
-
-                symbol_id = getattr(
-                    SymbolId,
-                    symbol_id_raw,
+                    """
                 )
 
-                symbol_name = SymbolConstants.NameById[symbol_id]
-
-                if current_available_symbol_name_set is None:
-                    current_available_symbol_name_set = set()
-
-                current_available_symbol_name_set.add(
-                    symbol_name,
+                result = await session.execute(
+                    recursive_cte_full_query,
                 )
 
-        self.__current_available_symbol_name_set = current_available_symbol_name_set
+                for row in result:
+                    symbol_id_raw: str = row.symbol_id
+
+                    symbol_id = getattr(
+                        SymbolId,
+                        symbol_id_raw,
+                    )
+
+                    symbol_name = SymbolConstants.NameById[symbol_id]
+
+                    if current_available_symbol_name_set is None:
+                        current_available_symbol_name_set = set()
+
+                    current_available_symbol_name_set.add(
+                        symbol_name,
+                    )
+
+            self.__current_available_symbol_name_set = current_available_symbol_name_set
 
         window = self.__window
 
