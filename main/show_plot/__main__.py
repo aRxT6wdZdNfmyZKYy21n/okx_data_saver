@@ -17,7 +17,7 @@ from main.save_candles.globals import (
     g_globals,
 )
 from main.show_plot.processor import (
-    FinPlotChartProcessor,
+    RedisChartProcessor,
 )
 
 logger = logging.getLogger(

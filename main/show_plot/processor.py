@@ -18,10 +18,14 @@ from main.show_plot.redis_data_adapter import g_redis_data_adapter
 logger = logging.getLogger(__name__)
 
 
-class RedisFinPlotChartProcessor:
+class RedisChartProcessor:
     """Процессор для работы с данными из Redis."""
 
-    def __init__(self):
+    def __init__(
+        self,
+    ) -> None:
+        super().__init__()
+
         self.redis_adapter = g_redis_data_adapter
 
     async def update_trades_dataframe(
@@ -271,4 +275,4 @@ class RedisFinPlotChartProcessor:
 
 
 # Глобальный экземпляр процессора
-g_redis_processor = RedisFinPlotChartProcessor()
+g_redis_processor = RedisChartProcessor()
