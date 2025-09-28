@@ -111,8 +111,8 @@ class ErrorHandler:
             # Ограничиваем количество критических ошибок в Redis
             await g_redis_manager.client.ltrim('critical_errors', 0, 99)
 
-        except Exception as e:
-            logger.error(f'Failed to save critical error: {e}')
+        except Exception as exception:
+            logger.error(f'Failed to save critical error: {exception}')
 
     def get_error_stats(self) -> dict[str, Any]:
         """Получение статистики ошибок."""
@@ -165,11 +165,11 @@ class SystemMonitor:
 
             return True
 
-        except Exception as e:
-            self.error_handler.handle_error('redis_health_check', e)
+        except Exception as exception:
+            self.error_handler.handle_error('redis_health_check', exception)
             self.metrics['redis_health'] = {
                 'status': 'unhealthy',
-                'error': str(e),
+                'error': str(exception),
             }
             return False
 
@@ -205,11 +205,11 @@ class SystemMonitor:
 
             return processing_issues == 0
 
-        except Exception as e:
-            self.error_handler.handle_error('data_processing_health_check', e)
+        except Exception as exception:
+            self.error_handler.handle_error('data_processing_health_check', exception)
             self.metrics['data_processing_health'] = {
                 'status': 'unhealthy',
-                'error': str(e),
+                'error': str(exception),
             }
             return False
 
@@ -250,8 +250,8 @@ class SystemMonitor:
         except ImportError:
             logger.warning('psutil not available, skipping system resource check')
             return True
-        except Exception as e:
-            self.error_handler.handle_error('system_resources_check', e)
+        except Exception as exception:
+            self.error_handler.handle_error('system_resources_check', exception)
             return False
 
     async def run_health_checks(self) -> dict[str, bool]:
@@ -291,8 +291,8 @@ class SystemMonitor:
             try:
                 await self.run_health_checks()
                 await asyncio.sleep(interval_seconds)
-            except Exception as e:
-                self.error_handler.handle_error('monitoring_loop', e)
+            except Exception as exception:
+                self.error_handler.handle_error('monitoring_loop', exception)
                 await asyncio.sleep(60)  # Пауза при ошибке
 
 

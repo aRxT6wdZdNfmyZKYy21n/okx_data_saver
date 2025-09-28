@@ -588,8 +588,8 @@ class DatabaseMigrator:
             logger.info(
                 f'Проверка торгов завершена. Всего проверено: {total_checked} записей'
             )
-        except Exception as e:
-            logger.error(f'Ошибка при проверки данных торгов: {str(e)}')
+        except Exception as exception:
+            logger.error(f'Ошибка при проверки данных торгов: {str(exception)}')
             raise
 
     async def check_order_book_data(self):
@@ -624,8 +624,8 @@ class DatabaseMigrator:
             logger.info(
                 f'Проверка order book завершена. Всего проверено: {total_checked} записей'
             )
-        except Exception as e:
-            logger.error(f'Ошибка при проверки данных order book: {str(e)}')
+        except Exception as exception:
+            logger.error(f'Ошибка при проверки данных order book: {str(exception)}')
             raise
 
     async def check_candle_data_15m(self):

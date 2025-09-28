@@ -91,8 +91,8 @@ class TestIntegration:
         try:
             # Вызываем несуществующий метод для генерации ошибки
             await g_redis_data_adapter.load_trades_dataframe('nonexistent_symbol')
-        except Exception as e:
-            g_error_handler.handle_error('test_operation', e, {'test': True})
+        except Exception as exception:
+            g_error_handler.handle_error('test_operation', exception, {'test': True})
 
         # Проверяем статистику ошибок
         error_stats = g_error_handler.get_error_stats()

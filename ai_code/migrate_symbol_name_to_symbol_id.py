@@ -269,9 +269,9 @@ def migrate_trade_data_batch(args):
                             )
 
                             trade_data = result.scalar()
-                    except Exception as e:
+                    except Exception as exception:
                         print(
-                            f'[PID {os.getpid()}] Ошибка при получении trade_id={trade_id}: {str(e)}',
+                            f'[PID {os.getpid()}] Ошибка при получении trade_id={trade_id}: {str(exception)}',
                         )
 
                         error_count += 1
@@ -311,10 +311,10 @@ def migrate_trade_data_batch(args):
                             print(
                                 f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей торгов...'
                             )
-                    except Exception as e:
+                    except Exception as exception:
                         error_count += 1
                         print(
-                            f'[PID {os.getpid()}] Ошибка при обработке записи trade_id={getattr(trade_data, "trade_id", "unknown")}: {str(e)}'
+                            f'[PID {os.getpid()}] Ошибка при обработке записи trade_id={getattr(trade_data, "trade_id", "unknown")}: {str(exception)}'
                         )
                         continue
 
@@ -521,9 +521,9 @@ def migrate_order_book_data_batch(args):
                             )
 
                             order_book_data = result.scalar()
-                    except Exception as e:
+                    except Exception as exception:
                         print(
-                            f'[PID {os.getpid()}] Ошибка при получении timestamp_ms={timestamp_ms}: {str(e)}'
+                            f'[PID {os.getpid()}] Ошибка при получении timestamp_ms={timestamp_ms}: {str(exception)}'
                         )
                         error_count += 1
                         continue
@@ -571,10 +571,10 @@ def migrate_order_book_data_batch(args):
                             print(
                                 f'[PID {os.getpid()}] Зафиксировано {migrated_count} записей order book...'
                             )
-                    except Exception as e:
+                    except Exception as exception:
                         error_count += 1
                         print(
-                            f'[PID {os.getpid()}] Ошибка при обработке записи order book timestamp_ms={getattr(order_book_data, "timestamp_ms", "unknown")}: {str(e)}'
+                            f'[PID {os.getpid()}] Ошибка при обработке записи order book timestamp_ms={getattr(order_book_data, "timestamp_ms", "unknown")}: {str(exception)}'
                         )
                         continue
 
@@ -854,8 +854,8 @@ class DatabaseMigrator:
             logger.info(
                 f'Миграция торгов завершена. Всего мигрировано: {total_migrated} записей'
             )
-        except Exception as e:
-            logger.error(f'Ошибка при миграции данных торгов: {str(e)}')
+        except Exception as exception:
+            logger.error(f'Ошибка при миграции данных торгов: {str(exception)}')
             raise
 
     async def migrate_order_book_data(self):
@@ -882,8 +882,8 @@ class DatabaseMigrator:
             logger.info(
                 f'Миграция order book завершена. Всего мигрировано: {total_migrated} записей'
             )
-        except Exception as e:
-            logger.error(f'Ошибка при миграции данных order book: {str(e)}')
+        except Exception as exception:
+            logger.error(f'Ошибка при миграции данных order book: {str(exception)}')
             raise
 
     async def migrate_candle_data_15m(self):

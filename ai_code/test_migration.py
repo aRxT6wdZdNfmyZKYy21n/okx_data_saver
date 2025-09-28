@@ -51,8 +51,8 @@ def test_migration_script_syntax():
     except SyntaxError as e:
         print(f'✗ Синтаксическая ошибка в скрипте миграции: {e}')
         return False
-    except Exception as e:
-        print(f'✗ Ошибка при проверке скрипта миграции: {e}')
+    except Exception as exception:
+        print(f'✗ Ошибка при проверке скрипта миграции: {exception}')
         return False
 
 
@@ -95,14 +95,14 @@ def test_settings_import():
     except ImportError as e:
         print(f'✗ Ошибка импорта модуля settings: {e}')
         return False
-    except Exception as e:
+    except Exception as exception:
         # Игнорируем ошибки валидации, так как .env файл может отсутствовать
-        if 'validation errors' in str(e) or 'Field required' in str(e):
+        if 'validation errors' in str(exception) or 'Field required' in str(exception):
             print(
                 '✓ Структура настроек корректна (ошибка валидации ожидаема без .env файла)'
             )
             return True
-        print(f'✗ Ошибка при проверке настроек: {e}')
+        print(f'✗ Ошибка при проверке настроек: {exception}')
         return False
 
 
