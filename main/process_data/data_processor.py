@@ -331,11 +331,22 @@ class DataProcessor:
             return None
 
         # Получаем номер уровня сглаживания
-        level_num = int(level.split('(')[1].split(')')[0])
+        level_num = int(
+            level.split(
+                '(',
+                maxsplit=1,
+            )[1].split(
+                ')',
+                maxsplit=1,
+            )[0]
+        )
 
         if level_num == 1:
             # Первый уровень сглаживания - обрабатываем сырые данные
-            return await self._calculate_level_1_smoothing(trades_df, existing_data,)
+            return await self._calculate_level_1_smoothing(
+                trades_df,
+                existing_data,
+            )
         else:
             return None
 
@@ -349,15 +360,16 @@ class DataProcessor:
     async def _calculate_level_1_smoothing(
         self,
         trades_df: DataFrame,
-        existing_data: DataFrame | None = None,
+        existing_data: DataFrame | None = None,  # noqa  # not used
     ) -> DataFrame | None:
         """Вычисление первого уровня сглаживания."""
 
         # Обрабатываем данные для создания линий
         line_raw_data_list = []
-        line_raw_data = None
+        line_raw_data: dict | None = None
 
         for trade_data in trades_df.iter_rows(named=True):
+            is_buy = trade_data['is_buy']
             trade_id = trade_data['trade_id']
             price = trade_data['price']
             quantity = trade_data['quantity']
@@ -367,78 +379,56 @@ class DataProcessor:
             if line_raw_data is None:
                 # Начинаем новую линию
                 line_raw_data = {
+                    'is_buy': is_buy,
                     'start_datetime': datetime_,
                     'start_price': price,
                     'start_trade_id': trade_id,
                     'quantity': quantity,
-                    'trading_direction': None,
                     'volume': volume,
                 }
             else:
-                old_trading_direction = line_raw_data['trading_direction']
+                new_is_buy = is_buy
+                old_is_buy = line_raw_data['is_buy']
 
-                if old_trading_direction is None:
-                    # Определяем направление торговли
-                    start_price = line_raw_data['start_price']
-                    end_price = price
-                    new_trading_direction = TradingUtils.get_direction(
-                        start_price, end_price
-                    )
-
+                if old_is_buy == new_is_buy:
+                    # Продолжаем текущую линию
                     line_raw_data.update(
                         {
-                            'end_datetime': datetime_,
-                            'end_price': end_price,
-                            'end_trade_id': trade_id,
                             'quantity': line_raw_data['quantity'] + quantity,
-                            'trading_direction': new_trading_direction,
                             'volume': line_raw_data['volume'] + volume,
                         }
                     )
                 else:
-                    new_end_price = price
-                    old_end_price = line_raw_data['end_price']
-                    new_trading_direction = TradingUtils.get_direction(
-                        old_end_price, new_end_price
+                    # Завершаем текущую линию и начинаем новую
+                    line_raw_data_list.append(
+                        line_raw_data,
                     )
 
-                    if (
-                        old_trading_direction == new_trading_direction
-                        or new_trading_direction == TradingDirection.Cross
-                    ):
-                        # Продолжаем текущую линию
-                        line_raw_data.update(
-                            {
-                                'quantity': line_raw_data['quantity'] + quantity,
-                                'volume': line_raw_data['volume'] + volume,
-                            }
-                        )
-                    else:
-                        # Завершаем текущую линию и начинаем новую
-                        line_raw_data_list.append(line_raw_data)
+                    line_raw_data = {
+                        'is_buy': is_buy,
+                        'start_datetime': line_raw_data['end_datetime'],
+                        'start_trade_id': line_raw_data['end_trade_id'],
+                        'start_price': line_raw_data['end_price'],
+                        'quantity': quantity,
+                        'volume': volume,
+                    }
 
-                        line_raw_data = {
-                            'start_datetime': line_raw_data['end_datetime'],
-                            'start_trade_id': line_raw_data['end_trade_id'],
-                            'start_price': old_end_price,
-                            'quantity': quantity,
-                            'trading_direction': new_trading_direction,
-                            'volume': volume,
-                        }
-
-                    line_raw_data.update(
-                        {
-                            'end_price': new_end_price,
-                            'end_datetime': datetime_,
-                            'end_trade_id': trade_id,
-                        }
-                    )
+            line_raw_data.update(
+                {
+                    'end_price': price,
+                    'end_datetime': datetime_,
+                    'end_trade_id': trade_id,
+                }
+            )
 
         # Завершаем последнюю линию, если она есть
         if line_raw_data is not None:
-            trading_direction = line_raw_data['trading_direction']
-            if trading_direction is not None:
-                line_raw_data_list.append(line_raw_data,)
+            end_trade_id: int | None = line_raw_data.get('end_trade_id',)
+
+            if end_trade_id is not None:
+                line_raw_data_list.append(
+                    line_raw_data,
+                )
 
         if not line_raw_data_list:
             return None
@@ -449,7 +439,7 @@ class DataProcessor:
             line_raw_data_list,
         )
 
-        line_dataframe = line_dataframe.sort('start_trade_id')
+        line_dataframe = line_dataframe.sort('start_trade_id',)
 
         # Создаем сглаженные данные из линий
         trades_smoothed_raw_data_list = []

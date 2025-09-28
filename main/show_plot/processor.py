@@ -290,6 +290,7 @@ class RedisChartProcessor:
 
         # Загружаем данные для нового символа
         from constants.symbol import SymbolConstants
+
         current_symbol_id = SymbolConstants.IdByName[value]
         await self.__load_all_data_for_symbol(current_symbol_id)
 
@@ -486,7 +487,7 @@ class RedisChartProcessor:
 
         if extreme_lines_data is not None:
             extreme_lines_array, position, scale = extreme_lines_data
-            
+
             # Обновляем атрибуты процессора
             self.__extreme_lines_array = extreme_lines_array
             self.__extreme_lines_position = position
@@ -508,7 +509,7 @@ class RedisChartProcessor:
 
         if order_book_data is not None:
             asks_array, bids_array, position, scale = order_book_data
-            
+
             # Обновляем атрибуты процессора
             self.__order_book_volumes_asks_array = asks_array
             self.__order_book_volumes_bids_array = bids_array
