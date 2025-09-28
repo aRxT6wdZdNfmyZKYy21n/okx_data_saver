@@ -192,7 +192,7 @@ class RedisDataService:
         metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=candles_df,
-            compression=CompressionAlgorithm.XZ,
+            compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -251,7 +251,7 @@ class RedisDataService:
         metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=rsi_df,
-            compression=CompressionAlgorithm.XZ,
+            compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -301,7 +301,7 @@ class RedisDataService:
         metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=smoothed_df,
-            compression=CompressionAlgorithm.XZ,
+            compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -350,7 +350,7 @@ class RedisDataService:
         metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=lines_df,
-            compression=CompressionAlgorithm.XZ,
+            compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -410,7 +410,7 @@ class RedisDataService:
         metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=extreme_lines_df,
-            compression=CompressionAlgorithm.XZ,
+            compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -491,7 +491,7 @@ class RedisDataService:
         metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=order_book_df,
-            compression=CompressionAlgorithm.XZ,
+            compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -561,7 +561,7 @@ class RedisDataService:
         metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=velocity_df,
-            compression=CompressionAlgorithm.XZ,
+            compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 

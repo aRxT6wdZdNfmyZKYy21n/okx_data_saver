@@ -540,7 +540,7 @@ class DataProcessor:
             # Создаем массив экстремальных линий
             extreme_lines_array = numpy.zeros((width, height))
 
-            logger.info('Filling extreme line array...')
+            logger.info('Getting line dataframe...')
 
             # Получаем данные линий для первого уровня
             line_dataframe = await g_redis_data_service.load_lines_data(
@@ -552,7 +552,10 @@ class DataProcessor:
                 logger.warning(
                     f'No lines data available for {symbol_id.name}, skipping extreme lines'
                 )
+
                 return
+
+            logger.info('Filling extreme lines...')
 
             active_extreme_line_raw_data_by_price_map: dict[
                 float, dict[str, typing.Any]
@@ -568,15 +571,23 @@ class DataProcessor:
                 left_price = min(end_price, start_price)
                 right_price = max(end_price, start_price)
 
+                active_extreme_line_prices_to_delete: list[float] | None = None
+
                 # Проверяем пересечения с активными линиями
-                for price, extreme_line_raw_data in tuple(
-                    active_extreme_line_raw_data_by_price_map.items(),
+                for price, extreme_line_raw_data in (
+                    active_extreme_line_raw_data_by_price_map.items()
                 ):
                     if not (left_price <= price <= right_price):
                         continue
 
-                    # Удаляем из активных и добавляем в завершенные
-                    active_extreme_line_raw_data_by_price_map.pop(price)
+                    if active_extreme_line_prices_to_delete is None:
+                        active_extreme_line_prices_to_delete = []
+
+                    active_extreme_line_prices_to_delete.append(
+                        price,
+                    )
+
+                    # Добавляем в завершенные
 
                     extreme_line_raw_data.update(
                         {
@@ -585,12 +596,26 @@ class DataProcessor:
                         }
                     )
 
-                    extreme_line_raw_data_list.append(extreme_line_raw_data)
+                    extreme_line_raw_data_list.append(
+                        extreme_line_raw_data,
+                    )
+
+                if active_extreme_line_prices_to_delete is not None:
+                    for price in active_extreme_line_prices_to_delete:
+                        # Удаляем из активных
+                        active_extreme_line_raw_data_by_price_map.pop(
+                            price,
+                        )
+
+                    active_extreme_line_prices_to_delete.clear()
+                    active_extreme_line_prices_to_delete = None  # noqa
 
                 # Проверяем, что цены не дублируются
+
                 assert end_price not in active_extreme_line_raw_data_by_price_map, (
                     end_price,
                 )
+
                 assert start_price not in active_extreme_line_raw_data_by_price_map, (
                     start_price,
                 )
@@ -624,6 +649,8 @@ class DataProcessor:
                 extreme_line_raw_data_list.append(extreme_line_raw_data)
 
             active_extreme_line_raw_data_by_price_map.clear()
+
+            logger.info('Filling extreme line array...')
 
             # Заполняем массив экстремальных линий
             for extreme_line_raw_data in extreme_line_raw_data_list:

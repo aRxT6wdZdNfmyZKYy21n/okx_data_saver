@@ -949,19 +949,22 @@ class FinPlotChartWindow(QMainWindow):
 
         extreme_lines_image_item = self.__extreme_lines_image_item
 
-        extreme_lines_image_item.setPos(
-            QPointF(
-                *extreme_lines_position,
-            ),
-        )
+        if extreme_lines_position is not None:
+            extreme_lines_image_item.setPos(
+                QPointF(
+                    *extreme_lines_position,
+                ),
+            )
 
-        extreme_lines_image_item.setImage(
-            extreme_lines_array,
-        )
+        if extreme_lines_array is not None:
+            extreme_lines_image_item.setImage(
+                extreme_lines_array,
+            )
 
-        extreme_lines_image_item.setScale(
-            extreme_lines_scale,
-        )
+        if extreme_lines_scale is not None:
+            extreme_lines_image_item.setScale(
+                extreme_lines_scale,
+            )
 
         order_book_volumes_asks_array = processor.get_order_book_volumes_asks_array()
 

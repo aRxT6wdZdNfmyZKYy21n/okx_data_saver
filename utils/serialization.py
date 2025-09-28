@@ -7,6 +7,9 @@ import lzma
 
 import lz4.frame
 import polars
+from chrono import (
+    Timer,
+)
 
 from enumerations.compression import (
     CompressionAlgorithm,
@@ -41,28 +44,32 @@ def serialize_dataframe(
 
     # Применение сжатия
 
-    if compression == CompressionAlgorithm.XZ:
-        # xz обеспечивает лучшее сжатие для финансовых данных
-        compressed_data = lzma.compress(
-            ipc_data,
-            preset=6,  # баланс скорость/сжатие
-            # preset=lzma.PRESET_EXTREME,  # Максимальное сжатие
-        )
-    elif compression == CompressionAlgorithm.LZ4:
-        # lz4 для быстрого сжатия когда размер не критичен
-        compressed_data = lz4.frame.compress(
-            ipc_data,
-        )
+    with Timer() as timer:
+        if compression == CompressionAlgorithm.XZ:
+            # xz обеспечивает лучшее сжатие для финансовых данных
+            compressed_data = lzma.compress(
+                ipc_data,
+                preset=6,  # баланс скорость/сжатие
+                # preset=lzma.PRESET_EXTREME,  # Максимальное сжатие
+            )
+        elif compression == CompressionAlgorithm.LZ4:
+            # lz4 для быстрого сжатия когда размер не критичен
+            compressed_data = lz4.frame.compress(
+                ipc_data,
+            )
+        elif compression == CompressionAlgorithm.NONE:
+            compressed_data = ipc_data
+        else:
+            raise ValueError(
+                f'Unsupported compression: {compression}',
+            )
 
-        print(
-            f'Compressed size: {len(compressed_data)}, uncompressed size: {len(ipc_data)} ({100 * len(compressed_data) / len(ipc_data):.3f}%)'
-        )
-    elif compression == CompressionAlgorithm.NONE:
-        compressed_data = ipc_data
-    else:
-        raise ValueError(
-            f'Unsupported compression: {compression}',
-        )
+    print(
+        f'[Serialize][{compression.name}] Compressed size: {len(compressed_data)}B'
+        f', uncompressed size: {len(ipc_data)}B'
+        f' ({100 * len(compressed_data) / len(ipc_data):.3f}%)'
+        f' by {timer.elapsed:.3f}s',
+    )
 
     return compressed_data
 
@@ -85,17 +92,28 @@ def deserialize_dataframe(
         ValueError: Если указан неподдерживаемый алгоритм сжатия
     """
     # Распаковка сжатия
-    if compression == CompressionAlgorithm.XZ:
-        ipc_data = lzma.decompress(data)
-    elif compression == CompressionAlgorithm.LZ4:
-        ipc_data = lz4.frame.decompress(data)
-    elif compression == CompressionAlgorithm.NONE:
-        ipc_data = data
-    else:
-        raise ValueError(f'Unsupported compression: {compression.name}')
+
+    with Timer() as timer:
+        if compression == CompressionAlgorithm.XZ:
+            ipc_data = lzma.decompress(data)
+        elif compression == CompressionAlgorithm.LZ4:
+            ipc_data = lz4.frame.decompress(data)
+        elif compression == CompressionAlgorithm.NONE:
+            ipc_data = data
+        else:
+            raise ValueError(f'Unsupported compression: {compression.name}')
+
+    print(
+        f'[Deserialize][{compression.name}] Compressed size: {len(data)}B'
+        f', uncompressed size: {len(ipc_data)}B'
+        f' ({100 * len(data) / len(ipc_data):.3f}%)'
+        f' by {timer.elapsed:.3f}s',
+    )
 
     # Десериализация из IPC формата
+
     buffer = io.BytesIO(ipc_data)
+
     return polars.read_ipc(buffer)
 
 
