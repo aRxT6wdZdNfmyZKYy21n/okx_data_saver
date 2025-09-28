@@ -69,23 +69,27 @@ class DataValidator:
         price_range = self.validation_rules['trades_data']['price_range']
         if 'price' in df.columns:
             price_stats = df.get_column('price').describe()
-            if (
-                price_stats['min'] < price_range[0]
-                or price_stats['max'] > price_range[1]
-            ):
-                errors.append(
-                    f'Price values out of range: {price_stats["min"]}-{price_stats["max"]}'
-                )
+            min_price = price_stats.filter(pl.col('statistic') == 'min').get_column(
+                'value'
+            )[0]
+            max_price = price_stats.filter(pl.col('statistic') == 'max').get_column(
+                'value'
+            )[0]
+            if min_price < price_range[0] or max_price > price_range[1]:
+                errors.append(f'Price values out of range: {min_price}-{max_price}')
 
         quantity_range = self.validation_rules['trades_data']['quantity_range']
         if 'quantity' in df.columns:
             quantity_stats = df.get_column('quantity').describe()
-            if (
-                quantity_stats['min'] < quantity_range[0]
-                or quantity_stats['max'] > quantity_range[1]
-            ):
+            min_quantity = quantity_stats.filter(
+                pl.col('statistic') == 'min'
+            ).get_column('value')[0]
+            max_quantity = quantity_stats.filter(
+                pl.col('statistic') == 'max'
+            ).get_column('value')[0]
+            if min_quantity < quantity_range[0] or max_quantity > quantity_range[1]:
                 errors.append(
-                    f'Quantity values out of range: {quantity_stats["min"]}-{quantity_stats["max"]}'
+                    f'Quantity values out of range: {min_quantity}-{max_quantity}'
                 )
 
         # Проверяем уникальность trade_id

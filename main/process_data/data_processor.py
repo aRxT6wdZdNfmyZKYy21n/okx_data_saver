@@ -17,19 +17,14 @@ from constants.common import CommonConstants
 from constants.plot import PlotConstants
 from enumerations import (
     SymbolId,
-    TradingDirection,
 )
 from main.process_data.redis_service import g_redis_data_service
-from utils.trading import TradingUtils
 
 logger = logging.getLogger(__name__)
 
 
 class DataProcessor:
     """Процессор для обработки финансовых данных."""
-
-    def __init__(self):
-        self.redis_service = g_redis_data_service
 
     async def process_trades_data(
         self,
@@ -80,7 +75,6 @@ class DataProcessor:
         # Обработка данных скорости
         await self._process_velocity_data(
             symbol_id,
-            trades_df,
         )
 
         logger.info(
@@ -109,7 +103,7 @@ class DataProcessor:
 
             if not upper_band.is_empty():
                 # Сохраняем в Redis
-                await self.redis_service.save_bollinger_data(
+                await g_redis_data_service.save_bollinger_data(
                     symbol_id=symbol_id,
                     upper_band=upper_band,
                     middle_band=middle_band,
@@ -150,7 +144,7 @@ class DataProcessor:
         last_candle_raw_data: dict[str, typing.Any] | None = None
 
         # Получаем существующие данные из Redis
-        existing_candles = await self.redis_service.load_candles_data(
+        existing_candles = await g_redis_data_service.load_candles_data(
             symbol_id,
             interval_name,
         )
@@ -242,7 +236,7 @@ class DataProcessor:
             min_trade_id = int(final_candles.get_column('start_trade_id').min())
             max_trade_id = int(final_candles.get_column('end_trade_id').max())
 
-            await self.redis_service.save_candles_data(
+            await g_redis_data_service.save_candles_data(
                 symbol_id=symbol_id,
                 interval=interval_name,
                 candles_df=final_candles,
@@ -258,7 +252,7 @@ class DataProcessor:
         """Обработка RSI данных."""
         with Timer() as timer:
             # Получаем свечные данные для расчета RSI с кэшированием
-            candles_df = await self.redis_service.load_candles_data(
+            candles_df = await g_redis_data_service.load_candles_data(
                 symbol_id=symbol_id,
                 interval='1m',
             )
@@ -274,7 +268,7 @@ class DataProcessor:
                 rsi_series = rsi_df.get_column('rsi')
 
                 if not rsi_series.is_empty():
-                    await self.redis_service.save_rsi_data(
+                    await g_redis_data_service.save_rsi_data(
                         symbol_id=symbol_id,
                         interval='1m',
                         rsi_series=rsi_series,
@@ -295,74 +289,85 @@ class DataProcessor:
                 if level == 'Raw (0)':
                     continue
 
-                existing_data = await self.redis_service.load_smoothed_data(
-                    symbol_id,
-                    level,
+                # Получаем номер уровня сглаживания
+                level_num = int(
+                    level.split(
+                        '(',
+                        maxsplit=1,
+                    )[1].split(
+                        ')',
+                        maxsplit=1,
+                    )[0]
                 )
 
-                smoothed_df = await self._calculate_smoothed_data(
-                    trades_df=trades_df,
-                    level=level,
-                    existing_data=existing_data,
-                )
-
-                if smoothed_df is not None and smoothed_df.height > 0:
-                    min_trade_id = int(smoothed_df.get_column('trade_id').min())
-                    max_trade_id = int(smoothed_df.get_column('trade_id').max())
-
-                    await self.redis_service.save_smoothed_data(
+                if level_num == 1:
+                    # Для первого уровня обрабатываем линии и сглаженные данные отдельно
+                    await self._process_level_1_data(
                         symbol_id=symbol_id,
+                        trades_df=trades_df,
                         level=level,
-                        smoothed_df=smoothed_df,
-                        min_trade_id=min_trade_id,
-                        max_trade_id=max_trade_id,
                     )
+                else:
+                    return
 
         logger.info(f'Smoothed data processed in {timer.elapsed:.3f}s')
 
-    async def _calculate_smoothed_data(
+    async def _process_level_1_data(
         self,
+        symbol_id: SymbolId,
         trades_df: DataFrame,
         level: str,
-        existing_data: DataFrame | None = None,
-    ) -> DataFrame | None:
-        """Вычисление сглаженных данных для конкретного уровня."""
-        if level == 'Raw (0)':
-            return None
-
-        # Получаем номер уровня сглаживания
-        level_num = int(
-            level.split(
-                '(',
-                maxsplit=1,
-            )[1].split(
-                ')',
-                maxsplit=1,
-            )[0]
+    ) -> None:
+        """Обработка данных первого уровня сглаживания (линии и сглаженные данные)."""
+        # Вычисляем новые линии
+        new_lines_df = await self._calculate_level_1_lines(
+            trades_df,
         )
 
-        if level_num == 1:
-            # Первый уровень сглаживания - обрабатываем сырые данные
-            return await self._calculate_level_1_smoothing(
-                trades_df,
-                existing_data,
-            )
-        else:
-            return None
+        if new_lines_df is None or not new_lines_df.height:
+            return
 
-            # Последующие уровни - обрабатываем данные предыдущего уровня
-            if existing_data is None:
-                return None
-            return await self._calculate_higher_level_smoothing(
-                existing_data, level_num
+        # Сортируем по start_trade_id
+        final_lines_df = new_lines_df.sort('start_trade_id')
+
+        # Сохраняем линии в Redis
+        min_trade_id = int(final_lines_df.get_column('start_trade_id').min())
+        max_trade_id = int(final_lines_df.get_column('end_trade_id').max())
+
+        await g_redis_data_service.save_lines_data(
+            symbol_id=symbol_id,
+            level=level,
+            lines_df=final_lines_df,
+            min_trade_id=min_trade_id,
+            max_trade_id=max_trade_id,
+        )
+
+        # Вычисляем сглаженные данные из линий
+        smoothed_df = await self._calculate_smoothed_from_lines(
+            final_lines_df,
+        )
+
+        if smoothed_df is not None and smoothed_df.height > 0:
+            # Получаем существующие сглаженные данные
+            final_smoothed_df = smoothed_df.sort('trade_id')
+
+            # Сохраняем сглаженные данные в Redis
+            min_trade_id = int(final_smoothed_df.get_column('trade_id').min())
+            max_trade_id = int(final_smoothed_df.get_column('trade_id').max())
+
+            await g_redis_data_service.save_smoothed_data(
+                symbol_id=symbol_id,
+                level=level,
+                smoothed_df=final_smoothed_df,
+                min_trade_id=min_trade_id,
+                max_trade_id=max_trade_id,
             )
 
-    async def _calculate_level_1_smoothing(
+    async def _calculate_level_1_lines(
         self,
         trades_df: DataFrame,
-        existing_data: DataFrame | None = None,  # noqa  # not used
     ) -> DataFrame | None:
-        """Вычисление первого уровня сглаживания."""
+        """Вычисление линий для первого уровня сглаживания."""
 
         # Обрабатываем данные для создания линий
         line_raw_data_list = []
@@ -423,7 +428,9 @@ class DataProcessor:
 
         # Завершаем последнюю линию, если она есть
         if line_raw_data is not None:
-            end_trade_id: int | None = line_raw_data.get('end_trade_id',)
+            end_trade_id: int | None = line_raw_data.get(
+                'end_trade_id',
+            )
 
             if end_trade_id is not None:
                 line_raw_data_list.append(
@@ -434,12 +441,19 @@ class DataProcessor:
             return None
 
         # Создаем DataFrame из линий
-
         line_dataframe = polars.DataFrame(
             line_raw_data_list,
         )
 
-        line_dataframe = line_dataframe.sort('start_trade_id',)
+        return line_dataframe.sort(
+            'start_trade_id',
+        )
+
+    @staticmethod
+    async def _calculate_smoothed_from_lines(
+        line_dataframe: DataFrame,
+    ) -> DataFrame | None:
+        """Вычисление сглаженных данных из линий."""
 
         # Создаем сглаженные данные из линий
         trades_smoothed_raw_data_list = []
@@ -476,16 +490,20 @@ class DataProcessor:
             'trade_id',
         )
 
-    async def _calculate_higher_level_smoothing(
+    async def _calculate_level_1_smoothing(
         self,
-        previous_level_data: DataFrame,
-        level_num: int,
+        trades_df: DataFrame,
+        existing_data: DataFrame | None = None,  # noqa  # not used
     ) -> DataFrame | None:
-        """Вычисление сглаживания для уровней выше первого."""
-        # Для упрощения пока возвращаем данные предыдущего уровня
-        # В полной реализации здесь должна быть логика объединения линий
-        # по торговым направлениям и другим критериям
-        return previous_level_data
+        """Вычисление первого уровня сглаживания."""
+        # Получаем линии
+        line_dataframe = await self._calculate_level_1_lines(trades_df)
+
+        if line_dataframe is None:
+            return None
+
+        # Создаем сглаженные данные из линий
+        return await self._calculate_smoothed_from_lines(line_dataframe)
 
     async def _process_extreme_lines(
         self,
@@ -512,21 +530,122 @@ class DataProcessor:
 
             aspect_ratio = delta_trade_id / delta_price
             height = 100
-            scale = delta_price / height
+            extreme_lines_scale = delta_price / height
             width = int(height * aspect_ratio)
+
+            logger.info(
+                f'Creating extreme line array ({width} x {height}, scale {extreme_lines_scale}, aspect ratio {aspect_ratio})'
+            )
 
             # Создаем массив экстремальных линий
             extreme_lines_array = numpy.zeros((width, height))
 
-            # Упрощенная логика заполнения массива
-            # В реальной реализации здесь должна быть полная логика из processor.py
+            logger.info('Filling extreme line array...')
 
-            await self.redis_service.save_extreme_lines_data(
+            # Получаем данные линий для первого уровня
+            line_dataframe = await g_redis_data_service.load_lines_data(
+                symbol_id=symbol_id,
+                level='Smoothed (1)',
+            )
+
+            if line_dataframe is None or line_dataframe.height == 0:
+                logger.warning(
+                    f'No lines data available for {symbol_id.name}, skipping extreme lines'
+                )
+                return
+
+            active_extreme_line_raw_data_by_price_map: dict[
+                float, dict[str, typing.Any]
+            ] = {}
+            extreme_line_raw_data_list: list[dict[str, typing.Any]] = []
+
+            for line_data in line_dataframe.iter_rows(named=True):
+                end_trade_id = int(line_data['end_trade_id'])
+                start_trade_id = int(line_data['start_trade_id'])
+                end_price = line_data['end_price']
+                start_price = line_data['start_price']
+
+                left_price = min(end_price, start_price)
+                right_price = max(end_price, start_price)
+
+                # Проверяем пересечения с активными линиями
+                for price, extreme_line_raw_data in tuple(
+                    active_extreme_line_raw_data_by_price_map.items(),
+                ):
+                    if not (left_price <= price <= right_price):
+                        continue
+
+                    # Удаляем из активных и добавляем в завершенные
+                    active_extreme_line_raw_data_by_price_map.pop(price)
+
+                    extreme_line_raw_data.update(
+                        {
+                            'end_trade_id': start_trade_id,
+                            'price': price,
+                        }
+                    )
+
+                    extreme_line_raw_data_list.append(extreme_line_raw_data)
+
+                # Проверяем, что цены не дублируются
+                assert end_price not in active_extreme_line_raw_data_by_price_map, (
+                    end_price,
+                )
+                assert start_price not in active_extreme_line_raw_data_by_price_map, (
+                    start_price,
+                )
+
+                # Добавляем новые активные линии
+                active_extreme_line_raw_data_by_price_map.update(
+                    {
+                        end_price: {
+                            'end_trade_id': None,
+                            'start_trade_id': end_trade_id,
+                        },
+                        start_price: {
+                            'end_trade_id': None,
+                            'start_trade_id': start_trade_id,
+                        },
+                    }
+                )
+
+            # Завершаем оставшиеся активные линии
+            for (
+                price,
+                extreme_line_raw_data,
+            ) in active_extreme_line_raw_data_by_price_map.items():
+                extreme_line_raw_data.update(
+                    {
+                        'end_trade_id': max_trade_id,
+                        'price': price,
+                    }
+                )
+
+                extreme_line_raw_data_list.append(extreme_line_raw_data)
+
+            active_extreme_line_raw_data_by_price_map.clear()
+
+            # Заполняем массив экстремальных линий
+            for extreme_line_raw_data in extreme_line_raw_data_list:
+                end_trade_id: int = extreme_line_raw_data['end_trade_id']
+                price: float = extreme_line_raw_data['price']
+                start_trade_id: int = extreme_line_raw_data['start_trade_id']
+
+                end_x = int((end_trade_id - min_trade_id) / extreme_lines_scale)
+                start_x = int((start_trade_id - min_trade_id) / extreme_lines_scale)
+                y = min(int((price - min_price) / extreme_lines_scale), height - 1)
+
+                # Заполняем массив значениями от 0 до длины линии
+                extreme_lines_array[start_x:end_x, y] = numpy.arange(
+                    end_x - start_x,
+                )
+
+            await g_redis_data_service.save_extreme_lines_data(
                 symbol_id=symbol_id,
                 extreme_lines_array=extreme_lines_array,
                 width=width,
                 height=height,
-                scale=scale,
+                scale=extreme_lines_scale,
                 min_trade_id=min_trade_id,
                 min_price=min_price,
             )
@@ -569,7 +688,7 @@ class DataProcessor:
             # Упрощенная логика заполнения массивов
             # В реальной реализации здесь должна быть полная логика из processor.py
 
-            await self.redis_service.save_order_book_volumes_data(
+            await g_redis_data_service.save_order_book_volumes_data(
                 symbol_id=symbol_id,
                 asks_array=asks_array,
                 bids_array=bids_array,
@@ -585,12 +704,11 @@ class DataProcessor:
     async def _process_velocity_data(
         self,
         symbol_id: SymbolId,
-        trades_df: DataFrame,
     ) -> None:
         """Обработка данных скорости."""
         with Timer() as timer:
             # Получаем свечные данные для расчета скорости
-            candles_df = await self.redis_service.load_candles_data(
+            candles_df = await g_redis_data_service.load_candles_data(
                 symbol_id,
                 '1m',
             )
@@ -598,7 +716,7 @@ class DataProcessor:
             if candles_df is not None and candles_df.height > 0:
                 velocity_series = candles_df.get_column('trades_count')
 
-                await self.redis_service.save_velocity_data(
+                await g_redis_data_service.save_velocity_data(
                     symbol_id=symbol_id,
                     interval='1m',
                     velocity_series=velocity_series,

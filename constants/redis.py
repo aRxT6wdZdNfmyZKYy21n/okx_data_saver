@@ -14,6 +14,7 @@ BOLLINGER_PREFIX: Final[str] = 'bollinger'
 CANDLES_PREFIX: Final[str] = 'candles'
 RSI_PREFIX: Final[str] = 'rsi'
 SMOOTHED_PREFIX: Final[str] = 'smoothed'
+LINES_PREFIX: Final[str] = 'lines'
 EXTREME_LINES_PREFIX: Final[str] = 'extreme_lines'
 ORDER_BOOK_VOLUMES_PREFIX: Final[str] = 'order_book_volumes'
 VELOCITY_PREFIX: Final[str] = 'velocity'
@@ -55,6 +56,11 @@ def get_rsi_key(symbol_id: SymbolId) -> str:
 def get_smoothed_key(symbol_id: SymbolId, level: str) -> str:
     """Получение ключа для сглаженных данных по уровню."""
     return f'{TRADES_PREFIX}:{symbol_id}:{SMOOTHED_PREFIX}:{level}'
+
+
+def get_lines_key(symbol_id: SymbolId, level: str) -> str:
+    """Получение ключа для линий по уровню."""
+    return f'{TRADES_PREFIX}:{symbol_id}:{LINES_PREFIX}:{level}'
 
 
 def get_extreme_lines_key(symbol_id: SymbolId) -> str:

@@ -21,6 +21,7 @@ from constants.plot import (
 from constants.symbol import (
     SymbolConstants,
 )
+
 from enumerations import (
     SymbolId,
 )
@@ -240,9 +241,12 @@ class RedisChartProcessor:
 
         # Обновляем RSI данные для текущего символа
         current_symbol_name = self.__current_symbol_name
-        if current_symbol_name:
+        if current_symbol_name is not None:
             current_symbol_id = SymbolConstants.IdByName[current_symbol_name]
-            await self.__update_rsi_series(current_symbol_id)
+
+            await self.__update_rsi_series(
+                current_symbol_id,
+            )
 
         window = self.__window
 
@@ -289,7 +293,6 @@ class RedisChartProcessor:
         self.__velocity_series = None
 
         # Загружаем данные для нового символа
-        from constants.symbol import SymbolConstants
 
         current_symbol_id = SymbolConstants.IdByName[value]
         await self.__load_all_data_for_symbol(current_symbol_id)

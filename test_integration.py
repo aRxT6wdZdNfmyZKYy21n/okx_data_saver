@@ -8,7 +8,9 @@ from datetime import UTC, datetime
 
 import polars
 import pytest
+import pytest_asyncio
 
+from enumerations import SymbolId
 from main.process_data.data_processor import g_data_processor
 from main.process_data.data_validator import g_data_validator
 from main.process_data.monitoring import g_error_handler, g_system_monitor
@@ -22,13 +24,14 @@ logger = logging.getLogger(__name__)
 class TestIntegration:
     """Интеграционные тесты для всей системы."""
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def redis_connection(self):
         """Фикстура для подключения к Redis."""
         await g_redis_manager.connect()
         yield g_redis_manager
         await g_redis_manager.disconnect()
 
+    @pytest.mark.asyncio
     async def test_full_data_processing_pipeline(self, redis_connection):
         """Тест полного пайплайна обработки данных."""
         # Создаем тестовые данные
@@ -38,10 +41,13 @@ class TestIntegration:
                 'price': [100.0 + i * 0.1 for i in range(100)],
                 'quantity': [1.0 + i * 0.01 for i in range(100)],
                 'datetime': [datetime.now(UTC) for _ in range(100)],
+                'is_buy': [
+                    i % 2 == 0 for i in range(100)
+                ],  # Чередуем покупки и продажи
             }
         )
 
-        symbol_id = 'test_symbol'
+        symbol_id = SymbolId.BTC_USDT
 
         try:
             # 1. Сохраняем данные о сделках
@@ -82,9 +88,9 @@ class TestIntegration:
 
         finally:
             # Очищаем тестовые данные
-            await g_redis_manager.client.delete(f'trades:{symbol_id}:data')
-            await g_redis_manager.client.delete(f'trades:{symbol_id}:data:metadata')
+            await g_redis_manager.delete_dataframe(f'trades:{symbol_id}:data')
 
+    @pytest.mark.asyncio
     async def test_error_handling_and_monitoring(self, redis_connection):
         """Тест обработки ошибок и мониторинга."""
         # Тестируем обработку ошибок
@@ -107,6 +113,7 @@ class TestIntegration:
 
         logger.info('Error handling and monitoring test passed')
 
+    @pytest.mark.asyncio
     async def test_data_consistency_across_components(self, redis_connection):
         """Тест согласованности данных между компонентами."""
         # Создаем тестовые данные
@@ -116,10 +123,11 @@ class TestIntegration:
                 'price': [100.0 + i * 0.5 for i in range(20)],
                 'quantity': [1.0 + i * 0.1 for i in range(20)],
                 'datetime': [datetime.now(UTC) for _ in range(20)],
+                'is_buy': [i % 2 == 0 for i in range(20)],  # Чередуем покупки и продажи
             }
         )
 
-        symbol_id = 'consistency_test'
+        symbol_id = SymbolId.BTC_USDT
 
         try:
             # Сохраняем и обрабатываем данные
@@ -161,14 +169,25 @@ class TestIntegration:
 
         finally:
             # Очищаем тестовые данные
-            await g_redis_manager.client.delete(f'trades:{symbol_id}:data')
-            await g_redis_manager.client.delete(f'trades:{symbol_id}:data:metadata')
+            await g_redis_manager.delete_dataframe(f'trades:{symbol_id}:data')
 
+    @pytest.mark.asyncio
     async def test_performance_under_load(self, redis_connection):
         """Тест производительности под нагрузкой."""
         import time
 
-        symbol_ids = [f'test_symbol_{i}' for i in range(10)]
+        symbol_ids = [
+            SymbolId.BTC_USDT,
+            SymbolId.ETH_USDT,
+            SymbolId.BNB_USDT,
+            SymbolId.ADA_USDT,
+            SymbolId.SOL_USDT,
+            SymbolId.XRP_USDT,
+            SymbolId.DOT_USDT,
+            SymbolId.DOGE_USDT,
+            SymbolId.AVAX_USDT,
+            SymbolId.SHIB_USDT,
+        ]
 
         try:
             # Создаем данные для нескольких символов
@@ -216,23 +235,25 @@ class TestIntegration:
         finally:
             # Очищаем тестовые данные
             for symbol_id in symbol_ids:
-                await g_redis_manager.client.delete(f'trades:{symbol_id}:data')
-                await g_redis_manager.client.delete(f'trades:{symbol_id}:data:metadata')
+                await g_redis_manager.delete(f'trades:{symbol_id}:data')
+                await g_redis_manager.delete(f'trades:{symbol_id}:data:metadata')
 
+    @pytest.mark.asyncio
     async def test_redis_connection_resilience(self, redis_connection):
         """Тест устойчивости подключения к Redis."""
         # Проверяем, что подключение работает
-        await g_redis_manager.client.ping()
+        await g_redis_manager.ping()
 
         # Тестируем повторное подключение
         await g_redis_manager.disconnect()
         await g_redis_manager.connect()
 
         # Проверяем, что подключение восстановилось
-        await g_redis_manager.client.ping()
+        await g_redis_manager.ping()
 
         logger.info('Redis connection resilience test passed')
 
+    @pytest.mark.asyncio
     async def test_data_validation_comprehensive(self, redis_connection):
         """Комплексный тест валидации данных."""
         # Создаем корректные данные

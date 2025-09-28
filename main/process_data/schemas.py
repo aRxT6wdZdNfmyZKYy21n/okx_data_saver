@@ -65,6 +65,15 @@ class SmoothedMetadata(DataFrameMetadata):
     max_trade_id: int = Field(..., description='Максимальный ID сделки')
 
 
+class LinesMetadata(DataFrameMetadata):
+    """Метаданные для линий."""
+
+    symbol_id: SymbolId = Field(..., description='ID символа')
+    level: str = Field(..., description='Уровень сглаживания')
+    min_trade_id: int = Field(..., description='Минимальный ID сделки')
+    max_trade_id: int = Field(..., description='Максимальный ID сделки')
+
+
 class ExtremeLinesMetadata(DataFrameMetadata):
     """Метаданные для экстремальных линий."""
 

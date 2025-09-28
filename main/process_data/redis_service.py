@@ -15,6 +15,7 @@ from constants.redis import (
     get_bollinger_key,
     get_candles_key,
     get_extreme_lines_key,
+    get_lines_key,
     get_metadata_key,
     get_order_book_volumes_key,
     get_rsi_key,
@@ -30,6 +31,7 @@ from main.process_data.schemas import (
     BollingerMetadata,
     CandlesMetadata,
     ExtremeLinesMetadata,
+    LinesMetadata,
     OrderBookVolumesMetadata,
     ProcessingStatus,
     RSIMetadata,
@@ -331,6 +333,55 @@ class RedisDataService:
     ) -> Any | None:  # Optional[polars.DataFrame]
         """Загрузка сглаженных данных."""
         key = get_smoothed_key(symbol_id, level)
+        return await g_redis_manager.load_dataframe(key)
+
+    async def save_lines_data(
+        self,
+        symbol_id: SymbolId,
+        level: str,
+        lines_df: Any,  # polars.DataFrame
+        min_trade_id: int,
+        max_trade_id: int,
+    ) -> LinesMetadata:
+        """Сохранение данных линий."""
+        key = get_lines_key(symbol_id, level)
+
+        # Сохраняем DataFrame
+        metadata = await g_redis_manager.save_dataframe(
+            key=key,
+            dataframe=lines_df,
+            compression=CompressionAlgorithm.XZ,
+            max_size_bytes=MAX_PART_SIZE_BYTES,
+        )
+
+        # Создаем полные метаданные
+        lines_metadata = LinesMetadata(
+            **metadata,
+            symbol_id=symbol_id,
+            level=level,
+            min_trade_id=min_trade_id,
+            max_trade_id=max_trade_id,
+            last_updated=datetime.now(UTC),
+        )
+
+        # Сохраняем метаданные
+        await g_redis_manager.set_metadata(
+            key,
+            lines_metadata.model_dump_json(),
+        )
+
+        logger.info(
+            f'Saved lines data for {symbol_id.name}:{level}: {lines_metadata.total_size} bytes'
+        )
+        return lines_metadata
+
+    async def load_lines_data(
+        self,
+        symbol_id: SymbolId,
+        level: str,
+    ) -> Any | None:  # Optional[polars.DataFrame]
+        """Загрузка данных линий."""
+        key = get_lines_key(symbol_id, level)
         return await g_redis_manager.load_dataframe(key)
 
     async def save_extreme_lines_data(
