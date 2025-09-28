@@ -18,9 +18,9 @@ from utils.serialization import (
     deserialize_dataframe,
     estimate_dataframe_size,
     get_compression_ratio,
-    merge_dataframe_chunks,
+    merge_compressed_data_chunks,
     serialize_dataframe,
-    split_dataframe_by_size,
+    split_compressed_data_by_size,
 )
 
 logger = logging.getLogger(
@@ -105,6 +105,11 @@ class RedisManager:
         """
         Сохранение DataFrame в Redis с разбивкой на части при необходимости.
 
+        Новый алгоритм:
+        1) Сжимаем DataFrame один раз
+        2) Разбиваем сжатые данные на чанки при необходимости
+        3) Сохраняем чанки
+
         Args:
             key: Ключ Redis
             dataframe: Polars DataFrame
@@ -114,100 +119,70 @@ class RedisManager:
         Returns:
             Метаданные о сохранении
         """
-        if not self.__redis:
+        redis_ = self.__redis
+        if not redis_:
             raise RuntimeError('Redis not connected')
 
-        # Оценка размера
-        estimated_size = estimate_dataframe_size(
+        # Шаг 1: Сжимаем DataFrame один раз
+        logger.info(f'[save_dataframe][{key}]: Compressing DataFrame...')
+
+        compressed_data = serialize_dataframe(
             dataframe,
             compression,
         )
 
-        if estimated_size <= max_size_bytes:
-            # Сохраняем как единое целое
-            compressed_data = serialize_dataframe(
-                dataframe,
-                compression,
-            )
-            await self.__redis.set(
-                key,
-                compressed_data,
-            )
+        logger.info(
+            f'[save_dataframe][{key}]: compressed_size: {len(compressed_data)}B',
+        )
 
-            metadata = {
-                'compression': str(compression.value),
-                'compression_ratio': get_compression_ratio(
-                    len(dataframe),
-                    len(compressed_data),
-                ),
-                'parts_count': 1,
-                'total_size': len(compressed_data),
-            }
+        # Шаг 2: Разбиваем сжатые данные на чанки при необходимости
+        data_chunks = split_compressed_data_by_size(
+            compressed_data,
+            max_size_bytes,
+        )
 
-            # Сохраняем метаданные
-            await self.__redis.set(
-                f'{key}:metadata',
-                json.dumps(metadata),
-            )
-
-        else:
-            # Разбиваем на части
-            chunks = split_dataframe_by_size(
-                dataframe,
-                max_size_bytes,
-            )
-
-            # Сохраняем каждую часть
-            for i, chunk in enumerate(chunks):
-                chunk_key = f'{key}:part_{i}'
-
-                compressed_data = serialize_dataframe(
-                    chunk,
-                    compression,
-                )
-
-                await self.__redis.set(
-                    chunk_key,
-                    compressed_data,
-                )
-
-            metadata = {
-                'compression': str(compression.value),
-                'compression_ratio': get_compression_ratio(
-                    estimate_dataframe_size(
-                        dataframe,
-                        CompressionAlgorithm.NONE,
-                    ),
-                    sum(
-                        estimate_dataframe_size(
-                            chunk,
-                            compression,
-                        )
-                        for chunk in chunks
-                    ),
-                ),
-                'parts_count': len(
-                    chunks,
-                ),
-                'total_size': sum(
-                    len(
-                        serialize_dataframe(
-                            chunk,
-                            compression,
-                        ),
-                    )
-                    for chunk in chunks
-                ),
-            }
-
-            # Сохраняем метаданные
-            await self.__redis.set(
-                f'{key}:metadata',
-                json.dumps(metadata),
-            )
+        parts_count = len(
+            data_chunks,
+        )
 
         logger.info(
-            f'Saved DataFrame to Redis: {key}, size: {metadata["total_size"]} bytes',
+            f'[save_dataframe][{key}]: Split into {parts_count} chunks',
+        )
+
+        # Шаг 3: Сохраняем чанки
+        if parts_count == 1:
+            # Сохраняем как единое целое
+            await redis_.set(key, compressed_data)
+        else:
+            # Сохраняем каждый чанк
+            for i, chunk in enumerate(data_chunks):
+                chunk_key = f'{key}:part_{i}'
+                await redis_.set(chunk_key, chunk)
+
+        # Вычисляем метаданные
+        original_size = estimate_dataframe_size(
+            dataframe,
+            CompressionAlgorithm.NONE,
+        )
+
+        metadata = {
+            'compression': str(compression.value),
+            'compression_ratio': get_compression_ratio(
+                original_size,
+                len(compressed_data),
+            ),
+            'parts_count': parts_count,
+            'total_size': len(compressed_data),
+        }
+
+        # Сохраняем метаданные
+        await redis_.set(
+            f'{key}:metadata',
+            json.dumps(metadata),
+        )
+
+        logger.info(
+            f'Saved DataFrame to Redis: {key}, size: {metadata["total_size"]} bytes, parts: {parts_count}',
         )
 
         return metadata
@@ -218,6 +193,11 @@ class RedisManager:
     ) -> Any | None:  # Optional[polars.DataFrame]
         """
         Загрузка DataFrame из Redis.
+
+        Новый алгоритм:
+        1) Загружаем чанки сжатых данных
+        2) Склеиваем чанки в единый блок
+        3) Разжимаем DataFrame
 
         Args:
             key: Ключ Redis
@@ -230,66 +210,48 @@ class RedisManager:
             raise RuntimeError('Redis not connected')
 
         # Загружаем метаданные
-
-        metadata_raw = await redis_.get(
-            f'{key}:metadata',
-        )
-
+        metadata_raw = await redis_.get(f'{key}:metadata')
         if not metadata_raw:
             return None
 
         metadata = json.loads(metadata_raw)
         compression_raw = metadata['compression']
-
-        compression = CompressionAlgorithm(
-            compression_raw,
-        )
-
+        compression = CompressionAlgorithm(compression_raw)
         parts_count = metadata['parts_count']
+
+        # Шаг 1: Загружаем чанки сжатых данных
+        compressed_chunks = []
 
         if parts_count == 1:
             # Загружаем как единое целое
-            data = await redis_.get(
-                key,
-            )
-
+            data = await redis_.get(key)
             if not data:
                 return None
-
-            return deserialize_dataframe(
-                data,
-                compression,
-            )
-
+            compressed_chunks = [data]
         else:
-            # Загружаем части и объединяем
-            chunks = []
+            # Загружаем все части
             for i in range(parts_count):
                 chunk_key = f'{key}:part_{i}'
-
-                chunk_data = await redis_.get(
-                    chunk_key,
-                )
+                chunk_data = await redis_.get(chunk_key)
 
                 if not chunk_data:
                     logger.warning(f'Missing chunk {i} for key {key}')
-                    continue
+                    return None
 
-                chunk = deserialize_dataframe(
-                    chunk_data,
-                    compression,
-                )
+                compressed_chunks.append(chunk_data)
 
-                chunks.append(
-                    chunk,
-                )
+        if not compressed_chunks:
+            return None
 
-            if not chunks:
-                return None
+        # Шаг 2: Склеиваем чанки в единый блок
+        logger.info(
+            f'[load_dataframe][{key}]: Merging {len(compressed_chunks)} chunks...'
+        )
+        compressed_data = merge_compressed_data_chunks(compressed_chunks)
 
-            return merge_dataframe_chunks(
-                chunks,
-            )
+        # Шаг 3: Разжимаем DataFrame
+        logger.info(f'[load_dataframe][{key}]: Decompressing DataFrame...')
+        return deserialize_dataframe(compressed_data, compression)
 
     async def delete_dataframe(
         self,

@@ -83,6 +83,7 @@ class DataProcessingDaemon:
         # Обновляем список доступных символов
         await self.__update_current_available_symbol_name_set()
 
+        """
         async with asyncio.TaskGroup() as task_group:
             for symbol_name in _SYMBOL_NAMES:
                 task_group.create_task(
@@ -90,6 +91,12 @@ class DataProcessingDaemon:
                         symbol_name,
                     )
                 )
+        """
+
+        for symbol_name in _SYMBOL_NAMES:
+            await self.__update_symbol(
+                symbol_name,
+            )
 
     async def __update_symbol(self, symbol_name: str) -> None:
         """Обновление данных для конкретного символа."""
@@ -234,8 +241,12 @@ class DataProcessingDaemon:
                     ' ORDER BY'
                     ' symbol_id ASC'
                     ', trade_id DESC'
+                    # f' LIMIT {20_000_000!r}'
                     # f' LIMIT {15_000_000!r}'
-                    f' LIMIT {1_000!r}'
+                    f' LIMIT {10_000_000!r}'
+                    # f' LIMIT {2_000_000!r}'
+                    # f' LIMIT {100_000!r}'
+                    # f' LIMIT {1_000!r}'
                     ';'
                 ),
                 uri=(

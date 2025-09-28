@@ -491,10 +491,15 @@ class RedisChartProcessor:
         if extreme_lines_data is not None:
             extreme_lines_array, position, scale = extreme_lines_data
 
+            print(
+                f'position: {position}, scale: {scale}',
+            )
+
             # Обновляем атрибуты процессора
             self.__extreme_lines_array = extreme_lines_array
             self.__extreme_lines_position = position
             self.__extreme_lines_scale = scale
+
             logger.info(f'Updated extreme lines for {symbol_id.name}')
 
         return extreme_lines_data
@@ -545,8 +550,6 @@ class RedisChartProcessor:
         symbol_names = await g_redis_data_adapter.load_available_symbols()
         if symbol_names is None:
             symbol_names = []
-
-        print(101010, symbol_names)
 
         current_available_symbol_name_set = set(symbol_names)
 

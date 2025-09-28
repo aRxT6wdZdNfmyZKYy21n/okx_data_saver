@@ -66,7 +66,7 @@ class RedisDataService:
         metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=trades_df,
-            compression=CompressionAlgorithm.XZ,
+            compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 
@@ -143,7 +143,7 @@ class RedisDataService:
         metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=bollinger_df,
-            compression=CompressionAlgorithm.XZ,
+            compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
         )
 

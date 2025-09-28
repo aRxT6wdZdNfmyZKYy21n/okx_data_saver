@@ -45,13 +45,17 @@ def serialize_dataframe(
         # xz обеспечивает лучшее сжатие для финансовых данных
         compressed_data = lzma.compress(
             ipc_data,
-            # preset=6,  # баланс скорость/сжатие
-            preset=lzma.PRESET_EXTREME,  # Максимальное сжатие
+            preset=6,  # баланс скорость/сжатие
+            # preset=lzma.PRESET_EXTREME,  # Максимальное сжатие
         )
     elif compression == CompressionAlgorithm.LZ4:
         # lz4 для быстрого сжатия когда размер не критичен
         compressed_data = lz4.frame.compress(
             ipc_data,
+        )
+
+        print(
+            f'Compressed size: {len(compressed_data)}, uncompressed size: {len(ipc_data)} ({100 * len(compressed_data) / len(ipc_data):.3f}%)'
         )
     elif compression == CompressionAlgorithm.NONE:
         compressed_data = ipc_data
@@ -93,44 +97,6 @@ def deserialize_dataframe(
     # Десериализация из IPC формата
     buffer = io.BytesIO(ipc_data)
     return polars.read_ipc(buffer)
-
-
-def split_dataframe_by_size(
-    df: polars.DataFrame,
-    max_size_bytes: int,
-) -> list[polars.DataFrame]:
-    """
-    Разбивка DataFrame на части по размеру в байтах.
-
-    Args:
-        df: Polars DataFrame для разбивки
-        max_size_bytes: Максимальный размер части в байтах (по умолчанию 400 МБ)
-
-    Returns:
-        Список частей DataFrame
-    """
-    if len(serialize_dataframe(df)) <= max_size_bytes:
-        return [df]
-
-    # Простая разбивка по количеству строк
-    total_rows = df.height
-    chunk_size = total_rows // 2  # Начинаем с половины
-
-    chunks = []
-    start = 0
-
-    while start < total_rows:
-        end = min(start + chunk_size, total_rows)
-        chunk = df.slice(start, end - start)
-
-        # Если чанк все еще слишком большой, уменьшаем размер
-        while len(serialize_dataframe(chunk)) > max_size_bytes and chunk.height > 1:
-            chunk = chunk.slice(0, chunk.height // 2)
-
-        chunks.append(chunk)
-        start += chunk.height
-
-    return chunks
 
 
 def merge_dataframe_chunks(
@@ -185,3 +151,48 @@ def estimate_dataframe_size(
         Примерный размер в байтах после сжатия
     """
     return len(serialize_dataframe(df, compression))
+
+
+def split_compressed_data_by_size(
+    compressed_data: bytes,
+    max_size_bytes: int,
+) -> list[bytes]:
+    """
+    Разбивка сжатых данных на части по размеру в байтах.
+
+    Args:
+        compressed_data: Сжатые данные
+        max_size_bytes: Максимальный размер части в байтах
+
+    Returns:
+        Список частей сжатых данных
+    """
+    if len(compressed_data) <= max_size_bytes:
+        return [compressed_data]
+
+    chunks = []
+    start = 0
+    total_size = len(compressed_data)
+
+    while start < total_size:
+        end = min(start + max_size_bytes, total_size)
+        chunk = compressed_data[start:end]
+        chunks.append(chunk)
+        start = end
+
+    return chunks
+
+
+def merge_compressed_data_chunks(
+    compressed_chunks: list[bytes],
+) -> bytes:
+    """
+    Объединение частей сжатых данных обратно в один блок.
+
+    Args:
+        compressed_chunks: Список частей сжатых данных
+
+    Returns:
+        Объединенные сжатые данные
+    """
+    return b''.join(compressed_chunks)

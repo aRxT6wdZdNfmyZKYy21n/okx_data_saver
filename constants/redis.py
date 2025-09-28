@@ -20,8 +20,8 @@ ORDER_BOOK_VOLUMES_PREFIX: Final[str] = 'order_book_volumes'
 VELOCITY_PREFIX: Final[str] = 'velocity'
 METADATA_PREFIX: Final[str] = 'metadata'
 
-# Максимальный размер части данных (400 МБ для безопасности)
-MAX_PART_SIZE_BYTES: Final[int] = 400_000_000
+# Максимальный размер части данных (500 МБ для безопасности)
+MAX_PART_SIZE_BYTES: Final[int] = 500_000_000
 
 # Время жизни ключей в Redis (в секундах)
 # 24 часа для основных данных
