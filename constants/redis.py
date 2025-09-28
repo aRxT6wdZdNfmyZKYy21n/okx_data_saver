@@ -4,6 +4,10 @@
 
 from typing import Final
 
+from enumerations import (
+    SymbolId,
+)
+
 # Префиксы ключей Redis
 TRADES_PREFIX: Final[str] = 'trades'
 BOLLINGER_PREFIX: Final[str] = 'bollinger'

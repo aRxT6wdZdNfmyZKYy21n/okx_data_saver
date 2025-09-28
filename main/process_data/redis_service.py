@@ -46,9 +46,6 @@ logger = logging.getLogger(__name__)
 class RedisDataService:
     """Сервис для работы с данными в Redis."""
 
-    def __init__(self):
-        self.redis = g_redis_manager
-
     async def save_trades_data(
         self,
         symbol_id: SymbolId,
@@ -64,7 +61,7 @@ class RedisDataService:
         )
 
         # Сохраняем DataFrame
-        metadata = await self.redis.save_dataframe(
+        metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=trades_df,
             compression=CompressionAlgorithm.XZ,
@@ -83,7 +80,7 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis.set_metadata(
+        await g_redis_manager.set_metadata(
             key,
             trades_metadata.model_dump_json(),
         )
@@ -101,7 +98,20 @@ class RedisDataService:
         key = get_trades_data_key(
             symbol_id,
         )
-        return await self.redis.load_dataframe(key)
+        return await g_redis_manager.load_dataframe(key)
+
+    async def load_trades_metadata(
+        self,
+        symbol_id: SymbolId,
+    ) -> TradesDataMetadata | None:
+        """Загрузка метаданных данных о сделках."""
+        key = get_trades_data_key(
+            symbol_id,
+        )
+        metadata_dict = await g_redis_manager.get_metadata(key)
+        if metadata_dict:
+            return TradesDataMetadata.model_validate(metadata_dict)
+        return None
 
     async def save_bollinger_data(
         self,
@@ -128,7 +138,7 @@ class RedisDataService:
         )
 
         # Сохраняем DataFrame
-        metadata = await self.redis.save_dataframe(
+        metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=bollinger_df,
             compression=CompressionAlgorithm.XZ,
@@ -144,7 +154,7 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis.set_metadata(
+        await g_redis_manager.set_metadata(
             key,
             bollinger_metadata.model_dump_json(),
         )
@@ -160,7 +170,7 @@ class RedisDataService:
     ) -> Any | None:  # Optional[polars.DataFrame]
         """Загрузка полос Боллинджера."""
         key = get_bollinger_key(symbol_id)
-        return await self.redis.load_dataframe(key)
+        return await g_redis_manager.load_dataframe(key)
 
     async def save_candles_data(
         self,
@@ -177,7 +187,7 @@ class RedisDataService:
         )
 
         # Сохраняем DataFrame
-        metadata = await self.redis.save_dataframe(
+        metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=candles_df,
             compression=CompressionAlgorithm.XZ,
@@ -195,7 +205,7 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis.set_metadata(
+        await g_redis_manager.set_metadata(
             key,
             candles_metadata.model_dump_json(),
         )
@@ -216,7 +226,7 @@ class RedisDataService:
             symbol_id,
             interval,
         )
-        return await self.redis.load_dataframe(key)
+        return await g_redis_manager.load_dataframe(key)
 
     async def save_rsi_data(
         self,
@@ -236,7 +246,7 @@ class RedisDataService:
         rsi_df = polars.DataFrame({'rsi': rsi_series})
 
         # Сохраняем DataFrame
-        metadata = await self.redis.save_dataframe(
+        metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=rsi_df,
             compression=CompressionAlgorithm.XZ,
@@ -253,7 +263,7 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis.set_metadata(
+        await g_redis_manager.set_metadata(
             key,
             rsi_metadata.model_dump_json(),
         )
@@ -272,7 +282,7 @@ class RedisDataService:
         key = get_rsi_key(
             symbol_id,
         )
-        return await self.redis.load_dataframe(key)
+        return await g_redis_manager.load_dataframe(key)
 
     async def save_smoothed_data(
         self,
@@ -286,7 +296,7 @@ class RedisDataService:
         key = get_smoothed_key(symbol_id, level)
 
         # Сохраняем DataFrame
-        metadata = await self.redis.save_dataframe(
+        metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=smoothed_df,
             compression=CompressionAlgorithm.XZ,
@@ -304,7 +314,7 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis.set_metadata(
+        await g_redis_manager.set_metadata(
             key,
             smoothed_metadata.model_dump_json(),
         )
@@ -321,7 +331,7 @@ class RedisDataService:
     ) -> Any | None:  # Optional[polars.DataFrame]
         """Загрузка сглаженных данных."""
         key = get_smoothed_key(symbol_id, level)
-        return await self.redis.load_dataframe(key)
+        return await g_redis_manager.load_dataframe(key)
 
     async def save_extreme_lines_data(
         self,
@@ -346,7 +356,7 @@ class RedisDataService:
         extreme_lines_df = polars.DataFrame({'extreme_lines': [extreme_lines_list]})
 
         # Сохраняем DataFrame
-        metadata = await self.redis.save_dataframe(
+        metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=extreme_lines_df,
             compression=CompressionAlgorithm.XZ,
@@ -366,7 +376,7 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis.set_metadata(
+        await g_redis_manager.set_metadata(
             key,
             extreme_lines_metadata.model_dump_json(),
         )
@@ -385,7 +395,7 @@ class RedisDataService:
             symbol_id,
         )
 
-        df = await self.redis.load_dataframe(key)
+        df = await g_redis_manager.load_dataframe(key)
 
         if df is None:
             return None
@@ -427,7 +437,7 @@ class RedisDataService:
         )
 
         # Сохраняем DataFrame
-        metadata = await self.redis.save_dataframe(
+        metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=order_book_df,
             compression=CompressionAlgorithm.XZ,
@@ -447,7 +457,7 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis.set_metadata(
+        await g_redis_manager.set_metadata(
             key,
             order_book_metadata.model_dump_json(),
         )
@@ -467,7 +477,7 @@ class RedisDataService:
         key = get_order_book_volumes_key(
             symbol_id,
         )
-        df = await self.redis.load_dataframe(key)
+        df = await g_redis_manager.load_dataframe(key)
 
         if df is None:
             return None, None
@@ -497,7 +507,7 @@ class RedisDataService:
         velocity_df = polars.DataFrame({'velocity': velocity_series})
 
         # Сохраняем DataFrame
-        metadata = await self.redis.save_dataframe(
+        metadata = await g_redis_manager.save_dataframe(
             key=key,
             dataframe=velocity_df,
             compression=CompressionAlgorithm.XZ,
@@ -513,7 +523,7 @@ class RedisDataService:
         )
 
         # Сохраняем метаданные
-        await self.redis.set_metadata(
+        await g_redis_manager.set_metadata(
             key,
             velocity_metadata.model_dump_json(),
         )
@@ -531,16 +541,16 @@ class RedisDataService:
         key = get_velocity_key(
             symbol_id,
         )
-        return await self.redis.load_dataframe(key)
+        return await g_redis_manager.load_dataframe(key)
 
     async def save_available_symbols(self, symbol_names: list[str]) -> None:
         """Сохранение списка доступных символов."""
         key = get_available_symbols_key()
 
-        await self.redis.set(
+        await g_redis_manager.set(
             key,
             json.dumps(symbol_names),
-        )  # TODO
+        )
 
         logger.info(
             f'Saved available symbols: {len(symbol_names)} symbols',
@@ -549,7 +559,7 @@ class RedisDataService:
     async def load_available_symbols(self) -> list[str]:
         """Загрузка списка доступных символов."""
         key = get_available_symbols_key()
-        data = await self.redis.__redis.get(key)
+        data = await g_redis_manager.get(key)
         if data:
             return json.loads(data)
         return []
@@ -560,7 +570,7 @@ class RedisDataService:
             symbol_metadata.symbol_id,
         )
 
-        await self.redis.set(
+        await g_redis_manager.set(
             key,
             symbol_metadata.model_dump_json(),
         )
@@ -575,7 +585,7 @@ class RedisDataService:
         key = get_metadata_key(
             symbol_id,
         )
-        data = await self.redis.__redis.get(key)
+        data = await g_redis_manager.get(key)
         if data:
             return SymbolMetadata.model_validate_json(data)
         return None
@@ -587,7 +597,7 @@ class RedisDataService:
         """Сохранение статуса обработки."""
         key = f'processing_status:{status.symbol_id.value}'
 
-        await self.redis.set(
+        await g_redis_manager.set(
             key,
             status.model_dump_json(),
         )
@@ -602,7 +612,7 @@ class RedisDataService:
     ) -> ProcessingStatus | None:
         """Загрузка статуса обработки."""
         key = f'processing_status:{symbol_id.value}'
-        data = await self.redis.__redis.get(key)
+        data = await g_redis_manager.get(key)
         if data:
             return ProcessingStatus.model_validate_json(data)
 

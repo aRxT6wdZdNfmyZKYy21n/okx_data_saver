@@ -21,7 +21,6 @@
 
 #### `main/process_data/performance_optimizer.py`
 - Использует enum в методах оптимизации сжатия
-- Возвращает enum значения из `optimize_data_compression()`
 
 #### `test_redis_migration.py`
 - Обновлены тесты для использования enum

@@ -204,12 +204,26 @@ class RedisDataAdapter:
                 return None, None, None
 
             # Получаем метаданные для позиции и масштаба
-            metadata = await g_redis_data_service.load_symbol_metadata(symbol_id)
-            if metadata:
-                # Для экстремальных линий нужны дополнительные метаданные
-                # Пока возвращаем заглушки
-                position = (0.0, 0.0)
-                scale = 1.0
+            trades_metadata = await g_redis_data_service.load_trades_metadata(symbol_id)
+            if trades_metadata:
+                # Вычисляем position и scale на основе данных о сделках
+                min_trade_id = trades_metadata.min_trade_id
+                min_price = trades_metadata.min_price
+                max_price = trades_metadata.max_price
+                max_trade_id = trades_metadata.max_trade_id
+
+                # Вычисляем scale аналогично старому процессору
+                delta_price = max_price - min_price
+                delta_trade_id = max_trade_id - min_trade_id
+
+                if delta_price > 0 and delta_trade_id > 0:
+                    # Используем ту же логику, что и в старом процессоре
+                    height = 100  # Фиксированная высота как в старом коде
+                    scale = delta_price / height
+                    position = (float(min_trade_id), float(min_price))
+                else:
+                    position = None
+                    scale = None
             else:
                 position = None
                 scale = None
@@ -246,15 +260,26 @@ class RedisDataAdapter:
                 return None, None, None, None
 
             # Получаем метаданные для позиции и масштаба
-            metadata = await g_redis_data_service.load_symbol_metadata(
-                symbol_id,
-            )
+            trades_metadata = await g_redis_data_service.load_trades_metadata(symbol_id)
+            if trades_metadata:
+                # Вычисляем position и scale на основе данных о сделках
+                min_trade_id = trades_metadata.min_trade_id
+                min_price = trades_metadata.min_price
+                max_price = trades_metadata.max_price
+                max_trade_id = trades_metadata.max_trade_id
 
-            if metadata:
-                # Для объемов стакана нужны дополнительные метаданные
-                # Пока возвращаем заглушки
-                position = (0.0, 0.0)
-                scale = 1.0
+                # Вычисляем scale аналогично старому процессору
+                delta_price = max_price - min_price
+                delta_trade_id = max_trade_id - min_trade_id
+
+                if delta_price > 0 and delta_trade_id > 0:
+                    # Используем ту же логику, что и в старом процессоре
+                    height = 100  # Фиксированная высота как в старом коде
+                    scale = delta_price / height
+                    position = (float(min_trade_id), float(min_price))
+                else:
+                    position = None
+                    scale = None
             else:
                 position = None
                 scale = None

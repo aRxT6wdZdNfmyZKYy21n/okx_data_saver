@@ -29,6 +29,7 @@ from main.show_plot.globals import (
 from settings import (
     settings,
 )
+from utils.redis import g_redis_manager
 
 try:
     import uvloop
@@ -48,12 +49,7 @@ _SYMBOL_NAMES = [
 
 
 class DataProcessingDaemon:
-    __slots__ = ('__redis_data_service',)
-
-    def __init__(self):
-        super().__init__()
-
-        self.__redis_data_service = g_redis_data_service
+    __slots__ = ()
 
     async def start_update_loop(
         self,
@@ -101,9 +97,9 @@ class DataProcessingDaemon:
         start_time = datetime.now(UTC)
 
         # Обновляем статус обработки
-        await self.__redis_data_service.save_processing_status(
+        await g_redis_data_service.save_processing_status(
             ProcessingStatus(
-                symbol_id=symbol_id.name,
+                symbol_id=symbol_id,
                 status='processing',
                 last_processed=start_time,
                 error_message=None,
@@ -132,9 +128,9 @@ class DataProcessingDaemon:
 
             # Обновляем статус обработки
             processing_time = (datetime.now(UTC) - start_time).total_seconds()
-            await self.__redis_data_service.save_processing_status(
+            await g_redis_data_service.save_processing_status(
                 ProcessingStatus(
-                    symbol_id=symbol_id.name,
+                    symbol_id=symbol_id,
                     status='completed',
                     last_processed=datetime.now(UTC),
                     error_message=None,
@@ -149,15 +145,15 @@ class DataProcessingDaemon:
                 operation=f'update_symbol_{symbol_name}',
                 error=exception,
                 context={
-                    'symbol_id': symbol_id.name,
+                    'symbol_id': symbol_id,
                     'symbol_name': symbol_name,
                     'processing_time': processing_time,
                 },
             )
 
-            await self.__redis_data_service.save_processing_status(
+            await g_redis_data_service.save_processing_status(
                 ProcessingStatus(
-                    symbol_id=symbol_id.name,
+                    symbol_id=symbol_id,
                     status='error',
                     last_processed=datetime.now(UTC),
                     error_message=str(exception),
@@ -165,8 +161,8 @@ class DataProcessingDaemon:
                 )
             )
 
+    @staticmethod
     async def __process_symbol_data(
-        self,
         symbol_id: SymbolId,
         symbol_name: str,
         trades_df: DataFrame,
@@ -179,8 +175,8 @@ class DataProcessingDaemon:
         min_trade_id = int(trades_df.get_column('trade_id').min())
         max_trade_id = int(trades_df.get_column('trade_id').max())
 
-        await self.__redis_data_service.save_trades_data(
-            symbol_id=symbol_id.name,
+        await g_redis_data_service.save_trades_data(
+            symbol_id=symbol_id,
             trades_df=trades_df,
             min_trade_id=min_trade_id,
             max_trade_id=max_trade_id,
@@ -190,13 +186,13 @@ class DataProcessingDaemon:
 
         # Обрабатываем все производные данные
         await g_data_processor.process_trades_data(
-            symbol_id=symbol_id.name,
+            symbol_id=symbol_id,
             trades_df=trades_df,
         )
 
         # Обновляем метаданные символа
         symbol_metadata = SymbolMetadata(
-            symbol_id=symbol_id.name,
+            symbol_id=symbol_id,
             symbol_name=symbol_name,
             last_updated=datetime.now(UTC),
             has_trades_data=True,
@@ -208,7 +204,10 @@ class DataProcessingDaemon:
             has_order_book_volumes=True,
             has_velocity=True,
         )
-        await self.__redis_data_service.save_symbol_metadata(symbol_metadata)
+
+        await g_redis_data_service.save_symbol_metadata(
+            symbol_metadata,
+        )
 
     @staticmethod
     async def __fetch_trades_dataframe(
@@ -235,7 +234,8 @@ class DataProcessingDaemon:
                     ' ORDER BY'
                     ' symbol_id ASC'
                     ', trade_id DESC'
-                    f' LIMIT {15_000_000!r}'
+                    # f' LIMIT {15_000_000!r}'
+                    f' LIMIT {1_000!r}'
                     ';'
                 ),
                 uri=(
@@ -353,9 +353,8 @@ class DataProcessingDaemon:
 
         return order_book_dataframe
 
-    async def __update_current_available_symbol_name_set(
-        self,
-    ) -> None:
+    @staticmethod
+    async def __update_current_available_symbol_name_set() -> None:
         """Обновление списка доступных символов."""
         current_available_symbol_name_set: set[str] | None = None
 
@@ -409,10 +408,15 @@ WHERE symbol_id IS NOT NULL;
                     symbol_name,
                 )
 
-        if current_available_symbol_name_set:
-            symbol_names = sorted(current_available_symbol_name_set)
-            await self.__redis_data_service.save_available_symbols(symbol_names)
-            logger.info(f'Updated available symbols: {len(symbol_names)} symbols')
+        symbol_names = sorted(
+            current_available_symbol_name_set,
+        )
+
+        await g_redis_data_service.save_available_symbols(
+            symbol_names,
+        )
+
+        logger.info(f'Updated available symbols: {len(symbol_names)} symbols')
 
 
 async def main() -> None:
@@ -427,7 +431,7 @@ async def main() -> None:
     )
 
     # Initialize Redis connection
-    await g_redis_data_service.redis.connect()
+    await g_redis_manager.connect()
 
     try:
         data_processing_daemon = DataProcessingDaemon()

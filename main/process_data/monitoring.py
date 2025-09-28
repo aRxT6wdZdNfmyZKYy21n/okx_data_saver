@@ -8,6 +8,7 @@ import traceback
 from datetime import UTC, datetime
 from typing import Any
 
+from constants.symbol import SymbolConstants
 from main.process_data.redis_service import g_redis_data_service
 from utils.redis import g_redis_manager
 
@@ -31,7 +32,12 @@ class ErrorHandler:
     ) -> None:
         """Обработка ошибки с логированием и статистикой."""
         error_msg = str(error)
-        error_traceback = traceback.format_exc()
+
+        error_traceback = ''.join(
+            traceback.format_exception(
+                error,
+            ),
+        )
 
         # Обновляем счетчики
         self.error_counts[operation] = self.error_counts.get(operation, 0) + 1
@@ -136,10 +142,10 @@ class SystemMonitor:
     async def check_redis_health(self) -> bool:
         """Проверка состояния Redis."""
         try:
-            await g_redis_manager.client.ping()
+            await g_redis_manager.ping()
 
             # Получаем информацию о Redis
-            info = await g_redis_manager.client.info()
+            info = await g_redis_manager.get_info()
 
             # Проверяем использование памяти
             used_memory = info.get('used_memory', 0)
@@ -179,13 +185,16 @@ class SystemMonitor:
 
             # Проверяем статус обработки для нескольких символов
             processing_issues = 0
-            for symbol in available_symbols[:5]:  # Проверяем первые 5 символов
-                status = await g_redis_data_service.load_processing_status(symbol)
+            for symbol_name in available_symbols[:5]:  # Проверяем первые 5 символов
+                symbol_id = SymbolConstants.IdByName[symbol_name]
+
+                status = await g_redis_data_service.load_processing_status(symbol_id)
 
                 if status and status.status == 'error':
                     processing_issues += 1
+
                     logger.warning(
-                        f'Processing error for symbol {symbol}: {status.error_message}'
+                        f'Processing error for symbol {symbol_id.name}: {status.error_message}'
                     )
 
             self.metrics['data_processing_health'] = {

@@ -43,7 +43,7 @@ async def start_processor_updating_loop() -> None:
 
     await init_db_models()
 
-    processor = FinPlotChartProcessor()
+    processor = RedisChartProcessor()
 
     await processor.init()
 

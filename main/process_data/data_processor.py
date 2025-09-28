@@ -17,9 +17,10 @@ from constants.common import CommonConstants
 from constants.plot import PlotConstants
 from enumerations import (
     SymbolId,
+    TradingDirection,
 )
-from main.process_data.performance_optimizer import g_performance_optimizer
 from main.process_data.redis_service import g_redis_data_service
+from utils.trading import TradingUtils
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ class DataProcessor:
             # Вычисляем полосы Боллинджера
             bollinger_df = trades_df.with_columns(
                 polars_talib.bbands(
-                    matype=int(talib.MA_Type.SMA),
+                    matype=int(talib.MA_Type.SMA),  # noqa
                     real=polars.col('price'),
                     timeperiod=20,
                 ).alias('bbands'),
@@ -116,7 +117,7 @@ class DataProcessor:
                     timeperiod=20,
                 )
 
-                logger.info(f'Bollinger bands processed in {timer.elapsed:.3f}s')
+        logger.info(f'Bollinger bands processed in {timer.elapsed:.3f}s')
 
     async def _process_candles_data(
         self,
@@ -132,7 +133,7 @@ class DataProcessor:
                     interval_name=interval_name,
                 )
 
-            logger.info(f'Candles data processed in {timer.elapsed:.3f}s')
+        logger.info(f'Candles data processed in {timer.elapsed:.3f}s')
 
     async def _process_candles_for_interval(
         self,
@@ -257,9 +258,7 @@ class DataProcessor:
         """Обработка RSI данных."""
         with Timer() as timer:
             # Получаем свечные данные для расчета RSI с кэшированием
-            candles_df = await g_performance_optimizer.get_cached_data(
-                key=f'candles:{symbol_id.value}:1m',
-                loader_func=self.redis_service.load_candles_data,
+            candles_df = await self.redis_service.load_candles_data(
                 symbol_id=symbol_id,
                 interval='1m',
             )
@@ -282,7 +281,7 @@ class DataProcessor:
                         timeperiod=14,
                     )
 
-            logger.info(f'RSI data processed in {timer.elapsed:.3f}s')
+        logger.info(f'RSI data processed in {timer.elapsed:.3f}s')
 
     async def _process_smoothed_data(
         self,
@@ -291,26 +290,20 @@ class DataProcessor:
     ) -> None:
         """Обработка сглаженных данных."""
         with Timer() as timer:
-            # Получаем существующие сглаженные данные
-            smoothed_data = {}
-            for level in PlotConstants.TradesSmoothingLevels:
-                if level != 'Raw (0)':
-                    existing_data = await self.redis_service.load_smoothed_data(
-                        symbol_id,
-                        level,
-                    )
-                    if existing_data is not None:
-                        smoothed_data[level] = existing_data
-
             # Обрабатываем сглаживание для каждого уровня
             for level in PlotConstants.TradesSmoothingLevels:
                 if level == 'Raw (0)':
                     continue
 
+                existing_data = await self.redis_service.load_smoothed_data(
+                    symbol_id,
+                    level,
+                )
+
                 smoothed_df = await self._calculate_smoothed_data(
                     trades_df=trades_df,
                     level=level,
-                    existing_data=smoothed_data.get(level),
+                    existing_data=existing_data,
                 )
 
                 if smoothed_df is not None and smoothed_df.height > 0:
@@ -325,7 +318,7 @@ class DataProcessor:
                         max_trade_id=max_trade_id,
                     )
 
-            logger.info(f'Smoothed data processed in {timer.elapsed:.3f}s')
+        logger.info(f'Smoothed data processed in {timer.elapsed:.3f}s')
 
     async def _calculate_smoothed_data(
         self,
@@ -334,15 +327,175 @@ class DataProcessor:
         existing_data: DataFrame | None = None,
     ) -> DataFrame | None:
         """Вычисление сглаженных данных для конкретного уровня."""
-        # Упрощенная версия алгоритма сглаживания
-        # В реальной реализации здесь должна быть полная логика из processor.py
+        if level == 'Raw (0)':
+            return None
 
-        if level == 'Smoothed (1)':
-            # Простое сглаживание - берем каждую 10-ю точку
-            smoothed_trades = trades_df.slice(0, None, 10)
-            return smoothed_trades.select(['trade_id', 'price', 'datetime'])
+        # Получаем номер уровня сглаживания
+        level_num = int(level.split('(')[1].split(')')[0])
 
-        return None
+        if level_num == 1:
+            # Первый уровень сглаживания - обрабатываем сырые данные
+            return await self._calculate_level_1_smoothing(trades_df, existing_data,)
+        else:
+            return None
+
+            # Последующие уровни - обрабатываем данные предыдущего уровня
+            if existing_data is None:
+                return None
+            return await self._calculate_higher_level_smoothing(
+                existing_data, level_num
+            )
+
+    async def _calculate_level_1_smoothing(
+        self,
+        trades_df: DataFrame,
+        existing_data: DataFrame | None = None,
+    ) -> DataFrame | None:
+        """Вычисление первого уровня сглаживания."""
+
+        # Обрабатываем данные для создания линий
+        line_raw_data_list = []
+        line_raw_data = None
+
+        for trade_data in trades_df.iter_rows(named=True):
+            trade_id = trade_data['trade_id']
+            price = trade_data['price']
+            quantity = trade_data['quantity']
+            volume = price * quantity
+            datetime_ = trade_data['datetime']
+
+            if line_raw_data is None:
+                # Начинаем новую линию
+                line_raw_data = {
+                    'start_datetime': datetime_,
+                    'start_price': price,
+                    'start_trade_id': trade_id,
+                    'quantity': quantity,
+                    'trading_direction': None,
+                    'volume': volume,
+                }
+            else:
+                old_trading_direction = line_raw_data['trading_direction']
+
+                if old_trading_direction is None:
+                    # Определяем направление торговли
+                    start_price = line_raw_data['start_price']
+                    end_price = price
+                    new_trading_direction = TradingUtils.get_direction(
+                        start_price, end_price
+                    )
+
+                    line_raw_data.update(
+                        {
+                            'end_datetime': datetime_,
+                            'end_price': end_price,
+                            'end_trade_id': trade_id,
+                            'quantity': line_raw_data['quantity'] + quantity,
+                            'trading_direction': new_trading_direction,
+                            'volume': line_raw_data['volume'] + volume,
+                        }
+                    )
+                else:
+                    new_end_price = price
+                    old_end_price = line_raw_data['end_price']
+                    new_trading_direction = TradingUtils.get_direction(
+                        old_end_price, new_end_price
+                    )
+
+                    if (
+                        old_trading_direction == new_trading_direction
+                        or new_trading_direction == TradingDirection.Cross
+                    ):
+                        # Продолжаем текущую линию
+                        line_raw_data.update(
+                            {
+                                'quantity': line_raw_data['quantity'] + quantity,
+                                'volume': line_raw_data['volume'] + volume,
+                            }
+                        )
+                    else:
+                        # Завершаем текущую линию и начинаем новую
+                        line_raw_data_list.append(line_raw_data)
+
+                        line_raw_data = {
+                            'start_datetime': line_raw_data['end_datetime'],
+                            'start_trade_id': line_raw_data['end_trade_id'],
+                            'start_price': old_end_price,
+                            'quantity': quantity,
+                            'trading_direction': new_trading_direction,
+                            'volume': volume,
+                        }
+
+                    line_raw_data.update(
+                        {
+                            'end_price': new_end_price,
+                            'end_datetime': datetime_,
+                            'end_trade_id': trade_id,
+                        }
+                    )
+
+        # Завершаем последнюю линию, если она есть
+        if line_raw_data is not None:
+            trading_direction = line_raw_data['trading_direction']
+            if trading_direction is not None:
+                line_raw_data_list.append(line_raw_data,)
+
+        if not line_raw_data_list:
+            return None
+
+        # Создаем DataFrame из линий
+
+        line_dataframe = polars.DataFrame(
+            line_raw_data_list,
+        )
+
+        line_dataframe = line_dataframe.sort('start_trade_id')
+
+        # Создаем сглаженные данные из линий
+        trades_smoothed_raw_data_list = []
+        last_line_data = None
+
+        for line_data in line_dataframe.iter_rows(named=True):
+            trades_smoothed_raw_data_list.append(
+                {
+                    'price': line_data['start_price'],
+                    'datetime': line_data['start_datetime'],
+                    'trade_id': line_data['start_trade_id'],
+                }
+            )
+
+            last_line_data = line_data
+
+        if last_line_data is not None:
+            trades_smoothed_raw_data_list.append(
+                {
+                    'price': last_line_data['end_price'],
+                    'datetime': last_line_data['end_datetime'],
+                    'trade_id': last_line_data['end_trade_id'],
+                }
+            )
+
+        if not trades_smoothed_raw_data_list:
+            return None
+
+        smoothed_dataframe = polars.DataFrame(
+            trades_smoothed_raw_data_list,
+        )
+
+        return smoothed_dataframe.sort(
+            'trade_id',
+        )
+
+    async def _calculate_higher_level_smoothing(
+        self,
+        previous_level_data: DataFrame,
+        level_num: int,
+    ) -> DataFrame | None:
+        """Вычисление сглаживания для уровней выше первого."""
+        # Для упрощения пока возвращаем данные предыдущего уровня
+        # В полной реализации здесь должна быть логика объединения линий
+        # по торговым направлениям и другим критериям
+        return previous_level_data
 
     async def _process_extreme_lines(
         self,
@@ -388,7 +541,7 @@ class DataProcessor:
                 min_price=min_price,
             )
 
-            logger.info(f'Extreme lines processed in {timer.elapsed:.3f}s')
+        logger.info(f'Extreme lines processed in {timer.elapsed:.3f}s')
 
     async def _process_order_book_volumes(
         self,
@@ -437,7 +590,7 @@ class DataProcessor:
                 min_price=min_price,
             )
 
-            logger.info(f'Order book volumes processed in {timer.elapsed:.3f}s')
+        logger.info(f'Order book volumes processed in {timer.elapsed:.3f}s')
 
     async def _process_velocity_data(
         self,
@@ -461,7 +614,7 @@ class DataProcessor:
                     velocity_series=velocity_series,
                 )
 
-            logger.info(f'Velocity data processed in {timer.elapsed:.3f}s')
+        logger.info(f'Velocity data processed in {timer.elapsed:.3f}s')
 
 
 # Глобальный экземпляр процессора

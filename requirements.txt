@@ -10,6 +10,7 @@ orjson
 pandas
 polars
 polars_talib
+psutil
 pyarrow
 pydantic
 pydantic-settings

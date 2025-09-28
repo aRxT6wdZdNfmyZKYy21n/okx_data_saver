@@ -52,7 +52,11 @@ from utils.qt import (
 )
 
 if typing.TYPE_CHECKING:
-    pass
+    from main.show_plot.processor import RedisChartProcessor
+
+    print(
+        RedisChartProcessor.__name__,  # Do not delete RedisChartProcessor by ruff
+    )
 
 
 _IS_NEED_DRAW_PRICE_PLOT_WITH_POINTS = False
@@ -118,7 +122,7 @@ _VELOCITY_LINE_COLOR = '#ffffff'
 class FinPlotChartWindow(QMainWindow):
     def __init__(
         self,
-        processor,  # type: FinPlotChartProcessor
+        processor,  # type: RedisChartProcessor
         parent=None,
     ):
         super().__init__(

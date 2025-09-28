@@ -5,6 +5,7 @@
 import json
 import logging
 import traceback
+import typing
 from typing import Any
 
 import polars
@@ -72,6 +73,27 @@ class RedisManager:
         if self.__redis:
             await self.__redis.close()
             logger.info('Disconnected from Redis')
+
+    async def get(
+        self,
+        key: str,
+    ) -> bytes:
+        redis_ = self.__redis
+        if not redis_:
+            raise RuntimeError('Redis not connected')
+
+        return await redis_.get(
+            key,
+        )
+
+    async def get_info(
+        self,
+    ) -> dict[str, typing.Any]:
+        redis_ = self.__redis
+        if not redis_:
+            raise RuntimeError('Redis not connected')
+
+        return await redis_.info()
 
     async def save_dataframe(
         self,
@@ -203,11 +225,16 @@ class RedisManager:
         Returns:
             Polars DataFrame или None если не найден
         """
-        if not self.__redis:
+        redis_ = self.__redis
+        if not redis_:
             raise RuntimeError('Redis not connected')
 
         # Загружаем метаданные
-        metadata_raw = await self.__redis.get(f'{key}:metadata')
+
+        metadata_raw = await redis_.get(
+            f'{key}:metadata',
+        )
+
         if not metadata_raw:
             return None
 
@@ -222,7 +249,7 @@ class RedisManager:
 
         if parts_count == 1:
             # Загружаем как единое целое
-            data = await self.__redis.get(
+            data = await redis_.get(
                 key,
             )
 
@@ -240,7 +267,7 @@ class RedisManager:
             for i in range(parts_count):
                 chunk_key = f'{key}:part_{i}'
 
-                chunk_data = await self.__redis.get(
+                chunk_data = await redis_.get(
                     chunk_key,
                 )
 
@@ -274,11 +301,12 @@ class RedisManager:
         Args:
             key: Ключ Redis
         """
-        if not self.__redis:
+        redis_ = self.__redis
+        if not redis_:
             raise RuntimeError('Redis not connected')
 
         # Загружаем метаданные для определения количества частей
-        metadata_raw = await self.__redis.get(
+        metadata_raw = await redis_.get(
             f'{key}:metadata',
         )
 
@@ -307,7 +335,12 @@ class RedisManager:
         if not self.__redis:
             raise RuntimeError('Redis not connected')
 
-        return await self.__redis.exists(key) > 0
+        return (
+            await self.__redis.exists(
+                key,
+            )
+            > 0
+        )
 
     async def get_metadata(self, key: str) -> dict[str, Any] | None:
         """
@@ -319,10 +352,11 @@ class RedisManager:
         Returns:
             Метаданные или None если не найдены
         """
-        if not self.__redis:
+        redis_ = self.__redis
+        if not redis_:
             raise RuntimeError('Redis not connected')
 
-        metadata_raw = await self.__redis.get(
+        metadata_raw = await redis_.get(
             f'{key}:metadata',
         )
 
@@ -332,6 +366,13 @@ class RedisManager:
         return json.loads(
             metadata_raw,
         )
+
+    async def ping(self) -> None:
+        redis_ = self.__redis
+        if not redis_:
+            raise RuntimeError('Redis not connected')
+
+        await redis_.ping()
 
     async def set(
         self,
