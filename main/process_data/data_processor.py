@@ -222,15 +222,29 @@ class DataProcessor:
                 .alias('start_datetime'),
             )
 
-            new_candle_dataframe = new_candle_dataframe.sort('start_trade_id')
-
             # Объединяем с существующими данными
             if existing_candles is not None:
-                final_candles = polars.concat([existing_candles, new_candle_dataframe])
+                final_candles = existing_candles.update(
+                    new_candle_dataframe,
+                    on='start_trade_id',
+                )
+
+                final_candles = polars.concat([
+                    final_candles,
+                    new_candle_dataframe.filter(
+                        polars.col(
+                            'start_trade_id'
+                        ) >
+
+                        min_trade_id,
+                    ),
+                ])
             else:
                 final_candles = new_candle_dataframe
 
-            final_candles = final_candles.sort('start_trade_id')
+            final_candles = final_candles.sort(
+                'start_trade_id',
+            )
 
             # Сохраняем в Redis
             min_trade_id = int(final_candles.get_column('start_trade_id').min())
