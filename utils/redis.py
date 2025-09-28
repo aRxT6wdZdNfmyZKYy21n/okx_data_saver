@@ -12,6 +12,7 @@ import polars
 import redis.asyncio as redis
 from redis.asyncio import Redis
 
+from constants.redis import DEFAULT_TTL, METADATA_TTL
 from enumerations import CompressionAlgorithm
 from settings import settings
 from utils.serialization import (
@@ -149,15 +150,15 @@ class RedisManager:
             f'[save_dataframe][{key}]: Split into {parts_count} chunks',
         )
 
-        # Шаг 3: Сохраняем чанки
+        # Шаг 3: Сохраняем чанки с TTL
         if parts_count == 1:
             # Сохраняем как единое целое
-            await redis_.set(key, compressed_data)
+            await redis_.setex(key, DEFAULT_TTL, compressed_data)
         else:
             # Сохраняем каждый чанк
             for i, chunk in enumerate(data_chunks):
                 chunk_key = f'{key}:part_{i}'
-                await redis_.set(chunk_key, chunk)
+                await redis_.setex(chunk_key, DEFAULT_TTL, chunk)
 
         # Вычисляем метаданные
         original_size = estimate_dataframe_size(
@@ -175,9 +176,10 @@ class RedisManager:
             'total_size': len(compressed_data),
         }
 
-        # Сохраняем метаданные
-        await redis_.set(
+        # Сохраняем метаданные с TTL
+        await redis_.setex(
             f'{key}:metadata',
+            METADATA_TTL,
             json.dumps(metadata),
         )
 
@@ -340,15 +342,16 @@ class RedisManager:
         self,
         key: str,
         value: str,
+        ttl: int | None = None,
     ) -> None:
         redis_ = self.__redis
         if not redis_:
             raise RuntimeError('Redis not connected')
 
-        await redis_.set(
-            key,
-            value,
-        )
+        if ttl is not None:
+            await redis_.setex(key, ttl, value)
+        else:
+            await redis_.set(key, value)
 
     async def set_metadata(
         self,
@@ -368,6 +371,7 @@ class RedisManager:
         await self.set(
             f'{key}:metadata',
             metadata_raw_data_raw,
+            ttl=METADATA_TTL,
         )
 
 

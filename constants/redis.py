@@ -24,10 +24,10 @@ METADATA_PREFIX: Final[str] = 'metadata'
 MAX_PART_SIZE_BYTES: Final[int] = 500_000_000
 
 # Время жизни ключей в Redis (в секундах)
-# 24 часа для основных данных
-DEFAULT_TTL: Final[int] = 86400
-# 7 дней для метаданных
-METADATA_TTL: Final[int] = 604800
+# 1 час для основных данных
+DEFAULT_TTL: Final[int] = 3600
+# 1 час для метаданных
+METADATA_TTL: Final[int] = 3600
 
 # Версии схем данных
 SCHEMA_VERSION: Final[str] = '1.0'
