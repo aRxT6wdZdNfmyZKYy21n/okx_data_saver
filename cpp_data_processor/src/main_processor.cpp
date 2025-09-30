@@ -28,12 +28,12 @@ void DataProcessor::initialize_components() {
     velocity_calculator_ = std::make_unique<VelocityCalculator>();
 }
 
-ProcessingResult DataProcessor::process_trades_data(SymbolId symbol_id, const pybind11::object& trades_df) {
+ProcessingResult DataProcessor::process_trades_data(SymbolId symbol_id, const pybind11::object& polars_dataframe) {
     auto start_time = std::chrono::high_resolution_clock::now();
     
     try {
-        // Convert Python DataFrame to C++ vector
-        std::vector<TradeData> trades = DataConverter::from_python_trades(trades_df);
+        // Convert Polars DataFrame to C++ vector
+        std::vector<TradeData> trades = DataConverter::from_python_trades(polars_dataframe);
         
         if (trades.empty()) {
             return ProcessingResult(true, "No trades to process", 0.0);
@@ -99,12 +99,12 @@ ProcessingResult DataProcessor::process_trades_data(SymbolId symbol_id, const py
     }
 }
 
-void DataProcessor::process_trades_data_async(SymbolId symbol_id, const pybind11::object& trades_df, 
+void DataProcessor::process_trades_data_async(SymbolId symbol_id, const pybind11::object& polars_dataframe, 
                                             const pybind11::function& callback) {
     // Run processing in a separate thread
-    std::thread([this, symbol_id, trades_df, callback]() {
+    std::thread([this, symbol_id, polars_dataframe, callback]() {
         try {
-            ProcessingResult result = process_trades_data(symbol_id, trades_df);
+            ProcessingResult result = process_trades_data(symbol_id, polars_dataframe);
             callback(result);
         } catch (const std::exception& e) {
             ProcessingResult error_result(false, std::string("Async processing failed: ") + e.what(), 0.0);
@@ -386,7 +386,7 @@ ProcessingResult DataProcessor::process_velocity_data(SymbolId symbol_id, const 
     }
 }
 
-void DataProcessor::save_results_to_redis(SymbolId symbol_id, const std::string& data_type, const pybind11::object& data) {
+void DataProcessor::save_results_to_redis(SymbolId symbol_id, const std::string& data_type, const pybind11::object& /* data */) {
     // TODO: Implement Redis saving
     // This is a placeholder - in the real implementation, this would save to Redis
     // For now, we'll just log that we would save the data

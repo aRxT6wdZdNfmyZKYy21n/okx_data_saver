@@ -34,19 +34,19 @@ public:
      * @brief Process trades data and create all derived data
      * 
      * @param symbol_id Symbol identifier
-     * @param trades_df Python DataFrame containing trades data
+     * @param polars_dataframe Polars DataFrame containing trades data
      * @return ProcessingResult Result of the processing operation
      */
-    ProcessingResult process_trades_data(SymbolId symbol_id, const pybind11::object& trades_df);
+    ProcessingResult process_trades_data(SymbolId symbol_id, const pybind11::object& polars_dataframe);
 
     /**
      * @brief Process trades data asynchronously
      * 
      * @param symbol_id Symbol identifier
-     * @param trades_df Python DataFrame containing trades data
+     * @param polars_dataframe Polars DataFrame containing trades data
      * @param callback Python callback function for async processing
      */
-    void process_trades_data_async(SymbolId symbol_id, const pybind11::object& trades_df, 
+    void process_trades_data_async(SymbolId symbol_id, const pybind11::object& polars_dataframe, 
                                   const pybind11::function& callback);
 
     /**

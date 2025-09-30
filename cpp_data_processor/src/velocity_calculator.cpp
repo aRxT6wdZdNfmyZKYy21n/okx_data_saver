@@ -20,7 +20,7 @@ VelocityCalculator::VelocityCalculator() {
 }
 
 VelocityData VelocityCalculator::calculate_velocity_from_candles(
-    SymbolId symbol_id, const std::vector<CandleData>& candles, const std::string& interval) {
+    SymbolId /* symbol_id */, const std::vector<CandleData>& candles, const std::string& interval) {
     
     VelocityData result(interval);
     
@@ -84,7 +84,7 @@ VelocityData VelocityCalculator::calculate_velocity_from_candles(
 }
 
 VelocityData VelocityCalculator::calculate_velocity_from_trades(
-    SymbolId symbol_id, const std::vector<TradeData>& trades, const std::string& interval) {
+    SymbolId /* symbol_id */, const std::vector<TradeData>& trades, const std::string& interval) {
     
     VelocityData result(interval);
     

@@ -169,7 +169,7 @@ enum class SymbolId : int32_t {
 class DataConverter {
 public:
     // Convert Python objects to C++ structures
-    static std::vector<TradeData> from_python_trades(const pybind11::object& trades_df);
+        static std::vector<TradeData> from_python_trades(const pybind11::object& polars_dataframe);
     static pybind11::object to_python_candles(const std::vector<CandleData>& candles);
     static pybind11::object to_python_bollinger(const BollingerBands& bollinger);
     static pybind11::object to_python_rsi(const RSIData& rsi);

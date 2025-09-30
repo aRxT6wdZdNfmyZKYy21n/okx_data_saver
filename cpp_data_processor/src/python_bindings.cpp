@@ -250,9 +250,9 @@ PYBIND11_MODULE(cpp_data_processor, m) {
     py::class_<okx_data_processor::DataProcessor>(m, "DataProcessor")
         .def(py::init<>())
         .def("process_trades_data", &okx_data_processor::DataProcessor::process_trades_data,
-             py::arg("symbol_id"), py::arg("trades_df"))
+             py::arg("symbol_id"), py::arg("polars_dataframe"))
         .def("process_trades_data_async", &okx_data_processor::DataProcessor::process_trades_data_async,
-             py::arg("symbol_id"), py::arg("trades_df"), py::arg("callback"))
+             py::arg("symbol_id"), py::arg("polars_dataframe"), py::arg("callback"))
         .def("get_processing_stats", &okx_data_processor::DataProcessor::get_processing_stats)
         .def("reset_stats", &okx_data_processor::DataProcessor::reset_stats)
         .def("set_processing_params", &okx_data_processor::DataProcessor::set_processing_params,

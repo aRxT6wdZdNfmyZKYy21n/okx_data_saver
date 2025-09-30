@@ -8,35 +8,53 @@
 namespace okx_data_processor {
 
 // DataConverter implementation
-std::vector<TradeData> DataConverter::from_python_trades(const pybind11::object& trades_df) {
+std::vector<TradeData> DataConverter::from_python_trades(const pybind11::object& trades_data) {
     std::vector<TradeData> trades;
     
     try {
-        // Extract data from pandas/polars DataFrame
-        auto trade_ids = trades_df.attr("trade_id").cast<pybind11::array_t<int64_t>>();
-        auto prices = trades_df.attr("price").cast<pybind11::array_t<double>>();
-        auto quantities = trades_df.attr("quantity").cast<pybind11::array_t<double>>();
-        auto is_buys = trades_df.attr("is_buy").cast<pybind11::array_t<bool>>();
-        auto datetimes = trades_df.attr("datetime").cast<pybind11::array_t<int64_t>>();
+        // Handle Polars DataFrame directly
+        auto df = trades_data.cast<pybind11::object>();
         
-        size_t size = trade_ids.size();
+        // Get columns from DataFrame
+        auto trade_ids_series = df.attr("__getitem__")("trade_id");
+        auto prices_series = df.attr("__getitem__")("price");
+        auto quantities_series = df.attr("__getitem__")("quantity");
+        auto is_buys_series = df.attr("__getitem__")("is_buy");
+        auto datetimes_series = df.attr("__getitem__")("datetime");
+        
+        // Get length from one of the series
+        size_t size = trade_ids_series.attr("len")().cast<size_t>();
         trades.reserve(size);
+        
+        // Convert polars.Series to numpy arrays for efficient access
+        auto trade_ids_np = trade_ids_series.attr("to_numpy")().cast<pybind11::array_t<int64_t>>();
+        auto prices_np = prices_series.attr("to_numpy")().cast<pybind11::array_t<double>>();
+        auto quantities_np = quantities_series.attr("to_numpy")().cast<pybind11::array_t<double>>();
+        auto is_buys_np = is_buys_series.attr("to_numpy")().cast<pybind11::array_t<bool>>();
+        auto datetimes_np = datetimes_series.attr("to_numpy")().cast<pybind11::array_t<int64_t>>();
+        
+        // Get raw pointers for fast access
+        auto trade_ids_ptr = trade_ids_np.data();
+        auto prices_ptr = prices_np.data();
+        auto quantities_ptr = quantities_np.data();
+        auto is_buys_ptr = is_buys_np.data();
+        auto datetimes_ptr = datetimes_np.data();
         
         for (size_t i = 0; i < size; ++i) {
             auto datetime_point = std::chrono::system_clock::from_time_t(
-                datetimes.at(i) / 1000) + 
-                std::chrono::milliseconds(datetimes.at(i) % 1000);
+                datetimes_ptr[i] / 1000) + 
+                std::chrono::milliseconds(datetimes_ptr[i] % 1000);
             
             trades.emplace_back(
-                trade_ids.at(i),
-                prices.at(i),
-                quantities.at(i),
-                is_buys.at(i),
+                trade_ids_ptr[i],
+                prices_ptr[i],
+                quantities_ptr[i],
+                is_buys_ptr[i],
                 datetime_point
             );
         }
     } catch (const std::exception& e) {
-        throw std::runtime_error("Failed to convert Python trades data: " + std::string(e.what()));
+        throw std::runtime_error("Failed to convert Polars DataFrame to C++ trades data: " + std::string(e.what()));
     }
     
     return trades;

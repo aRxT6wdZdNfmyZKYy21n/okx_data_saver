@@ -1,5 +1,6 @@
 """
 C++ Data Processor Wrapper - интеграция C++ процессора с Python кодом.
+Только C++ процессор, без fallback на Python.
 """
 
 import logging
@@ -18,6 +19,14 @@ from enumerations import SymbolId
 from main.process_data.redis_service import g_redis_data_service
 
 # Попытка импорта C++ модуля
+import sys
+import os
+
+# Add C++ module path
+cpp_module_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'cpp_data_processor', 'build')
+if cpp_module_path not in sys.path:
+    sys.path.insert(0, cpp_module_path)
+
 try:
     import cpp_data_processor
     CPP_AVAILABLE = True
@@ -26,37 +35,30 @@ try:
 except ImportError as e:
     CPP_AVAILABLE = False
     logger = logging.getLogger(__name__)
-    logger.warning(f"C++ Data Processor not available: {e}")
-    cpp_data_processor = None
+    logger.error(f"C++ Data Processor not available: {e}")
+    raise RuntimeError(f"C++ Data Processor is required but not available: {e}") from e
 
 logger = logging.getLogger(__name__)
 
 
 class CppDataProcessorWrapper:
-    """Обертка для C++ Data Processor с fallback на Python версию."""
+    """Обертка для C++ Data Processor. Только C++ процессор, без fallback."""
 
-    def __init__(self, enable_cpp: bool = True):
+    def __init__(self):
         """
         Инициализация обертки.
-        
-        Args:
-            enable_cpp: Включить использование C++ процессора
+        Требует наличия C++ модуля.
         """
-        self.enable_cpp = enable_cpp and CPP_AVAILABLE
-        self.cpp_processor = None
-        self.fallback_processor = None
-        
-        if self.enable_cpp:
-            try:
-                self.cpp_processor = cpp_data_processor.DataProcessor()
-                self._setup_cpp_parameters()
-                logger.info("C++ Data Processor initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize C++ Data Processor: {e}")
-                self.enable_cpp = False
-                self.cpp_processor = None
-        else:
-            logger.info("Using Python fallback processor")
+        if not CPP_AVAILABLE:
+            raise RuntimeError("C++ Data Processor module is not available")
+            
+        try:
+            self.cpp_processor = cpp_data_processor.DataProcessor()
+            self._setup_cpp_parameters()
+            logger.info("C++ Data Processor initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize C++ Data Processor: {e}")
+            raise RuntimeError(f"Failed to initialize C++ Data Processor: {e}") from e
 
     def _setup_cpp_parameters(self):
         """Настройка параметров C++ процессора."""
@@ -83,6 +85,7 @@ class CppDataProcessorWrapper:
             
         except Exception as e:
             logger.error(f"Failed to configure C++ processor parameters: {e}")
+            raise
 
     async def process_trades_data(
         self,
@@ -100,10 +103,10 @@ class CppDataProcessorWrapper:
             f'Processing trades data for {symbol_id.name}: {trades_df.height} records'
         )
 
-        if self.enable_cpp and self.cpp_processor:
-            await self._process_with_cpp(symbol_id, trades_df)
-        else:
-            await self._process_with_python_fallback(symbol_id, trades_df)
+        if not self.cpp_processor:
+            raise RuntimeError("C++ processor is not initialized")
+
+        await self._process_with_cpp(symbol_id, trades_df)
 
     async def _process_with_cpp(
         self,
@@ -113,11 +116,11 @@ class CppDataProcessorWrapper:
         """Обработка данных с использованием C++ процессора."""
         try:
             with Timer() as timer:
-                # Конвертация Polars DataFrame в формат для C++
-                trades_data = self._convert_polars_to_cpp_format(trades_df)
-                
-                # Обработка данных
-                result = self.cpp_processor.process_trades_data(symbol_id, trades_data)
+                # Обработка данных - передаем Polars DataFrame напрямую
+                # C++ SymbolId enum: BTC_USDT=0, ETH_USDT=1
+                # Python SymbolId enum: BTC_USDT=1, ETH_USDT=2
+                cpp_symbol_id = cpp_data_processor.SymbolId(symbol_id.value - 1)
+                result = self.cpp_processor.process_trades_data(cpp_symbol_id, trades_df)
                 
                 if result.success:
                     logger.info(
@@ -129,46 +132,13 @@ class CppDataProcessorWrapper:
                     
                 else:
                     logger.error(f"C++ processing failed: {result.error_message}")
-                    # Fallback к Python процессору
-                    await self._process_with_python_fallback(symbol_id, trades_df)
+                    raise RuntimeError(f"C++ processing failed: {result.error_message}")
                     
         except Exception as e:
             logger.error(f"C++ processing error: {e}")
-            # Fallback к Python процессору
-            await self._process_with_python_fallback(symbol_id, trades_df)
+            raise RuntimeError(f"C++ processing failed: {e}") from e
 
-    async def _process_with_python_fallback(
-        self,
-        symbol_id: SymbolId,
-        trades_df: DataFrame,
-    ) -> None:
-        """Fallback обработка с использованием Python процессора."""
-        logger.info("Using Python fallback processor")
-        
-        # Здесь будет вызов оригинального Python процессора
-        # Пока что просто логируем
-        logger.info("Python fallback processing (not implemented yet)")
 
-    def _convert_polars_to_cpp_format(self, trades_df: DataFrame) -> dict:
-        """
-        Конвертация Polars DataFrame в формат для C++ процессора.
-        
-        Args:
-            trades_df: Polars DataFrame с данными о сделках
-            
-        Returns:
-            dict: Данные в формате для C++ процессора
-        """
-        # Конвертация datetime в timestamp
-        datetime_series = trades_df['datetime'].cast(polars.Int64) // 1000  # Convert to seconds
-        
-        return {
-            'trade_id': trades_df['trade_id'].to_list(),
-            'price': trades_df['price'].to_list(),
-            'quantity': trades_df['quantity'].to_list(),
-            'is_buy': trades_df['is_buy'].to_list(),
-            'datetime': datetime_series.to_list()
-        }
 
     async def _save_cpp_results_to_redis(
         self,
@@ -197,16 +167,16 @@ class CppDataProcessorWrapper:
         Returns:
             dict: Статистика обработки
         """
-        if self.enable_cpp and self.cpp_processor:
-            try:
-                stats = self.cpp_processor.get_processing_stats()
-                stats['processor_type'] = 'cpp'
-                return stats
-            except Exception as e:
-                logger.error(f"Failed to get C++ processing stats: {e}")
-                return {'processor_type': 'cpp', 'error': str(e)}
-        else:
-            return {'processor_type': 'python_fallback'}
+        if not self.cpp_processor:
+            raise RuntimeError("C++ processor is not initialized")
+            
+        try:
+            stats = self.cpp_processor.get_processing_stats()
+            stats['processor_type'] = 'cpp'
+            return stats
+        except Exception as e:
+            logger.error(f"Failed to get C++ processing stats: {e}")
+            raise RuntimeError(f"Failed to get C++ processing stats: {e}") from e
 
     def is_cpp_available(self) -> bool:
         """
@@ -215,7 +185,7 @@ class CppDataProcessorWrapper:
         Returns:
             bool: True если C++ процессор доступен
         """
-        return self.enable_cpp and self.cpp_processor is not None
+        return CPP_AVAILABLE and self.cpp_processor is not None
 
     def get_processor_info(self) -> dict:
         """
@@ -226,9 +196,9 @@ class CppDataProcessorWrapper:
         """
         return {
             'cpp_available': CPP_AVAILABLE,
-            'cpp_enabled': self.enable_cpp,
+            'cpp_enabled': True,
             'cpp_initialized': self.cpp_processor is not None,
-            'processor_type': 'cpp' if self.is_cpp_available() else 'python_fallback'
+            'processor_type': 'cpp'
         }
 
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Performance Benchmark - сравнение производительности C++ и Python data processors.
+Performance Benchmark - тест производительности C++ data processor.
+Только C++ процессор, без fallback на Python.
 """
 
 import asyncio
@@ -32,14 +33,13 @@ except ImportError as e:
 
 
 class PerformanceBenchmark:
-    """Класс для проведения бенчмарков производительности."""
+    """Класс для проведения бенчмарков производительности C++ процессора."""
     
     def __init__(self):
         """Инициализация бенчмарка."""
         self.results = {
             'cpp': [],
-            'python': [],
-            'hybrid': []
+            'hybrid': []  # Теперь это тоже C++ процессор
         }
         self.test_data_sizes = [100, 500, 1000, 5000, 10000, 50000]
         
@@ -120,47 +120,9 @@ class PerformanceBenchmark:
                 'processor_type': 'cpp'
             }
     
-    async def benchmark_python_processor(self, trades_df: pl.DataFrame) -> Dict[str, Any]:
-        """
-        Бенчмарк Python процессора.
-        
-        Args:
-            trades_df: DataFrame с данными о сделках
-            
-        Returns:
-            Dict[str, Any]: Результаты бенчмарка
-        """
-        logger.info("Benchmarking Python processor")
-        
-        start_time = time.time()
-        
-        try:
-            # Здесь будет вызов оригинального Python процессора
-            # Пока что симулируем обработку
-            await asyncio.sleep(0.001 * trades_df.height / 1000)  # Симуляция обработки
-            
-            end_time = time.time()
-            processing_time = (end_time - start_time) * 1000
-            
-            return {
-                'success': True,
-                'processing_time_ms': processing_time,
-                'trades_count': trades_df.height,
-                'trades_per_second': trades_df.height / (processing_time / 1000),
-                'processor_type': 'python'
-            }
-            
-        except Exception as e:
-            logger.error(f"Python processor benchmark failed: {e}")
-            return {
-                'success': False,
-                'error': str(e),
-                'processor_type': 'python'
-            }
-    
     async def benchmark_hybrid_processor(self, trades_df: pl.DataFrame) -> Dict[str, Any]:
         """
-        Бенчмарк гибридного процессора.
+        Бенчмарк гибридного процессора (теперь только C++).
         
         Args:
             trades_df: DataFrame с данными о сделках
@@ -171,7 +133,7 @@ class PerformanceBenchmark:
         if not CPP_AVAILABLE:
             return {'error': 'Hybrid processor not available'}
         
-        logger.info("Benchmarking hybrid processor")
+        logger.info("Benchmarking hybrid processor (C++ only)")
         
         hybrid_processor = get_hybrid_data_processor()
         
@@ -203,6 +165,43 @@ class PerformanceBenchmark:
                 'processor_type': 'hybrid'
             }
     
+    async def benchmark_python_simulation(self, trades_df: pl.DataFrame) -> Dict[str, Any]:
+        """
+        Симуляция Python процессора для сравнения.
+        
+        Args:
+            trades_df: DataFrame с данными о сделках
+            
+        Returns:
+            Dict[str, Any]: Результаты симуляции
+        """
+        logger.info("Benchmarking Python processor (simulation)")
+        
+        start_time = time.time()
+        
+        try:
+            # Симуляция более медленной Python обработки
+            await asyncio.sleep(0.001 * trades_df.height / 1000)
+            
+            end_time = time.time()
+            processing_time = (end_time - start_time) * 1000
+            
+            return {
+                'success': True,
+                'processing_time_ms': processing_time,
+                'trades_count': trades_df.height,
+                'trades_per_second': trades_df.height / (processing_time / 1000),
+                'processor_type': 'python_simulation'
+            }
+            
+        except Exception as e:
+            logger.error(f"Python simulation benchmark failed: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'processor_type': 'python_simulation'
+            }
+    
     async def run_single_benchmark(self, num_trades: int, num_iterations: int = 3) -> Dict[str, Any]:
         """
         Запуск одного бенчмарка для определенного количества сделок.
@@ -223,8 +222,8 @@ class PerformanceBenchmark:
             'num_trades': num_trades,
             'num_iterations': num_iterations,
             'cpp': [],
-            'python': [],
-            'hybrid': []
+            'hybrid': [],
+            'python_simulation': []
         }
         
         # Запуск бенчмарков
@@ -236,18 +235,18 @@ class PerformanceBenchmark:
             if cpp_result.get('success'):
                 results['cpp'].append(cpp_result)
             
-            # Python процессор
-            python_result = await self.benchmark_python_processor(trades_df)
-            if python_result.get('success'):
-                results['python'].append(python_result)
-            
-            # Гибридный процессор
+            # Гибридный процессор (C++)
             hybrid_result = await self.benchmark_hybrid_processor(trades_df)
             if hybrid_result.get('success'):
                 results['hybrid'].append(hybrid_result)
+            
+            # Симуляция Python процессора
+            python_result = await self.benchmark_python_simulation(trades_df)
+            if python_result.get('success'):
+                results['python_simulation'].append(python_result)
         
         # Расчет статистики
-        for processor_type in ['cpp', 'python', 'hybrid']:
+        for processor_type in ['cpp', 'hybrid', 'python_simulation']:
             if results[processor_type]:
                 times = [r['processing_time_ms'] for r in results[processor_type]]
                 results[f'{processor_type}_stats'] = {
@@ -304,16 +303,16 @@ class PerformanceBenchmark:
         }
         
         for result in results:
-            if 'cpp_stats' in result and 'python_stats' in result:
+            if 'cpp_stats' in result and 'python_simulation_stats' in result:
                 cpp_time = result['cpp_stats']['mean_time_ms']
-                python_time = result['python_stats']['mean_time_ms']
+                python_time = result['python_simulation_stats']['mean_time_ms']
                 if python_time > 0:
                     speedup = python_time / cpp_time
                     summary['cpp_vs_python_speedup'].append(speedup)
             
-            if 'hybrid_stats' in result and 'python_stats' in result:
+            if 'hybrid_stats' in result and 'python_simulation_stats' in result:
                 hybrid_time = result['hybrid_stats']['mean_time_ms']
-                python_time = result['python_stats']['mean_time_ms']
+                python_time = result['python_simulation_stats']['mean_time_ms']
                 if python_time > 0:
                     speedup = python_time / hybrid_time
                     summary['hybrid_vs_python_speedup'].append(speedup)
@@ -341,14 +340,14 @@ class PerformanceBenchmark:
             results: Результаты бенчмарка
         """
         print("\n" + "="*80)
-        print("PERFORMANCE BENCHMARK RESULTS")
+        print("C++ DATA PROCESSOR PERFORMANCE BENCHMARK RESULTS")
         print("="*80)
         
         for result in results['results']:
             print(f"\nTrades: {result['num_trades']}")
             print("-" * 40)
             
-            for processor_type in ['cpp', 'python', 'hybrid']:
+            for processor_type in ['cpp', 'hybrid', 'python_simulation']:
                 if f'{processor_type}_stats' in result:
                     stats = result[f'{processor_type}_stats']
                     print(f"{processor_type.upper()}:")

@@ -105,7 +105,7 @@ std::vector<CandleData> CandlesProcessor::process_trades_for_interval_impl(
             trade.datetime.time_since_epoch()).count();
         
         int64_t candle_start_timestamp = calculate_candle_start_timestamp(timestamp_ms, interval_duration_ms);
-        int64_t candle_end_timestamp = candle_start_timestamp + interval_duration_ms;
+        // int64_t candle_end_timestamp = candle_start_timestamp + interval_duration_ms;
         
         auto it = candle_map.find(candle_start_timestamp);
         if (it != candle_map.end()) {

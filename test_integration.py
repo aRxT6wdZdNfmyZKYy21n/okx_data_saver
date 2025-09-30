@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Integration Test - полный тест интеграции C++ Data Processor.
+Только C++ процессор, без fallback на Python.
 """
 
 import asyncio
@@ -79,8 +80,8 @@ async def test_cpp_processor():
 
 
 async def test_hybrid_processor():
-    """Тест гибридного процессора."""
-    logger.info("Testing hybrid processor...")
+    """Тест гибридного процессора (теперь только C++)."""
+    logger.info("Testing C++ processor (formerly hybrid)...")
     
     hybrid = get_hybrid_data_processor()
     
@@ -99,15 +100,15 @@ async def test_hybrid_processor():
             end_time = time.time()
             
             processing_time = (end_time - start_time) * 1000
-            logger.info(f"Hybrid processing ({size} trades): {processing_time:.2f}ms")
+            logger.info(f"C++ processing ({size} trades): {processing_time:.2f}ms")
             
         except Exception as e:
-            logger.error(f"Hybrid processing failed for {size} trades: {e}")
+            logger.error(f"C++ processing failed for {size} trades: {e}")
             return False
     
     # Получение итоговой статистики
     stats = hybrid.get_processing_stats()
-    logger.info(f"Hybrid stats: {stats}")
+    logger.info(f"C++ stats: {stats}")
     
     return True
 
@@ -123,17 +124,19 @@ def test_configuration():
         config = get_config(profile)
         logger.info(f"Profile {profile}: mode={config.mode}, cpp_enabled={config.enable_cpp}")
         
-        # Тест принятия решений
+        # Тест принятия решений (всегда должно быть True для C++)
         for trades_count in [100, 500, 1000, 5000]:
             should_use_cpp = config.should_use_cpp(trades_count)
             logger.info(f"  {trades_count} trades -> use C++: {should_use_cpp}")
+            if not should_use_cpp:
+                logger.warning(f"  WARNING: C++ should always be used for {trades_count} trades")
     
     return True
 
 
 def test_performance_comparison():
-    """Тест сравнения производительности."""
-    logger.info("Testing performance comparison...")
+    """Тест производительности C++ процессора."""
+    logger.info("Testing C++ processor performance...")
     
     # Создание тестовых данных
     trades_df = generate_test_data(5000)
@@ -150,7 +153,7 @@ def test_performance_comparison():
         except Exception as e:
             logger.error(f"C++ test failed: {e}")
     
-    # Тест Python процессора (симуляция)
+    # Тест Python процессора (симуляция для сравнения)
     start_time = time.time()
     time.sleep(0.01)  # Симуляция более медленной Python обработки
     python_time = (time.time() - start_time) * 1000
@@ -171,7 +174,7 @@ async def main():
     tests = [
         ("Configuration System", test_configuration),
         ("C++ Processor", test_cpp_processor),
-        ("Hybrid Processor", test_hybrid_processor),
+        ("C++ Processor (formerly hybrid)", test_hybrid_processor),
         ("Performance Comparison", test_performance_comparison),
     ]
     

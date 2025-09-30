@@ -9,7 +9,7 @@ OrderBookProcessor::OrderBookProcessor() {
 }
 
 OrderBookVolumes OrderBookProcessor::process_order_book_volumes(
-    SymbolId symbol_id, const std::vector<TradeData>& trades) {
+    SymbolId /* symbol_id */, const std::vector<TradeData>& trades) {
     
     if (trades.empty()) {
         return OrderBookVolumes(0, 0, 0.0, 0, 0.0);
@@ -35,7 +35,7 @@ OrderBookVolumes OrderBookProcessor::process_order_book_volumes(
 }
 
 OrderBookVolumes OrderBookProcessor::process_order_book_volumes_with_snapshots(
-    SymbolId symbol_id, 
+    SymbolId /* symbol_id */, 
     const std::vector<TradeData>& trades,
     const std::vector<OrderBookSnapshot>& order_book_data) {
     
@@ -94,7 +94,7 @@ std::pair<int32_t, int32_t> OrderBookProcessor::calculate_array_dimensions(
 }
 
 double OrderBookProcessor::calculate_scale_factor(
-    const std::vector<TradeData>& trades, int32_t width, int32_t height) const {
+    const std::vector<TradeData>& trades, int32_t /* width */, int32_t height) const {
     
     if (trades.empty()) {
         return 1.0;
@@ -114,7 +114,7 @@ double OrderBookProcessor::calculate_scale_factor(
         return 1.0;
     }
     
-    double aspect_ratio = static_cast<double>(delta_trade_id) / delta_price;
+    // double aspect_ratio = static_cast<double>(delta_trade_id) / delta_price;
     double scale = delta_price / height;
     
     return scale;
@@ -283,7 +283,7 @@ std::pair<std::pair<double, double>, std::pair<int64_t, int64_t>> OrderBookProce
     );
 }
 
-double OrderBookProcessor::calculate_volume_contribution(const TradeData& trade, double scale) const {
+double OrderBookProcessor::calculate_volume_contribution(const TradeData& trade, double /* scale */) const {
     double volume = trade.price * trade.quantity;
     return volume * params_.volume_aggregation_factor;
 }

@@ -1,5 +1,6 @@
 """
 Configuration for C++ Data Processor integration.
+Only C++ processor, no Python fallback.
 """
 
 from typing import Dict, Any, List
@@ -10,9 +11,7 @@ from enum import Enum
 class ProcessorMode(Enum):
     """Режимы работы процессора."""
     CPP_ONLY = "cpp_only"
-    PYTHON_ONLY = "python_only"
-    HYBRID = "hybrid"
-    AUTO = "auto"
+    AUTO = "auto"  # Автоматический выбор на основе размера данных
 
 
 @dataclass
@@ -20,9 +19,8 @@ class CppProcessorConfig:
     """Конфигурация C++ процессора."""
     
     # Основные настройки
-    mode: ProcessorMode = ProcessorMode.HYBRID
+    mode: ProcessorMode = ProcessorMode.CPP_ONLY
     enable_cpp: bool = True
-    enable_python_fallback: bool = True
     
     # Настройки производительности
     prefer_cpp_for_large_datasets: bool = True
@@ -92,25 +90,18 @@ class CppProcessorConfig:
     def should_use_cpp(self, trades_count: int) -> bool:
         """
         Определение, следует ли использовать C++ процессор.
+        Всегда возвращает True, так как только C++ процессор доступен.
         
         Args:
             trades_count: Количество сделок для обработки
             
         Returns:
-            bool: True если следует использовать C++ процессор
+            bool: Всегда True (только C++ процессор)
         """
         if not self.enable_cpp:
-            return False
+            raise RuntimeError("C++ processor is disabled but required")
         
         if self.mode == ProcessorMode.CPP_ONLY:
-            return True
-        
-        if self.mode == ProcessorMode.PYTHON_ONLY:
-            return False
-        
-        if self.mode == ProcessorMode.HYBRID:
-            if self.prefer_cpp_for_large_datasets:
-                return trades_count >= self.large_dataset_threshold
             return True
         
         if self.mode == ProcessorMode.AUTO:
@@ -126,7 +117,7 @@ DEFAULT_CONFIG = CppProcessorConfig()
 # Конфигурации для разных сценариев
 CONFIGS = {
     'development': CppProcessorConfig(
-        mode=ProcessorMode.HYBRID,
+        mode=ProcessorMode.CPP_ONLY,
         enable_performance_monitoring=True,
         log_processing_times=True,
         collect_detailed_stats=True
@@ -142,14 +133,14 @@ CONFIGS = {
     ),
     
     'testing': CppProcessorConfig(
-        mode=ProcessorMode.PYTHON_ONLY,
+        mode=ProcessorMode.CPP_ONLY,
         enable_performance_monitoring=True,
         log_processing_times=True,
         collect_detailed_stats=True
     ),
     
     'benchmark': CppProcessorConfig(
-        mode=ProcessorMode.HYBRID,
+        mode=ProcessorMode.AUTO,
         enable_performance_monitoring=True,
         log_processing_times=True,
         collect_detailed_stats=True,
@@ -204,7 +195,7 @@ SYMBOL_CONFIGS = {
     ),
     
     'ETH_USDT': CppProcessorConfig(
-        mode=ProcessorMode.HYBRID,
+        mode=ProcessorMode.CPP_ONLY,
         large_dataset_threshold=500,
         enable_bollinger_bands=True,
         enable_candles=True,

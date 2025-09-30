@@ -9,9 +9,9 @@ ExtremeLinesProcessor::ExtremeLinesProcessor() {
 }
 
 std::vector<ExtremeLine> ExtremeLinesProcessor::process_extreme_lines(
-    SymbolId symbol_id, 
+    SymbolId /* symbol_id */,
     const std::vector<SmoothedLine>& smoothed_lines,
-    const std::vector<TradeData>& trades) {
+    const std::vector<TradeData>& /* trades */) {
     
     if (smoothed_lines.empty()) {
         return std::vector<ExtremeLine>();
@@ -78,7 +78,7 @@ std::pair<int32_t, int32_t> ExtremeLinesProcessor::calculate_array_dimensions(
 }
 
 double ExtremeLinesProcessor::calculate_scale_factor(
-    const std::vector<TradeData>& trades, int32_t width, int32_t height) const {
+    const std::vector<TradeData>& trades, int32_t /* width */, int32_t height) const {
     
     if (trades.empty()) {
         return 1.0;
@@ -98,7 +98,7 @@ double ExtremeLinesProcessor::calculate_scale_factor(
         return 1.0;
     }
     
-    double aspect_ratio = static_cast<double>(delta_trade_id) / delta_price;
+    // double aspect_ratio = static_cast<double>(delta_trade_id) / delta_price;
     double scale = delta_price / height;
     
     return scale;
@@ -145,7 +145,7 @@ std::vector<double> ExtremeLinesProcessor::find_extreme_prices(const std::vector
 }
 
 std::vector<ExtremeLine> ExtremeLinesProcessor::process_extreme_lines_with_intersections(
-    const std::vector<double>& extreme_prices,
+    const std::vector<double>& /* extreme_prices */,
     const std::vector<SmoothedLine>& smoothed_lines) const {
     
     std::vector<ExtremeLine> extreme_lines;
