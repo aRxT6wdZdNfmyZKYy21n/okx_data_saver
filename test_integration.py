@@ -19,8 +19,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Импорт компонентов
-from main.process_data.cpp_data_processor_wrapper import get_cpp_data_processor
-from main.process_data.hybrid_data_processor import get_hybrid_data_processor
+from main.process_data.cpp_data_processor_wrapper import g_cpp_data_processor_wrapper
+from main.process_data.hybrid_data_processor import g_cpp_data_processor
 from config.cpp_processor_config import get_config, ProcessorMode
 from enumerations import SymbolId
 
@@ -51,7 +51,7 @@ async def test_cpp_processor():
     """Тест C++ процессора."""
     logger.info("Testing C++ processor...")
     
-    wrapper = get_cpp_data_processor()
+    wrapper = g_cpp_data_processor_wrapper
     if not wrapper.is_cpp_available():
         logger.error("C++ processor not available")
         return False
@@ -83,7 +83,7 @@ async def test_hybrid_processor():
     """Тест гибридного процессора (теперь только C++)."""
     logger.info("Testing C++ processor (formerly hybrid)...")
     
-    hybrid = get_hybrid_data_processor()
+    hybrid = g_cpp_data_processor
     
     # Тест с разными размерами данных
     test_sizes = [100, 500, 1000, 5000]
@@ -142,7 +142,7 @@ def test_performance_comparison():
     trades_df = generate_test_data(5000)
     
     # Тест C++ процессора
-    wrapper = get_cpp_data_processor()
+    wrapper = g_cpp_data_processor_wrapper
     if wrapper.is_cpp_available():
         start_time = time.time()
         try:

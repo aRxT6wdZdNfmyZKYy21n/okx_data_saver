@@ -18,7 +18,7 @@ from constants.common import CommonConstants
 from constants.plot import PlotConstants
 from enumerations import SymbolId
 from main.process_data.redis_service import g_redis_data_service
-from main.process_data.cpp_data_processor_wrapper import get_cpp_data_processor
+from main.process_data.cpp_data_processor_wrapper import g_cpp_data_processor_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class CppDataProcessor:
         """
         Инициализация C++ процессора.
         """
-        self.cpp_wrapper = get_cpp_data_processor()
+        self.cpp_wrapper = g_cpp_data_processor_wrapper
         
         # Статистика обработки
         self.stats = {
@@ -132,19 +132,3 @@ class CppDataProcessor:
 
 # Глобальный экземпляр C++ процессора
 g_cpp_data_processor = CppDataProcessor()
-
-
-def get_cpp_data_processor() -> CppDataProcessor:
-    """
-    Получение глобального экземпляра C++ data processor.
-    
-    Returns:
-        CppDataProcessor: Экземпляр C++ процессора
-    """
-    return g_cpp_data_processor
-
-
-# Для обратной совместимости
-HybridDataProcessor = CppDataProcessor
-get_hybrid_data_processor = get_cpp_data_processor
-g_hybrid_data_processor = g_cpp_data_processor

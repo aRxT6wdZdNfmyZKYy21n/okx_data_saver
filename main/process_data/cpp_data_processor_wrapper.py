@@ -205,12 +205,3 @@ class CppDataProcessorWrapper:
 # Глобальный экземпляр обертки
 g_cpp_data_processor_wrapper = CppDataProcessorWrapper()
 
-
-def get_cpp_data_processor() -> CppDataProcessorWrapper:
-    """
-    Получение глобального экземпляра C++ data processor wrapper.
-    
-    Returns:
-        CppDataProcessorWrapper: Экземпляр обертки
-    """
-    return g_cpp_data_processor_wrapper

@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 
 # Импорт процессоров
 try:
-    from main.process_data.cpp_data_processor_wrapper import get_cpp_data_processor
-    from main.process_data.hybrid_data_processor import get_hybrid_data_processor
+    from main.process_data.cpp_data_processor_wrapper import g_cpp_data_processor_wrapper
+    from main.process_data.hybrid_data_processor import g_cpp_data_processor
     from enumerations import SymbolId
     CPP_AVAILABLE = True
 except ImportError as e:
@@ -92,7 +92,7 @@ class PerformanceBenchmark:
         
         logger.info("Benchmarking C++ processor")
         
-        cpp_wrapper = get_cpp_data_processor()
+        cpp_wrapper = g_cpp_data_processor_wrapper
         if not cpp_wrapper.is_cpp_available():
             return {'error': 'C++ processor not initialized'}
         
@@ -135,7 +135,7 @@ class PerformanceBenchmark:
         
         logger.info("Benchmarking hybrid processor (C++ only)")
         
-        hybrid_processor = get_hybrid_data_processor()
+        hybrid_processor = g_cpp_data_processor
         
         start_time = time.time()
         

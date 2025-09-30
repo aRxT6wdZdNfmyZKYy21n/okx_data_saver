@@ -13,7 +13,7 @@ from constants.symbol import (
 from enumerations import (
     SymbolId,
 )
-from main.process_data.data_processor import g_data_processor
+from main.process_data.hybrid_data_processor import g_cpp_data_processor
 from main.process_data.monitoring import g_error_handler, g_system_monitor
 from main.process_data.redis_service import g_redis_data_service
 from main.process_data.schemas import ProcessingStatus, SymbolMetadata
@@ -192,7 +192,7 @@ class DataProcessingDaemon:
         )
 
         # Обрабатываем все производные данные
-        await g_data_processor.process_trades_data(
+        await g_cpp_data_processor.process_trades_data(
             symbol_id=symbol_id,
             trades_df=trades_df,
         )
@@ -244,9 +244,9 @@ class DataProcessingDaemon:
                     # f' LIMIT {20_000_000!r}'
                     # f' LIMIT {15_000_000!r}'
                     # f' LIMIT {10_000_000!r}'
-                    f' LIMIT {5_000_000!r}'
+                    # f' LIMIT {5_000_000!r}'
                     # f' LIMIT {2_000_000!r}'
-                    # f' LIMIT {100_000!r}'
+                    f' LIMIT {100_000!r}'
                     # f' LIMIT {1_000!r}'
                     ';'
                 ),
@@ -454,7 +454,7 @@ async def main() -> None:
         )
     finally:
         # Close Redis connection
-        await g_redis_data_service.redis.disconnect()
+        await g_redis_manager.disconnect()
 
 
 if __name__ == '__main__':

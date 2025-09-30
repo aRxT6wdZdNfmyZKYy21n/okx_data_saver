@@ -23,10 +23,10 @@ python3 scripts/deploy_cpp_processor.py --rollback
 
 ```python
 # Импорт гибридного процессора
-from main.process_data.hybrid_data_processor import get_hybrid_data_processor
+from main.process_data.hybrid_data_processor import g_cpp_data_processor
 
 # Получение процессора
-processor = get_hybrid_data_processor()
+processor = g_cpp_data_processor
 
 # Обработка данных
 await processor.process_trades_data(symbol_id, trades_df)
@@ -161,9 +161,9 @@ make -j$(nproc)
 ### Проверка доступности C++ модуля
 
 ```python
-from main.process_data.cpp_data_processor_wrapper import get_cpp_data_processor
+from main.process_data.cpp_data_processor_wrapper import g_cpp_data_processor_wrapper
 
-wrapper = get_cpp_data_processor()
+wrapper = g_cpp_data_processor_wrapper
 print(f"C++ available: {wrapper.is_cpp_available()}")
 print(f"Processor info: {wrapper.get_processor_info()}")
 ```
