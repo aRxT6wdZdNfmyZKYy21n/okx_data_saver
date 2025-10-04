@@ -229,16 +229,14 @@ class DataProcessor:
                     on='start_trade_id',
                 )
 
-                final_candles = polars.concat([
-                    final_candles,
-                    new_candle_dataframe.filter(
-                        polars.col(
-                            'start_trade_id'
-                        ) >
-
-                        min_trade_id,
-                    ),
-                ])
+                final_candles = polars.concat(
+                    [
+                        final_candles,
+                        new_candle_dataframe.filter(
+                            polars.col('start_trade_id') > min_trade_id,
+                        ),
+                    ]
+                )
             else:
                 final_candles = new_candle_dataframe
 
@@ -588,9 +586,10 @@ class DataProcessor:
                 active_extreme_line_prices_to_delete: list[float] | None = None
 
                 # Проверяем пересечения с активными линиями
-                for price, extreme_line_raw_data in (
-                    active_extreme_line_raw_data_by_price_map.items()
-                ):
+                for (
+                    price,
+                    extreme_line_raw_data,
+                ) in active_extreme_line_raw_data_by_price_map.items():
                     if not (left_price <= price <= right_price):
                         continue
 

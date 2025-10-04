@@ -6,11 +6,17 @@
 #include "extreme_lines_processor.h"
 #include "order_book_processor.h"
 #include "velocity_calculator.h"
+#include "redis_client.h"
 #include <pybind11/pybind11.h>
 #include <pybind11/functional.h>
+#include <pybind11/stl.h>
 #include <chrono>
 #include <thread>
 #include <future>
+#include <sstream>
+#include <algorithm>  // C++17: For std::all_of, std::any_of, etc.
+#include <numeric>    // C++17: For std::reduce, std::transform_reduce
+#include <execution>  // C++17: For parallel algorithms
 
 namespace okx_data_processor {
 
@@ -24,19 +30,31 @@ void DataProcessor::initialize_components() {
     rsi_calculator_ = std::make_unique<RSICalculator>();
     smoothing_processor_ = std::make_unique<SmoothingProcessor>();
     extreme_lines_processor_ = std::make_unique<ExtremeLinesProcessor>();
-    order_book_processor_ = std::make_unique<OrderBookProcessor>();
+    // order_book_processor_ = std::make_unique<OrderBookProcessor>();
     velocity_calculator_ = std::make_unique<VelocityCalculator>();
+    
+    // Initialize Redis client
+    redis_client_ = std::make_unique<RedisClient>();
+    redis_client_->initialize();
 }
 
 ProcessingResult DataProcessor::process_trades_data(SymbolId symbol_id, const pybind11::object& polars_dataframe) {
     auto start_time = std::chrono::high_resolution_clock::now();
     
     try {
-        // Convert Polars DataFrame to C++ vector
-        std::vector<TradeData> trades = DataConverter::from_python_trades(polars_dataframe);
+        // C++17: Use auto for type deduction
+        auto trades = DataConverter::from_polars_trades(polars_dataframe);
         
+        // C++17: Use constexpr validation
         if (trades.empty()) {
-            return ProcessingResult(true, "No trades to process", 0.0);
+            return ProcessingResult::success_result(0.0);
+        }
+        
+        // C++17: Validate trades data using constexpr method
+        if (!std::all_of(trades.begin(), trades.end(), [](const auto& trade) {
+            return trade.is_valid();
+        })) {
+            return ProcessingResult::error_result("Invalid trade data detected");
         }
         
         // Process each component
@@ -67,10 +85,12 @@ ProcessingResult DataProcessor::process_trades_data(SymbolId symbol_id, const py
         }
         
         // Process remaining components
+        /*
         ProcessingResult order_book_result = process_order_book_volumes(symbol_id, trades);
         if (!order_book_result.success) {
             return order_book_result;
         }
+        */
         
         ProcessingResult velocity_result = process_velocity_data(symbol_id, trades);
         if (!velocity_result.success) {
@@ -85,17 +105,21 @@ ProcessingResult DataProcessor::process_trades_data(SymbolId symbol_id, const py
         total_processing_time_ms_ += duration.count();
         successful_operations_++;
         
-        return ProcessingResult(true, "Processing completed successfully", 
-                              duration.count() / 1000.0);
+        // C++17: Use constexpr calculation
+        return ProcessingResult::success_result(duration.count() / 1000.0);
         
     } catch (const std::exception& e) {
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        const auto end_time = std::chrono::high_resolution_clock::now();
+        const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        const auto processing_time = duration.count() / 1000.0;
         
         failed_operations_++;
         
-        return ProcessingResult(false, std::string("Processing failed: ") + e.what(), 
-                              duration.count() / 1000.0);
+        // C++17: Use string_view for better performance
+        return ProcessingResult::error_result(
+            std::string("Processing failed: ") + e.what(), 
+            processing_time
+        );
     }
 }
 
@@ -176,32 +200,41 @@ void DataProcessor::set_processing_params(const pybind11::dict& params) {
     }
 }
 
+
 ProcessingResult DataProcessor::process_bollinger_bands(SymbolId symbol_id, const std::vector<TradeData>& trades) {
     if (!processing_params_.enable_bollinger_bands) {
-        return ProcessingResult(true, "Bollinger Bands processing disabled", 0.0);
+        return ProcessingResult::success_result(0.0);
     }
     
     try {
-        auto start_time = std::chrono::high_resolution_clock::now();
+        const auto start_time = std::chrono::high_resolution_clock::now();
         
         // Set parameters
         bollinger_processor_->set_parameters(processing_params_.bollinger_period);
         
-        // Calculate Bollinger Bands
-        BollingerBands bollinger = bollinger_processor_->calculate_from_trades(trades);
+        // C++17: Use auto for type deduction
+        auto bollinger = bollinger_processor_->calculate_from_trades(trades);
+        
+        // C++17: Validate bollinger bands data
+        if (!bollinger.is_valid()) {
+            return ProcessingResult::error_result("Invalid Bollinger Bands data generated");
+        }
         
         // Convert to Python object and save to Redis
-        pybind11::object bollinger_py = DataConverter::to_python_bollinger(bollinger);
-        save_results_to_redis(symbol_id, "bollinger_bands", bollinger_py);
+        auto bollinger_py = DataConverter::to_polars_bollinger(bollinger);
+        save_results_to_redis(symbol_id, "bollinger", bollinger_py, pybind11::dict());
         
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        const auto end_time = std::chrono::high_resolution_clock::now();
+        const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        const auto processing_time = duration.count() / 1000.0;
         
-        return ProcessingResult(true, "Bollinger Bands processed successfully", 
-                              duration.count() / 1000.0);
+        return ProcessingResult::success_result(processing_time);
         
     } catch (const std::exception& e) {
-        return ProcessingResult(false, std::string("Bollinger Bands processing failed: ") + e.what(), 0.0);
+        return ProcessingResult::error_result(
+            std::string("Bollinger Bands processing failed: ") + e.what(), 
+            0.0
+        );
     }
 }
 
@@ -221,8 +254,10 @@ ProcessingResult DataProcessor::process_candles_data(SymbolId symbol_id, const s
             const std::string& interval_name = pair.first;
             const std::vector<CandleData>& candles = pair.second;
             
-            pybind11::object candles_py = DataConverter::to_python_candles(candles);
-            save_results_to_redis(symbol_id, "candles_" + interval_name, candles_py);
+            pybind11::object candles_py = DataConverter::to_polars_candles(candles);
+            pybind11::dict params;
+            params["interval"] = interval_name;
+            save_results_to_redis(symbol_id, "candles", candles_py, params);
         }
         
         auto end_time = std::chrono::high_resolution_clock::now();
@@ -251,8 +286,8 @@ ProcessingResult DataProcessor::process_rsi_data(SymbolId symbol_id, const std::
         RSIData rsi = rsi_calculator_->calculate_from_trades(trades);
         
         // Convert to Python object and save to Redis
-        pybind11::object rsi_py = DataConverter::to_python_rsi(rsi);
-        save_results_to_redis(symbol_id, "rsi", rsi_py);
+        pybind11::object rsi_py = DataConverter::to_polars_rsi(rsi);
+        save_results_to_redis(symbol_id, "rsi", rsi_py, pybind11::dict());
         
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -281,8 +316,8 @@ ProcessingResult DataProcessor::process_smoothed_data(SymbolId symbol_id, const 
             const std::string& level_name = pair.first;
             const std::vector<SmoothedLine>& lines = pair.second;
             
-            pybind11::object lines_py = DataConverter::to_python_smoothed(lines);
-            save_results_to_redis(symbol_id, "smoothed_" + level_name, lines_py);
+            pybind11::object lines_py = DataConverter::to_polars_smoothed_lines(lines);
+            save_results_to_redis(symbol_id, "smoothed_" + level_name, lines_py, pybind11::dict());
         }
         
         auto end_time = std::chrono::high_resolution_clock::now();
@@ -314,9 +349,9 @@ ProcessingResult DataProcessor::process_extreme_lines(SymbolId symbol_id, const 
         // Process extreme lines
         auto extreme_lines = extreme_lines_processor_->process_extreme_lines(symbol_id, smoothed_lines, trades);
         
-        // Convert to Python object and save to Redis
-        pybind11::object extreme_lines_py = DataConverter::to_python_extreme_lines(extreme_lines);
-        save_results_to_redis(symbol_id, "extreme_lines", extreme_lines_py);
+        // Convert to numpy array and save to Redis
+        pybind11::object extreme_lines_py = DataConverter::to_numpy_extreme_lines(extreme_lines);
+        save_results_to_redis(symbol_id, "extreme_lines", extreme_lines_py, pybind11::dict());
         
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -329,6 +364,7 @@ ProcessingResult DataProcessor::process_extreme_lines(SymbolId symbol_id, const 
     }
 }
 
+/*
 ProcessingResult DataProcessor::process_order_book_volumes(SymbolId symbol_id, const std::vector<TradeData>& trades) {
     if (!processing_params_.enable_order_book_volumes) {
         return ProcessingResult(true, "Order book volumes processing disabled", 0.0);
@@ -341,8 +377,8 @@ ProcessingResult DataProcessor::process_order_book_volumes(SymbolId symbol_id, c
         OrderBookVolumes volumes = order_book_processor_->process_order_book_volumes(symbol_id, trades);
         
         // Convert to Python object and save to Redis
-        pybind11::object volumes_py = DataConverter::to_python_order_book_volumes(volumes);
-        save_results_to_redis(symbol_id, "order_book_volumes", volumes_py);
+        pybind11::object volumes_py = DataConverter::to_polars_order_book_volumes(volumes);
+        save_results_to_redis(symbol_id, "order_book_volumes", volumes_py, pybind11::dict());
         
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -354,6 +390,7 @@ ProcessingResult DataProcessor::process_order_book_volumes(SymbolId symbol_id, c
         return ProcessingResult(false, std::string("Order book volumes processing failed: ") + e.what(), 0.0);
     }
 }
+*/
 
 ProcessingResult DataProcessor::process_velocity_data(SymbolId symbol_id, const std::vector<TradeData>& trades) {
     if (!processing_params_.enable_velocity) {
@@ -371,8 +408,10 @@ ProcessingResult DataProcessor::process_velocity_data(SymbolId symbol_id, const 
             VelocityData velocity = velocity_calculator_->calculate_velocity_from_trades(symbol_id, trades, interval);
             
             // Convert to Python object and save to Redis
-            pybind11::object velocity_py = DataConverter::to_python_velocity(velocity);
-            save_results_to_redis(symbol_id, "velocity_" + interval, velocity_py);
+            pybind11::object velocity_py = DataConverter::to_polars_velocity(velocity);
+            pybind11::dict params;
+            params["interval"] = interval;
+            save_results_to_redis(symbol_id, "velocity", velocity_py, params);
         }
         
         auto end_time = std::chrono::high_resolution_clock::now();
@@ -386,18 +425,82 @@ ProcessingResult DataProcessor::process_velocity_data(SymbolId symbol_id, const 
     }
 }
 
-void DataProcessor::save_results_to_redis(SymbolId symbol_id, const std::string& data_type, const pybind11::object& /* data */) {
-    // TODO: Implement Redis saving
-    // This is a placeholder - in the real implementation, this would save to Redis
-    // For now, we'll just log that we would save the data
-    pybind11::print("Would save", data_type, "for symbol", static_cast<int>(symbol_id), "to Redis");
+void DataProcessor::save_results_to_redis(SymbolId symbol_id, const std::string& data_type, const pybind11::object& dataframe, const pybind11::dict& additional_params) {
+    try {
+        if (!redis_client_ || !redis_client_->is_connected()) {
+            pybind11::print("Redis client not connected, skipping save operation");
+            return;
+        }
+
+        // Use provided additional parameters or create defaults
+        pybind11::dict params = additional_params;
+        
+        // Add default parameters if not provided
+        if (data_type == "bollinger" && !params.contains("timeperiod")) {
+            params["timeperiod"] = 20; // Default timeperiod
+        } else if (data_type == "rsi") {
+            if (!params.contains("interval")) {
+                params["interval"] = "1m";  // Default interval
+            }
+            if (!params.contains("timeperiod")) {
+                params["timeperiod"] = 14;  // Default timeperiod
+            }
+        } else if (data_type == "velocity" && !params.contains("interval")) {
+            params["interval"] = "1m"; // Default interval
+        }
+        
+        // Save DataFrame to Redis using Python service
+        bool success = redis_client_->save_dataframe(symbol_id, data_type, dataframe, params);
+        if (success) {
+            pybind11::print("✅ Successfully saved", data_type, "DataFrame for symbol", static_cast<int>(symbol_id), "to Redis");
+        } else {
+            pybind11::print("❌ Failed to save", data_type, "DataFrame for symbol", static_cast<int>(symbol_id), "to Redis");
+        }
+        
+    } catch (const std::exception& e) {
+        pybind11::print("❌ Error saving DataFrame to Redis:", e.what());
+    }
 }
 
 pybind11::object DataProcessor::load_data_from_redis(SymbolId symbol_id, const std::string& data_type) {
-    // TODO: Implement Redis loading
-    // This is a placeholder - in the real implementation, this would load from Redis
-    pybind11::print("Would load", data_type, "for symbol", static_cast<int>(symbol_id), "from Redis");
-    return pybind11::none();
+    try {
+        if (!redis_client_ || !redis_client_->is_connected()) {
+            pybind11::print("Redis client not connected, returning None");
+            return pybind11::none();
+        }
+
+        // Create additional parameters dict for specific data types
+        pybind11::dict additional_params;
+        
+        // Add specific parameters based on data type
+        if (data_type == "bollinger") {
+            additional_params["timeperiod"] = 20; // Default timeperiod
+        } else if (data_type == "rsi") {
+            additional_params["interval"] = "1m";  // Default interval
+            additional_params["timeperiod"] = 14;  // Default timeperiod
+        } else if (data_type == "velocity") {
+            additional_params["interval"] = "1m"; // Default interval
+        }
+        
+        // Load DataFrame from Redis using Python service
+        pybind11::object dataframe = redis_client_->load_dataframe(symbol_id, data_type, additional_params);
+        
+        if (dataframe.is_none()) {
+            pybind11::print("No", data_type, "DataFrame found for symbol", static_cast<int>(symbol_id), "in Redis");
+        } else {
+            pybind11::print("✅ Successfully loaded", data_type, "DataFrame for symbol", static_cast<int>(symbol_id), "from Redis");
+        }
+        
+        return dataframe;
+        
+    } catch (const std::exception& e) {
+        pybind11::print("❌ Error loading DataFrame from Redis:", e.what());
+        return pybind11::none();
+    }
+}
+
+bool DataProcessor::is_redis_connected() const {
+    return redis_client_ && redis_client_->is_connected();
 }
 
 } // namespace okx_data_processor

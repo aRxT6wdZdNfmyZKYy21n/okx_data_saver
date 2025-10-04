@@ -17,10 +17,15 @@ endif()
 
 # Find pybind11
 set(PYBIND11_FINDPYTHON ON)
+set(pybind11_DIR "/home/debian-12-client/Repositories/okx_data_saver/.venv/lib/python3.12/site-packages/pybind11/share/cmake/pybind11")
 find_package(pybind11 CONFIG REQUIRED)
 
 # Find Python
 find_package(Python COMPONENTS Interpreter Development REQUIRED)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -35,6 +40,7 @@ set(SOURCES
     src/extreme_lines_processor.cpp
     src/order_book_processor.cpp
     src/velocity_calculator.cpp
+    src/redis_client.cpp
     src/main_processor.cpp
     src/python_bindings.cpp
 )
@@ -49,6 +55,7 @@ set(HEADERS
     include/extreme_lines_processor.h
     include/order_book_processor.h
     include/velocity_calculator.h
+    include/redis_client.h
     include/main_processor.h
 )
 
@@ -63,7 +70,9 @@ set_target_properties(cpp_data_processor PROPERTIES
 )
 
 # Link libraries
-target_link_libraries(cpp_data_processor PRIVATE pybind11::module)
+target_link_libraries(cpp_data_processor PRIVATE 
+    pybind11::module
+)
 
 # Compiler-specific options
 if(MSVC)

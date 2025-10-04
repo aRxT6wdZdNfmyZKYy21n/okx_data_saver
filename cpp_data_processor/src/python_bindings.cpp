@@ -256,28 +256,33 @@ PYBIND11_MODULE(cpp_data_processor, m) {
         .def("get_processing_stats", &okx_data_processor::DataProcessor::get_processing_stats)
         .def("reset_stats", &okx_data_processor::DataProcessor::reset_stats)
         .def("set_processing_params", &okx_data_processor::DataProcessor::set_processing_params,
-             py::arg("params"));
+             py::arg("params"))
+        .def("save_results_to_redis", &okx_data_processor::DataProcessor::save_results_to_redis,
+             py::arg("symbol_id"), py::arg("data_type"), py::arg("data"), py::arg("additional_params") = py::dict())
+        .def("load_data_from_redis", &okx_data_processor::DataProcessor::load_data_from_redis,
+             py::arg("symbol_id"), py::arg("data_type"))
+        .def("is_redis_connected", &okx_data_processor::DataProcessor::is_redis_connected);
 
     // Bind DataConverter class
     py::class_<okx_data_processor::DataConverter>(m, "DataConverter")
-        .def_static("from_python_trades", &okx_data_processor::DataConverter::from_python_trades,
-                    py::arg("trades_df"))
-        .def_static("to_python_candles", &okx_data_processor::DataConverter::to_python_candles,
+        .def_static("from_polars_trades", &okx_data_processor::DataConverter::from_polars_trades,
+                    py::arg("polars_dataframe"))
+        .def_static("to_polars_candles", &okx_data_processor::DataConverter::to_polars_candles,
                     py::arg("candles"))
-        .def_static("to_python_bollinger", &okx_data_processor::DataConverter::to_python_bollinger,
+        .def_static("to_polars_bollinger", &okx_data_processor::DataConverter::to_polars_bollinger,
                     py::arg("bollinger"))
-        .def_static("to_python_rsi", &okx_data_processor::DataConverter::to_python_rsi,
+        .def_static("to_polars_rsi", &okx_data_processor::DataConverter::to_polars_rsi,
                     py::arg("rsi"))
-        .def_static("to_python_smoothed", &okx_data_processor::DataConverter::to_python_smoothed,
+        .def_static("to_polars_smoothed_lines", &okx_data_processor::DataConverter::to_polars_smoothed_lines,
                     py::arg("lines"))
-        .def_static("to_python_extreme_lines", &okx_data_processor::DataConverter::to_python_extreme_lines,
+        .def_static("to_polars_extreme_lines", &okx_data_processor::DataConverter::to_polars_extreme_lines,
                     py::arg("lines"))
-        .def_static("to_python_order_book_volumes", &okx_data_processor::DataConverter::to_python_order_book_volumes,
+        .def_static("to_numpy_extreme_lines", &okx_data_processor::DataConverter::to_numpy_extreme_lines,
+                    py::arg("lines"))
+        .def_static("to_polars_order_book_volumes", &okx_data_processor::DataConverter::to_polars_order_book_volumes,
                     py::arg("volumes"))
-        .def_static("to_python_velocity", &okx_data_processor::DataConverter::to_python_velocity,
+        .def_static("to_polars_velocity", &okx_data_processor::DataConverter::to_polars_velocity,
                     py::arg("velocity"))
-        .def_static("to_python_trades", &okx_data_processor::DataConverter::to_python_trades,
-                    py::arg("trades"))
         .def_static("from_python_candles", &okx_data_processor::DataConverter::from_python_candles,
                     py::arg("candles_df"))
         .def_static("from_python_bollinger", &okx_data_processor::DataConverter::from_python_bollinger,

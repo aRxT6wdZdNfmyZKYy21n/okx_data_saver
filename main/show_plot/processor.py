@@ -21,7 +21,6 @@ from constants.plot import (
 from constants.symbol import (
     SymbolConstants,
 )
-
 from enumerations import (
     SymbolId,
 )

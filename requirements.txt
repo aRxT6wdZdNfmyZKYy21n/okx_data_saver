@@ -12,6 +12,7 @@ polars
 polars_talib
 psutil
 pyarrow
+pybind11
 pydantic
 pydantic-settings
 PyQt6

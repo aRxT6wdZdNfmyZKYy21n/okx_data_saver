@@ -8,12 +8,12 @@
 namespace okx_data_processor {
 
 // DataConverter implementation
-std::vector<TradeData> DataConverter::from_python_trades(const pybind11::object& trades_data) {
+std::vector<TradeData> DataConverter::from_polars_trades(const pybind11::object& polars_dataframe) {
     std::vector<TradeData> trades;
     
     try {
-        // Handle Polars DataFrame directly
-        auto df = trades_data.cast<pybind11::object>();
+        // Handle Polars DataFrame
+        auto df = polars_dataframe.cast<pybind11::object>();
         
         // Get columns from DataFrame
         auto trade_ids_series = df.attr("__getitem__")("trade_id");
@@ -53,38 +53,16 @@ std::vector<TradeData> DataConverter::from_python_trades(const pybind11::object&
                 datetime_point
             );
         }
+        
     } catch (const std::exception& e) {
-        throw std::runtime_error("Failed to convert Polars DataFrame to C++ trades data: " + std::string(e.what()));
+        throw std::runtime_error("Failed to convert Polars DataFrame trades data to C++ trades data: " + std::string(e.what()));
     }
     
     return trades;
 }
 
-pybind11::object DataConverter::to_python_trades(const std::vector<TradeData>& trades) {
-    pybind11::list trade_ids, prices, quantities, is_buys, datetimes;
-    
-    for (const auto& trade : trades) {
-        trade_ids.append(trade.trade_id);
-        prices.append(trade.price);
-        quantities.append(trade.quantity);
-        is_buys.append(trade.is_buy);
-        
-        auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            trade.datetime.time_since_epoch()).count();
-        datetimes.append(timestamp_ms);
-    }
-    
-    pybind11::dict result;
-    result["trade_id"] = trade_ids;
-    result["price"] = prices;
-    result["quantity"] = quantities;
-    result["is_buy"] = is_buys;
-    result["datetime"] = datetimes;
-    
-    return result;
-}
 
-pybind11::object DataConverter::to_python_candles(const std::vector<CandleData>& candles) {
+pybind11::object DataConverter::to_polars_candles(const std::vector<CandleData>& candles) {
     pybind11::list open_prices, high_prices, low_prices, close_prices, volumes;
     pybind11::list start_trade_ids, end_trade_ids, start_timestamps, end_timestamps, trades_counts;
     
@@ -101,38 +79,47 @@ pybind11::object DataConverter::to_python_candles(const std::vector<CandleData>&
         trades_counts.append(candle.trades_count);
     }
     
-    pybind11::dict result;
-    result["open_price"] = open_prices;
-    result["high_price"] = high_prices;
-    result["low_price"] = low_prices;
-    result["close_price"] = close_prices;
-    result["volume"] = volumes;
-    result["start_trade_id"] = start_trade_ids;
-    result["end_trade_id"] = end_trade_ids;
-    result["start_timestamp_ms"] = start_timestamps;
-    result["end_timestamp_ms"] = end_timestamps;
-    result["trades_count"] = trades_counts;
+    // Create Polars DataFrame
+    pybind11::dict data;
+    data["open_price"] = open_prices;
+    data["high_price"] = high_prices;
+    data["low_price"] = low_prices;
+    data["close_price"] = close_prices;
+    data["volume"] = volumes;
+    data["start_trade_id"] = start_trade_ids;
+    data["end_trade_id"] = end_trade_ids;
+    data["start_timestamp_ms"] = start_timestamps;
+    data["end_timestamp_ms"] = end_timestamps;
+    data["trades_count"] = trades_counts;
     
-    return result;
+    pybind11::module polars = pybind11::module::import("polars");
+    return polars.attr("DataFrame")(data);
 }
 
-pybind11::object DataConverter::to_python_bollinger(const BollingerBands& bollinger) {
-    pybind11::dict result;
-    result["upper_band"] = bollinger.upper_band;
-    result["middle_band"] = bollinger.middle_band;
-    result["lower_band"] = bollinger.lower_band;
-    result["timeperiod"] = bollinger.timeperiod;
-    return result;
+
+pybind11::object DataConverter::to_polars_bollinger(const BollingerBands& bollinger) {
+    pybind11::dict data;
+    data["upper_band"] = bollinger.upper_band;
+    data["middle_band"] = bollinger.middle_band;
+    data["lower_band"] = bollinger.lower_band;
+    data["timeperiod"] = bollinger.timeperiod;
+    
+    pybind11::module polars = pybind11::module::import("polars");
+    return polars.attr("DataFrame")(data);
 }
 
-pybind11::object DataConverter::to_python_rsi(const RSIData& rsi) {
-    pybind11::dict result;
-    result["rsi_values"] = rsi.rsi_values;
-    result["timeperiod"] = rsi.timeperiod;
-    return result;
+
+pybind11::object DataConverter::to_polars_rsi(const RSIData& rsi) {
+    pybind11::dict data;
+    data["rsi_values"] = rsi.rsi_values;
+    data["timeperiod"] = rsi.timeperiod;
+    
+    pybind11::module polars = pybind11::module::import("polars");
+    return polars.attr("DataFrame")(data);
 }
 
-pybind11::object DataConverter::to_python_smoothed(const std::vector<SmoothedLine>& lines) {
+
+pybind11::object DataConverter::to_polars_smoothed_lines(const std::vector<SmoothedLine>& lines) {
     pybind11::list is_buys, start_prices, end_prices, quantities, volumes;
     pybind11::list start_trade_ids, end_trade_ids, start_datetimes, end_datetimes;
     
@@ -154,21 +141,23 @@ pybind11::object DataConverter::to_python_smoothed(const std::vector<SmoothedLin
         end_datetimes.append(end_timestamp_ms);
     }
     
-    pybind11::dict result;
-    result["is_buy"] = is_buys;
-    result["start_price"] = start_prices;
-    result["end_price"] = end_prices;
-    result["quantity"] = quantities;
-    result["volume"] = volumes;
-    result["start_trade_id"] = start_trade_ids;
-    result["end_trade_id"] = end_trade_ids;
-    result["start_datetime"] = start_datetimes;
-    result["end_datetime"] = end_datetimes;
+    pybind11::dict data;
+    data["is_buy"] = is_buys;
+    data["start_price"] = start_prices;
+    data["end_price"] = end_prices;
+    data["quantity"] = quantities;
+    data["volume"] = volumes;
+    data["start_trade_id"] = start_trade_ids;
+    data["end_trade_id"] = end_trade_ids;
+    data["start_datetime"] = start_datetimes;
+    data["end_datetime"] = end_datetimes;
     
-    return result;
+    pybind11::module polars = pybind11::module::import("polars");
+    return polars.attr("DataFrame")(data);
 }
 
-pybind11::object DataConverter::to_python_extreme_lines(const std::vector<ExtremeLine>& lines) {
+
+pybind11::object DataConverter::to_polars_extreme_lines(const std::vector<ExtremeLine>& lines) {
     pybind11::list prices, start_trade_ids, end_trade_ids;
     
     for (const auto& line : lines) {
@@ -177,31 +166,59 @@ pybind11::object DataConverter::to_python_extreme_lines(const std::vector<Extrem
         end_trade_ids.append(line.end_trade_id);
     }
     
-    pybind11::dict result;
-    result["price"] = prices;
-    result["start_trade_id"] = start_trade_ids;
-    result["end_trade_id"] = end_trade_ids;
+    pybind11::dict data;
+    data["price"] = prices;
+    data["start_trade_id"] = start_trade_ids;
+    data["end_trade_id"] = end_trade_ids;
     
-    return result;
+    pybind11::module polars = pybind11::module::import("polars");
+    return polars.attr("DataFrame")(data);
 }
 
-pybind11::object DataConverter::to_python_order_book_volumes(const OrderBookVolumes& volumes) {
-    pybind11::dict result;
-    result["asks_array"] = volumes.asks_array;
-    result["bids_array"] = volumes.bids_array;
-    result["width"] = volumes.width;
-    result["height"] = volumes.height;
-    result["scale"] = volumes.scale;
-    result["min_trade_id"] = volumes.min_trade_id;
-    result["min_price"] = volumes.min_price;
-    return result;
+pybind11::object DataConverter::to_numpy_extreme_lines(const std::vector<ExtremeLine>& lines) {
+    if (lines.empty()) {
+        // Return empty numpy array with shape (0, 3)
+        pybind11::module numpy = pybind11::module::import("numpy");
+        return numpy.attr("array")(pybind11::list(), pybind11::str("float64")).attr("reshape")(0, 3);
+    }
+    
+    // Create 2D array: each row is [price, start_trade_id, end_trade_id]
+    pybind11::list rows;
+    for (const auto& line : lines) {
+        pybind11::list row;
+        row.append(line.price);
+        row.append(static_cast<double>(line.start_trade_id));
+        row.append(static_cast<double>(line.end_trade_id));
+        rows.append(row);
+    }
+    
+    pybind11::module numpy = pybind11::module::import("numpy");
+    return numpy.attr("array")(rows, pybind11::str("float64"));
 }
 
-pybind11::object DataConverter::to_python_velocity(const VelocityData& velocity) {
-    pybind11::dict result;
-    result["velocity_values"] = velocity.velocity_values;
-    result["interval"] = velocity.interval;
-    return result;
+
+pybind11::object DataConverter::to_polars_order_book_volumes(const OrderBookVolumes& volumes) {
+    pybind11::dict data;
+    data["asks_array"] = volumes.asks_array;
+    data["bids_array"] = volumes.bids_array;
+    data["width"] = volumes.width;
+    data["height"] = volumes.height;
+    data["scale"] = volumes.scale;
+    data["min_trade_id"] = volumes.min_trade_id;
+    data["min_price"] = volumes.min_price;
+    
+    pybind11::module polars = pybind11::module::import("polars");
+    return polars.attr("DataFrame")(data);
+}
+
+
+pybind11::object DataConverter::to_polars_velocity(const VelocityData& velocity) {
+    pybind11::dict data;
+    data["velocity_values"] = velocity.velocity_values;
+    data["interval"] = velocity.interval;
+    
+    pybind11::module polars = pybind11::module::import("polars");
+    return polars.attr("DataFrame")(data);
 }
 
 // Conversion from Python to C++ structures

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "data_structures.h"
+#include "redis_client.h"
 #include <memory>
 #include <string>
 
@@ -68,6 +69,32 @@ public:
      */
     void set_processing_params(const pybind11::dict& params);
 
+
+    /**
+     * @brief Save processing results to Redis
+     * 
+     * @param symbol_id Symbol identifier
+     * @param data_type Type of data to save
+     * @param data Data to save (Python object)
+     */
+    void save_results_to_redis(SymbolId symbol_id, const std::string& data_type, const pybind11::object& data, const pybind11::dict& additional_params = pybind11::dict());
+
+    /**
+     * @brief Load data from Redis
+     * 
+     * @param symbol_id Symbol identifier
+     * @param data_type Type of data to load
+     * @return Loaded data as Python object, or None if not found
+     */
+    pybind11::object load_data_from_redis(SymbolId symbol_id, const std::string& data_type);
+
+    /**
+     * @brief Check if Redis client is connected
+     * 
+     * @return true if connected, false otherwise
+     */
+    bool is_redis_connected() const;
+
 private:
     // Processor components
     std::unique_ptr<BollingerBandsProcessor> bollinger_processor_;
@@ -77,6 +104,9 @@ private:
     std::unique_ptr<ExtremeLinesProcessor> extreme_lines_processor_;
     std::unique_ptr<OrderBookProcessor> order_book_processor_;
     std::unique_ptr<VelocityCalculator> velocity_calculator_;
+    
+    // Redis client
+    std::unique_ptr<RedisClient> redis_client_;
 
     // Processing statistics
     mutable std::atomic<uint64_t> total_trades_processed_{0};
@@ -140,15 +170,6 @@ private:
      */
     ProcessingResult process_velocity_data(SymbolId symbol_id, const std::vector<TradeData>& trades);
 
-    /**
-     * @brief Save processing results to Redis (placeholder)
-     */
-    void save_results_to_redis(SymbolId symbol_id, const std::string& data_type, const pybind11::object& data);
-
-    /**
-     * @brief Load existing data from Redis (placeholder)
-     */
-    pybind11::object load_data_from_redis(SymbolId symbol_id, const std::string& data_type);
 };
 
 } // namespace okx_data_processor

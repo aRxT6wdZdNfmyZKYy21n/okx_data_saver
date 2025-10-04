@@ -7,6 +7,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+import numpy
 import polars
 
 from constants.redis import (
@@ -178,7 +179,7 @@ class RedisDataService:
         self,
         symbol_id: SymbolId,
         interval: str,
-        candles_df: Any,  # polars.DataFrame
+        candles_df: polars.DataFrame,
         min_trade_id: int,
         max_trade_id: int,
     ) -> CandlesMetadata:
@@ -290,7 +291,7 @@ class RedisDataService:
         self,
         symbol_id: SymbolId,
         level: str,
-        smoothed_df: Any,  # polars.DataFrame
+        smoothed_df: polars.DataFrame,
         min_trade_id: int,
         max_trade_id: int,
     ) -> SmoothedMetadata:
@@ -339,7 +340,7 @@ class RedisDataService:
         self,
         symbol_id: SymbolId,
         level: str,
-        lines_df: Any,  # polars.DataFrame
+        lines_df: polars.DataFrame,
         min_trade_id: int,
         max_trade_id: int,
     ) -> LinesMetadata:
@@ -387,7 +388,7 @@ class RedisDataService:
     async def save_extreme_lines_data(
         self,
         symbol_id: SymbolId,
-        extreme_lines_array: Any,  # numpy.ndarray
+        extreme_lines_array: numpy.ndarray,
         width: int,
         height: int,
         scale: float,
@@ -460,8 +461,8 @@ class RedisDataService:
     async def save_order_book_volumes_data(
         self,
         symbol_id: SymbolId,
-        asks_array: Any,  # numpy.ndarray
-        bids_array: Any,  # numpy.ndarray
+        asks_array: numpy.ndarray,
+        bids_array: numpy.ndarray,
         width: int,
         height: int,
         scale: float,

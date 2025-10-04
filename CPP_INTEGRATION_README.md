@@ -14,9 +14,6 @@ python3 scripts/deploy_cpp_processor.py
 
 # Развертывание без тестов (быстрее)
 python3 scripts/deploy_cpp_processor.py --skip-tests
-
-# Откат к предыдущей версии
-python3 scripts/deploy_cpp_processor.py --rollback
 ```
 
 ### 2. Использование в коде
