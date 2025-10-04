@@ -949,22 +949,28 @@ class FinPlotChartWindow(QMainWindow):
 
         extreme_lines_image_item = self.__extreme_lines_image_item
 
-        if extreme_lines_position is not None:
+        if (
+                extreme_lines_position is not None and
+                extreme_lines_array is not None and
+                extreme_lines_scale is not None
+        ):
             extreme_lines_image_item.setPos(
                 QPointF(
                     *extreme_lines_position,
                 ),
             )
 
-        if extreme_lines_array is not None:
             extreme_lines_image_item.setImage(
                 extreme_lines_array,
             )
 
-        if extreme_lines_scale is not None:
             extreme_lines_image_item.setScale(
                 extreme_lines_scale,
             )
+
+            extreme_lines_image_item.show()
+        else:
+            extreme_lines_image_item.hide()
 
         order_book_volumes_asks_array = processor.get_order_book_volumes_asks_array()
 
@@ -977,7 +983,14 @@ class FinPlotChartWindow(QMainWindow):
         order_book_volumes_asks_image_item = self.__order_book_volumes_asks_image_item
         order_book_volumes_bids_image_item = self.__order_book_volumes_bids_image_item
 
-        if order_book_volumes_position is not None:
+        if (
+                order_book_volumes_position is not None and
+                order_book_volumes_asks_array is not None and
+                order_book_volumes_bids_array is not None and
+                order_book_volumes_scale is not None
+        ):
+
+
             order_book_volumes_position_point = QPointF(
                 *order_book_volumes_position,
             )
@@ -986,28 +999,32 @@ class FinPlotChartWindow(QMainWindow):
                 order_book_volumes_position_point,
             )
 
-            order_book_volumes_bids_image_item.setPos(
-                order_book_volumes_position_point,
-            )
-
-        if order_book_volumes_asks_array is not None:
             order_book_volumes_asks_image_item.setImage(
                 order_book_volumes_asks_array,
             )
 
-        if order_book_volumes_bids_array is not None:
-            order_book_volumes_bids_image_item.setImage(
-                order_book_volumes_bids_array,
-            )
-
-        if order_book_volumes_scale is not None:
             order_book_volumes_asks_image_item.setScale(
                 order_book_volumes_scale,
+            )
+
+            order_book_volumes_asks_image_item.show()
+
+            order_book_volumes_bids_image_item.setPos(
+                order_book_volumes_position_point,
+            )
+
+            order_book_volumes_bids_image_item.setImage(
+                order_book_volumes_bids_array,
             )
 
             order_book_volumes_bids_image_item.setScale(
                 order_book_volumes_scale,
             )
+
+            order_book_volumes_bids_image_item.show()
+        else:
+            order_book_volumes_asks_image_item.hide()
+            order_book_volumes_bids_image_item.hide()
 
         price_series = trades_smoothed_dataframe.get_column(
             'price',

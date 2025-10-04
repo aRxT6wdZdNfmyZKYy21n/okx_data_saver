@@ -4,6 +4,27 @@
 
 namespace okx_data_processor {
 
+// Helper function to convert C++ SymbolId to Python SymbolId
+pybind11::object convert_symbol_id_to_python(SymbolId symbol_id) {
+    try {
+        // Import the Python SymbolId enum
+        pybind11::module enumerations = pybind11::module::import("enumerations");
+        pybind11::object python_symbol_id = enumerations.attr("SymbolId");
+        
+        // Convert based on the C++ enum value
+        switch (symbol_id) {
+            case SymbolId::BTC_USDT:
+                return python_symbol_id.attr("BTC_USDT");
+            case SymbolId::ETH_USDT:
+                return python_symbol_id.attr("ETH_USDT");
+            default:
+                throw std::runtime_error("Unknown SymbolId: " + std::to_string(static_cast<int>(symbol_id)));
+        }
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to convert SymbolId to Python: " + std::string(e.what()));
+    }
+}
+
 RedisClient::RedisClient() : connected_(false) {
 }
 
@@ -41,6 +62,9 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             return false;
         }
 
+        // Convert C++ SymbolId to Python SymbolId
+        pybind11::object python_symbol_id = convert_symbol_id_to_python(symbol_id);
+        
         // Call appropriate Python method based on data type
         if (data_type == "trades") {
             // Extract parameters for trades data
@@ -56,7 +80,7 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             // Call Python async method synchronously
             pybind11::object result = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_trades_data")(
-                    symbol_id, dataframe, min_trade_id, max_trade_id, min_price, max_price));
+                    python_symbol_id, dataframe, min_trade_id, max_trade_id, min_price, max_price));
             
         } else if (data_type == "bollinger") {
             // Extract parameters for bollinger bands
@@ -70,7 +94,7 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             
             pybind11::object result = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_bollinger_data")(
-                    symbol_id, upper_band, middle_band, lower_band, timeperiod));
+                    python_symbol_id, upper_band, middle_band, lower_band, timeperiod));
             
         } else if (data_type == "rsi") {
             // Extract parameters for RSI
@@ -83,7 +107,7 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             
             pybind11::object result = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_rsi_data")(
-                    symbol_id, interval, rsi_series, timeperiod));
+                    python_symbol_id, interval, rsi_series, timeperiod));
             
         } else if (data_type == "velocity") {
             // Extract parameters for velocity
@@ -94,7 +118,7 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             
             pybind11::object result = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_velocity_data")(
-                    symbol_id, interval, velocity_series));
+                    python_symbol_id, interval, velocity_series));
             
         } else if (data_type == "candles") {
             // Extract parameters for candles
@@ -107,7 +131,7 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             
             pybind11::object result = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_candles_data")(
-                    symbol_id, interval, dataframe, min_trade_id, max_trade_id));
+                    python_symbol_id, interval, dataframe, min_trade_id, max_trade_id));
             
         } else if (data_type.substr(0, 9) == "smoothed_") {
             // Extract level from data_type (e.g., "smoothed_Smoothed (1)" -> "Smoothed (1)")
@@ -121,7 +145,7 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             
             pybind11::object result = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_smoothed_data")(
-                    symbol_id, level, dataframe, min_trade_id, max_trade_id));
+                    python_symbol_id, level, dataframe, min_trade_id, max_trade_id));
             
         } else if (data_type == "extreme_lines") {
             // Extract parameters for extreme lines
@@ -138,12 +162,12 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             
             pybind11::object result = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_extreme_lines_data")(
-                    symbol_id, dataframe, width, height, scale, min_trade_id, min_price));
+                    python_symbol_id, dataframe, width, height, scale, min_trade_id, min_price));
             
         } else if (data_type == "order_book_volumes") {
             pybind11::object result = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_order_book_volumes_data")(
-                    symbol_id, dataframe));
+                    python_symbol_id, dataframe));
             
         } else {
             std::cerr << "Unsupported data type: " << data_type << std::endl;

@@ -125,6 +125,7 @@ class RedisDataService:
         timeperiod: int = 20,
     ) -> BollingerMetadata:
         """Сохранение полос Боллинджера."""
+
         key = get_bollinger_key(
             symbol_id,
         )
