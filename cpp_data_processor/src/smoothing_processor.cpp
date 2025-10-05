@@ -53,6 +53,75 @@ std::map<std::string, std::vector<SmoothedLine>> SmoothingProcessor::process_smo
     return result;
 }
 
+std::map<std::string, std::vector<SmoothedDataPoint>> SmoothingProcessor::process_smoothed_data_points(
+    SymbolId symbol_id, const std::vector<TradeData>& trades) {
+    
+    std::map<std::string, std::vector<SmoothedDataPoint>> result;
+    
+    for (const auto& level_pair : smoothing_levels_) {
+        const std::string& level_name = level_pair.first;
+        int32_t level_number = level_pair.second;
+        
+        // Skip raw level (0)
+        if (level_number == 0) {
+            continue;
+        }
+        
+        int64_t min_trade_id = get_min_trade_id(symbol_id, level_name);
+        auto filtered_trades = filter_trades_by_min_id(trades, min_trade_id);
+        
+        if (filtered_trades.empty()) {
+            continue;
+        }
+        
+        std::vector<SmoothedDataPoint> data_points;
+        
+        if (level_number == 1) {
+            // First calculate lines
+            auto lines = process_level_1_smoothing(filtered_trades);
+            // Then convert to data points
+            data_points = calculate_smoothed_data_points_from_lines(lines);
+        } else {
+            // For now, only level 1 is implemented
+            // Higher levels would be implemented here
+            continue;
+        }
+        
+        if (!data_points.empty()) {
+            result[level_name] = std::move(data_points);
+        }
+    }
+    
+    return result;
+}
+
+std::vector<SmoothedDataPoint> SmoothingProcessor::process_level_data_points(
+    SymbolId symbol_id, const std::vector<TradeData>& trades, const std::string& level) {
+    
+    auto it = smoothing_levels_.find(level);
+    if (it == smoothing_levels_.end()) {
+        throw std::invalid_argument("Unknown smoothing level: " + level);
+    }
+    
+    int32_t level_number = it->second;
+    int64_t min_trade_id = get_min_trade_id(symbol_id, level);
+    auto filtered_trades = filter_trades_by_min_id(trades, min_trade_id);
+    
+    if (filtered_trades.empty()) {
+        return std::vector<SmoothedDataPoint>();
+    }
+    
+    if (level_number == 1) {
+        // First calculate lines
+        auto lines = process_level_1_smoothing(filtered_trades);
+        // Then convert to data points
+        return calculate_smoothed_data_points_from_lines(lines);
+    } else {
+        // For now, only level 1 is implemented
+        return std::vector<SmoothedDataPoint>();
+    }
+}
+
 std::vector<SmoothedLine> SmoothingProcessor::process_level_data(
     SymbolId symbol_id, const std::vector<TradeData>& trades, const std::string& level) {
     
@@ -172,6 +241,29 @@ std::vector<SmoothedLine> SmoothingProcessor::calculate_smoothed_from_lines(cons
     }
     
     return smoothed_data;
+}
+
+std::vector<SmoothedDataPoint> SmoothingProcessor::calculate_smoothed_data_points_from_lines(const std::vector<SmoothedLine>& lines) const {
+    std::vector<SmoothedDataPoint> smoothed_data_points;
+    smoothed_data_points.reserve(lines.size() * 2); // Each line contributes start and end points
+    
+    for (const auto& line : lines) {
+        // Add start point
+        smoothed_data_points.emplace_back(
+            line.start_trade_id,
+            line.start_price,
+            line.start_datetime
+        );
+        
+        // Add end point
+        smoothed_data_points.emplace_back(
+            line.end_trade_id,
+            line.end_price,
+            line.end_datetime
+        );
+    }
+    
+    return smoothed_data_points;
 }
 
 std::vector<TradeData> SmoothingProcessor::filter_trades_by_min_id(

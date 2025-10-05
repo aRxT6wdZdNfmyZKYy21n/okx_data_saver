@@ -190,6 +190,29 @@ struct SmoothedLine {
 };
 
 /**
+ * @brief Smoothed data point structure (for smoothed DataFrame)
+ */
+struct SmoothedDataPoint {
+    int64_t trade_id;
+    double price;
+    std::chrono::system_clock::time_point datetime;
+    
+    SmoothedDataPoint() = default;
+    SmoothedDataPoint(int64_t id, double p, std::chrono::system_clock::time_point dt)
+        : trade_id(id), price(p), datetime(dt) {}
+    
+    // C++17: Add validation
+    constexpr bool is_valid() const noexcept {
+        return trade_id > 0 && price > 0.0;
+    }
+    
+    // C++17: Add structured binding support
+    auto as_tuple() const noexcept {
+        return std::make_tuple(trade_id, price, datetime);
+    }
+};
+
+/**
  * @brief Extreme line data structure
  */
 struct ExtremeLine {
@@ -293,6 +316,7 @@ public:
     static pybind11::object to_polars_bollinger(const BollingerBands& bollinger);
     static pybind11::object to_polars_rsi(const RSIData& rsi);
     static pybind11::object to_polars_smoothed_lines(const std::vector<SmoothedLine>& lines);
+    static pybind11::object to_polars_smoothed_data(const std::vector<SmoothedDataPoint>& data_points);
     static pybind11::object to_polars_extreme_lines(const std::vector<ExtremeLine>& lines);
     static pybind11::object to_numpy_extreme_lines(const std::vector<ExtremeLine>& lines);
     static pybind11::object to_polars_order_book_volumes(const OrderBookVolumes& volumes);

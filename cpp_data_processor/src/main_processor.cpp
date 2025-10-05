@@ -311,13 +311,25 @@ ProcessingResult DataProcessor::process_smoothed_data(SymbolId symbol_id, const 
         // Process smoothed data for all levels
         auto smoothed_map = smoothing_processor_->process_smoothed_data(symbol_id, trades);
         
-        // Save each level's data to Redis
+        // Process smoothed data points for all levels
+        auto smoothed_data_points_map = smoothing_processor_->process_smoothed_data_points(symbol_id, trades);
+        
+        // Save each level's lines data to Redis
         for (const auto& pair : smoothed_map) {
             const std::string& level_name = pair.first;
             const std::vector<SmoothedLine>& lines = pair.second;
             
             pybind11::object lines_py = DataConverter::to_polars_smoothed_lines(lines);
-            save_results_to_redis(symbol_id, "smoothed_" + level_name, lines_py, pybind11::dict());
+            save_results_to_redis(symbol_id, "lines_" + level_name, lines_py, pybind11::dict());
+        }
+        
+        // Save each level's smoothed data points to Redis
+        for (const auto& pair : smoothed_data_points_map) {
+            const std::string& level_name = pair.first;
+            const std::vector<SmoothedDataPoint>& data_points = pair.second;
+            
+            pybind11::object smoothed_py = DataConverter::to_polars_smoothed_data(data_points);
+            save_results_to_redis(symbol_id, "smoothed_" + level_name, smoothed_py, pybind11::dict());
         }
         
         auto end_time = std::chrono::high_resolution_clock::now();

@@ -156,6 +156,27 @@ pybind11::object DataConverter::to_polars_smoothed_lines(const std::vector<Smoot
     return polars.attr("DataFrame")(data);
 }
 
+pybind11::object DataConverter::to_polars_smoothed_data(const std::vector<SmoothedDataPoint>& data_points) {
+    pybind11::list trade_ids, prices, datetimes;
+    
+    for (const auto& point : data_points) {
+        trade_ids.append(point.trade_id);
+        prices.append(point.price);
+        
+        auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            point.datetime.time_since_epoch()).count();
+        datetimes.append(timestamp_ms);
+    }
+    
+    pybind11::dict data;
+    data["trade_id"] = trade_ids;
+    data["price"] = prices;
+    data["datetime"] = datetimes;
+    
+    pybind11::module polars = pybind11::module::import("polars");
+    return polars.attr("DataFrame")(data);
+}
+
 
 pybind11::object DataConverter::to_polars_extreme_lines(const std::vector<ExtremeLine>& lines) {
     pybind11::list prices, start_trade_ids, end_trade_ids;

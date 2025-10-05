@@ -44,6 +44,27 @@ public:
         SymbolId symbol_id, const std::vector<TradeData>& trades, const std::string& level);
 
     /**
+     * @brief Process smoothed data points for all configured levels
+     * 
+     * @param symbol_id Symbol identifier
+     * @param trades Vector of trade data
+     * @return std::map<std::string, std::vector<SmoothedDataPoint>> Smoothed data points by level
+     */
+    std::map<std::string, std::vector<SmoothedDataPoint>> process_smoothed_data_points(
+        SymbolId symbol_id, const std::vector<TradeData>& trades);
+
+    /**
+     * @brief Process smoothed data points for specific level
+     * 
+     * @param symbol_id Symbol identifier
+     * @param trades Vector of trade data
+     * @param level Smoothing level (e.g., "Smoothed (1)")
+     * @return std::vector<SmoothedDataPoint> Smoothed data points for the level
+     */
+    std::vector<SmoothedDataPoint> process_level_data_points(
+        SymbolId symbol_id, const std::vector<TradeData>& trades, const std::string& level);
+
+    /**
      * @brief Add smoothing level configuration
      * 
      * @param level_name Level name
@@ -114,6 +135,14 @@ private:
      * @return std::vector<SmoothedLine> Smoothed data points
      */
     std::vector<SmoothedLine> calculate_smoothed_from_lines(const std::vector<SmoothedLine>& lines) const;
+
+    /**
+     * @brief Calculate smoothed data points from lines
+     * 
+     * @param lines Vector of smoothed lines
+     * @return std::vector<SmoothedDataPoint> Smoothed data points
+     */
+    std::vector<SmoothedDataPoint> calculate_smoothed_data_points_from_lines(const std::vector<SmoothedLine>& lines) const;
 
     /**
      * @brief Filter trades by minimum trade ID

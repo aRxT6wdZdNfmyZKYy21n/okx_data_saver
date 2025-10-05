@@ -77,7 +77,7 @@ PYBIND11_MODULE(cpp_data_processor, m) {
         .def(py::init<>())
         .def(py::init<bool, double, double, double, double, int64_t, int64_t,
                       std::chrono::system_clock::time_point, std::chrono::system_clock::time_point>(),
-             py::arg("is_buy"), py::arg("start_price"), py::arg("end_price"), 
+             py::arg("is_buy"), py::arg("start_price"), py::arg("end_price"),
              py::arg("quantity"), py::arg("volume"), py::arg("start_trade_id"),
              py::arg("end_trade_id"), py::arg("start_datetime"), py::arg("end_datetime"))
         .def_readwrite("is_buy", &okx_data_processor::SmoothedLine::is_buy)
@@ -89,6 +89,15 @@ PYBIND11_MODULE(cpp_data_processor, m) {
         .def_readwrite("end_trade_id", &okx_data_processor::SmoothedLine::end_trade_id)
         .def_readwrite("start_datetime", &okx_data_processor::SmoothedLine::start_datetime)
         .def_readwrite("end_datetime", &okx_data_processor::SmoothedLine::end_datetime);
+
+    // Bind SmoothedDataPoint struct
+    py::class_<okx_data_processor::SmoothedDataPoint>(m, "SmoothedDataPoint")
+        .def(py::init<>())
+        .def(py::init<int64_t, double, std::chrono::system_clock::time_point>(),
+             py::arg("trade_id"), py::arg("price"), py::arg("datetime"))
+        .def_readwrite("trade_id", &okx_data_processor::SmoothedDataPoint::trade_id)
+        .def_readwrite("price", &okx_data_processor::SmoothedDataPoint::price)
+        .def_readwrite("datetime", &okx_data_processor::SmoothedDataPoint::datetime);
 
     // Bind ExtremeLine struct
     py::class_<okx_data_processor::ExtremeLine>(m, "ExtremeLine")
@@ -183,6 +192,10 @@ PYBIND11_MODULE(cpp_data_processor, m) {
              py::arg("symbol_id"), py::arg("trades"))
         .def("process_level_data", &okx_data_processor::SmoothingProcessor::process_level_data,
              py::arg("symbol_id"), py::arg("trades"), py::arg("level"))
+        .def("process_smoothed_data_points", &okx_data_processor::SmoothingProcessor::process_smoothed_data_points,
+             py::arg("symbol_id"), py::arg("trades"))
+        .def("process_level_data_points", &okx_data_processor::SmoothingProcessor::process_level_data_points,
+             py::arg("symbol_id"), py::arg("trades"), py::arg("level"))
         .def("add_smoothing_level", &okx_data_processor::SmoothingProcessor::add_smoothing_level,
              py::arg("level_name"), py::arg("level_number"))
         .def("get_configured_levels", &okx_data_processor::SmoothingProcessor::get_configured_levels)
@@ -275,6 +288,8 @@ PYBIND11_MODULE(cpp_data_processor, m) {
                     py::arg("rsi"))
         .def_static("to_polars_smoothed_lines", &okx_data_processor::DataConverter::to_polars_smoothed_lines,
                     py::arg("lines"))
+        .def_static("to_polars_smoothed_data", &okx_data_processor::DataConverter::to_polars_smoothed_data,
+                    py::arg("data_points"))
         .def_static("to_polars_extreme_lines", &okx_data_processor::DataConverter::to_polars_extreme_lines,
                     py::arg("lines"))
         .def_static("to_numpy_extreme_lines", &okx_data_processor::DataConverter::to_numpy_extreme_lines,
