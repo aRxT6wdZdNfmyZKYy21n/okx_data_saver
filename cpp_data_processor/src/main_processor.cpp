@@ -84,14 +84,6 @@ ProcessingResult DataProcessor::process_trades_data(SymbolId symbol_id, const py
             return extreme_lines_result;
         }
         
-        // Process remaining components
-        /*
-        ProcessingResult order_book_result = process_order_book_volumes(symbol_id, trades);
-        if (!order_book_result.success) {
-            return order_book_result;
-        }
-        */
-        
         ProcessingResult velocity_result = process_velocity_data(symbol_id, trades);
         if (!velocity_result.success) {
             return velocity_result;
@@ -176,9 +168,6 @@ void DataProcessor::set_processing_params(const pybind11::dict& params) {
         }
         if (params.contains("enable_extreme_lines")) {
             processing_params_.enable_extreme_lines = params["enable_extreme_lines"].cast<bool>();
-        }
-        if (params.contains("enable_order_book_volumes")) {
-            processing_params_.enable_order_book_volumes = params["enable_order_book_volumes"].cast<bool>();
         }
         if (params.contains("enable_velocity")) {
             processing_params_.enable_velocity = params["enable_velocity"].cast<bool>();
@@ -453,34 +442,6 @@ ProcessingResult DataProcessor::process_extreme_lines(SymbolId symbol_id, const 
         return ProcessingResult(false, std::string("Extreme lines processing failed: ") + e.what(), 0.0);
     }
 }
-
-/*
-ProcessingResult DataProcessor::process_order_book_volumes(SymbolId symbol_id, const std::vector<TradeData>& trades) {
-    if (!processing_params_.enable_order_book_volumes) {
-        return ProcessingResult(true, "Order book volumes processing disabled", 0.0);
-    }
-    
-    try {
-        auto start_time = std::chrono::high_resolution_clock::now();
-        
-        // Process order book volumes
-        OrderBookVolumes volumes = order_book_processor_->process_order_book_volumes(symbol_id, trades);
-        
-        // Convert to Python object and save to Redis
-        pybind11::object volumes_py = DataConverter::to_polars_order_book_volumes(volumes);
-        save_results_to_redis(symbol_id, "order_book_volumes", volumes_py, pybind11::dict());
-        
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-        
-        return ProcessingResult(true, "Order book volumes processed successfully", 
-                              duration.count() / 1000.0);
-        
-    } catch (const std::exception& e) {
-        return ProcessingResult(false, std::string("Order book volumes processing failed: ") + e.what(), 0.0);
-    }
-}
-*/
 
 ProcessingResult DataProcessor::process_velocity_data(SymbolId symbol_id, const std::vector<TradeData>& /* trades */) {
     if (!processing_params_.enable_velocity) {

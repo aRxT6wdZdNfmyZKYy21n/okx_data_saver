@@ -33,7 +33,6 @@ class CppProcessorConfig:
     enable_rsi: bool = True
     enable_smoothing: bool = True
     enable_extreme_lines: bool = True
-    enable_order_book_volumes: bool = True
     enable_velocity: bool = True
 
     # Параметры Bollinger Bands
@@ -79,7 +78,6 @@ class CppProcessorConfig:
             'enable_rsi': self.enable_rsi,
             'enable_smoothing': self.enable_smoothing,
             'enable_extreme_lines': self.enable_extreme_lines,
-            'enable_order_book_volumes': self.enable_order_book_volumes,
             'enable_velocity': self.enable_velocity,
             'bollinger_period': self.bollinger_period,
             'bollinger_std_dev_multiplier': self.bollinger_std_dev_multiplier,
@@ -188,7 +186,6 @@ SYMBOL_CONFIGS = {
         enable_rsi=True,
         enable_smoothing=True,
         enable_extreme_lines=True,
-        enable_order_book_volumes=True,
         enable_velocity=True,
     ),
     'ETH_USDT': CppProcessorConfig(
@@ -199,7 +196,6 @@ SYMBOL_CONFIGS = {
         enable_rsi=True,
         enable_smoothing=True,
         enable_extreme_lines=True,
-        enable_order_book_volumes=True,
         enable_velocity=True,
     ),
     'default': DEFAULT_CONFIG,

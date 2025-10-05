@@ -126,7 +126,6 @@ private:
         bool enable_rsi = true;
         bool enable_smoothing = true;
         bool enable_extreme_lines = true;
-        bool enable_order_book_volumes = true;
         bool enable_velocity = true;
         
         int32_t bollinger_period = 20;

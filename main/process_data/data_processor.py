@@ -5,20 +5,27 @@
 import logging
 import typing
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import numpy
+import orjson
 import polars
 import polars_talib
 import talib
 from chrono import Timer
 from polars import DataFrame
+from sqlalchemy import and_, select
 
 from constants.common import CommonConstants
 from constants.plot import PlotConstants
 from enumerations import (
+    OKXOrderBookActionId,
     SymbolId,
 )
+from main.process_data.globals import g_globals
 from main.process_data.redis_service import g_redis_data_service
+from main.save_order_books.schemas import OKXOrderBookData2
+from settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -716,30 +723,214 @@ class DataProcessor:
             if not delta_trade_id:
                 return
 
+            logger.info(f'delta_price: {delta_price}, delta_trade_id: {delta_trade_id})')
+
+            datetime_series = trades_df.get_column('datetime')
+            max_datetime: datetime = datetime_series.max()
+            max_timestamp_ms = int(max_datetime.timestamp() * 1000)
+            min_datetime: datetime = datetime_series.min()
+            min_timestamp_ms = int(min_datetime.timestamp() * 1000)
+            delta_timestamp_ms = max_timestamp_ms - min_timestamp_ms
+
+            if not delta_timestamp_ms:
+                return
+
+            # Получаем начальный снимок стакана заявок
+            postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
+
+            async with postgres_db_session_maker() as session:
+                async with session.begin():
+                    result = await session.execute(
+                        select(OKXOrderBookData2)
+                        .where(
+                            and_(
+                                OKXOrderBookData2.symbol_id == symbol_id,
+                                OKXOrderBookData2.timestamp_ms <= min_timestamp_ms,
+                                OKXOrderBookData2.action_id == OKXOrderBookActionId.Snapshot,
+                            )
+                        )
+                        .order_by(
+                            OKXOrderBookData2.symbol_id.asc(),
+                            OKXOrderBookData2.timestamp_ms.desc(),
+                        )
+                        .limit(
+                            1,
+                        )
+                    )
+
+                    initial_order_book_snapshot_data = result.scalar_one_or_none()
+
+                    if initial_order_book_snapshot_data is None:
+                        logger.info(
+                            'Could not find initial order book snapshot data'
+                            f' for symbol ID {symbol_id.name} and max timestamp (ms) {min_timestamp_ms}'
+                        )
+                        return
+                    else:
+                        logger.info(
+                            f'Found initial order book snapshot data: {initial_order_book_snapshot_data}'
+                        )
+
+            # Получаем данные стакана заявок
+            new_order_book_dataframe = await self._fetch_order_book_dataframe(
+                max_timestamp_ms=max_timestamp_ms,
+                min_timestamp_ms=initial_order_book_snapshot_data.timestamp_ms,
+                symbol_id=symbol_id,
+            )
+
+            logger.info(f'new_order_book_dataframe: {new_order_book_dataframe}')
+
             aspect_ratio = delta_trade_id / delta_price
             height = 100
-            scale = delta_price / height
+            order_book_volumes_scale = delta_price / height
             width = int(height * aspect_ratio)
 
-            # Создаем массивы объемов
-            asks_array = numpy.zeros((width, height))
-            bids_array = numpy.zeros((width, height))
+            logger.info(
+                f'Creating order book volume array ({width} x {height}, scale {order_book_volumes_scale}, aspect ratio {aspect_ratio})'
+            )
 
-            # Упрощенная логика заполнения массивов
-            # В реальной реализации здесь должна быть полная логика из processor.py
+            order_book_volumes_asks_array = numpy.zeros((width, height))
+            order_book_volumes_bids_array = numpy.zeros((width, height))
+
+            logger.info('Filling order book volumes asks and bids arrays...')
+
+            order_book_ask_quantity_by_price_map: dict[Decimal, Decimal] = {}
+            order_book_bid_quantity_by_price_map: dict[Decimal, Decimal] = {}
+
+            for (
+                timestamp_ms,
+                action_id_raw,
+                asks_raw,
+                bids_raw,
+                datetime_,
+            ) in new_order_book_dataframe.iter_rows(named=False):
+                action_id = getattr(OKXOrderBookActionId, action_id_raw)
+
+                if action_id == OKXOrderBookActionId.Snapshot:
+                    order_book_ask_quantity_by_price_map.clear()
+                    order_book_bid_quantity_by_price_map.clear()
+
+                asks: list[list[str, str, str, str]] = orjson.loads(asks_raw)
+
+                for ask_list in asks:
+                    price_raw, quantity_raw, _, _ = ask_list
+                    price = Decimal(price_raw)
+                    quantity = Decimal(quantity_raw)
+
+                    if quantity:
+                        order_book_ask_quantity_by_price_map[price] = quantity
+                    else:
+                        order_book_ask_quantity_by_price_map.pop(price, None)
+
+                bids: list[list[str, str, str, str]] = orjson.loads(bids_raw)
+
+                for bid_list in bids:
+                    price_raw, quantity_raw, _, _ = bid_list
+                    price = Decimal(price_raw)
+                    quantity = Decimal(quantity_raw)
+
+                    if quantity:
+                        order_book_bid_quantity_by_price_map[price] = quantity
+                    else:
+                        order_book_bid_quantity_by_price_map.pop(price, None)
+
+                if datetime_ < min_datetime:
+                    continue
+
+                logger.info(
+                    f'{datetime_} / {max_datetime} ({100.0 * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
+                )
+
+                idx = datetime_series.search_sorted(element=datetime_, side='left')
+                closest_trade_id = trade_id_series[idx]
+
+                x = min(
+                    int((closest_trade_id - min_trade_id) / order_book_volumes_scale),
+                    width - 1,
+                )
+
+                for price, quantity in order_book_ask_quantity_by_price_map.items():
+                    volume = price * quantity
+                    y = min(
+                        int((float(price) - min_price) / order_book_volumes_scale),
+                        height - 1,
+                    )
+                    order_book_volumes_asks_array[x, y] = float(volume)
+
+                for price, quantity in order_book_bid_quantity_by_price_map.items():
+                    volume = price * quantity
+                    y = min(
+                        int((float(price) - min_price) / order_book_volumes_scale),
+                        height - 1,
+                    )
+                    order_book_volumes_bids_array[x, y] = float(volume)
 
             await g_redis_data_service.save_order_book_volumes_data(
                 symbol_id=symbol_id,
-                asks_array=asks_array,
-                bids_array=bids_array,
+                asks_array=order_book_volumes_asks_array,
+                bids_array=order_book_volumes_bids_array,
                 width=width,
                 height=height,
-                scale=scale,
+                scale=order_book_volumes_scale,
                 min_trade_id=min_trade_id,
                 min_price=min_price,
             )
 
         logger.info(f'Order book volumes processed in {timer.elapsed:.3f}s')
+
+    @staticmethod
+    async def _fetch_order_book_dataframe(
+        max_timestamp_ms: int,
+        min_timestamp_ms: int,
+        symbol_id: SymbolId,
+    ) -> DataFrame:
+        """Получение данных стакана заявок из базы данных."""
+        with Timer() as timer:
+            order_book_dataframe = polars.read_database_uri(
+                query=(
+                    'SELECT'
+                    # Primary key fields
+                    ' timestamp_ms'
+                    # Attribute fields
+                    ', action_id'
+                    ', asks'
+                    ', bids'
+                    f' FROM {OKXOrderBookData2.__tablename__}'
+                    f' WHERE symbol_id = {symbol_id.name!r}'
+                    f' AND timestamp_ms >= {min_timestamp_ms!r}'
+                    f' AND timestamp_ms <= {max_timestamp_ms!r}'
+                    ' ORDER BY'
+                    ' symbol_id ASC'
+                    ', timestamp_ms ASC'
+                    ';'
+                ),
+                engine='connectorx',
+                uri=(
+                    'postgresql'
+                    '://'
+                    f'{settings.POSTGRES_DB_USER_NAME}'
+                    ':'
+                    f'{settings.POSTGRES_DB_PASSWORD.get_secret_value()}'
+                    '@'
+                    f'{settings.POSTGRES_DB_HOST_NAME}'
+                    ':'
+                    f'{settings.POSTGRES_DB_PORT}'
+                    '/'
+                    f'{settings.POSTGRES_DB_NAME}'
+                ),
+            )
+
+        logger.info(f'Fetched order book dataframe by {timer.elapsed:.3f}s')
+
+        order_book_dataframe = order_book_dataframe.with_columns(
+            polars.col('timestamp_ms')
+            .cast(polars.Datetime(time_unit='ms', time_zone=UTC))
+            .alias('datetime')
+        )
+
+        order_book_dataframe = order_book_dataframe.sort('datetime')
+
+        return order_book_dataframe
 
     async def _process_velocity_data(
         self,

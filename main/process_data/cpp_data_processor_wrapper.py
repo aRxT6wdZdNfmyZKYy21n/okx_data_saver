@@ -59,7 +59,6 @@ class CppDataProcessorWrapper:
                 'enable_rsi': True,
                 'enable_smoothing': True,
                 'enable_extreme_lines': True,
-                'enable_order_book_volumes': True,
                 'enable_velocity': True,
                 'bollinger_period': 20,
                 'bollinger_std_dev_multiplier': 2.0,
