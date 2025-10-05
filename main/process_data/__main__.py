@@ -245,8 +245,8 @@ class DataProcessingDaemon:
                     # f' LIMIT {15_000_000!r}'
                     # f' LIMIT {10_000_000!r}'
                     # f' LIMIT {5_000_000!r}'
-                    # f' LIMIT {2_000_000!r}'
-                    f' LIMIT {100_000!r}'
+                    f' LIMIT {2_000_000!r}'
+                    # f' LIMIT {100_000!r}'
                     # f' LIMIT {1_000!r}'
                     ';'
                 ),

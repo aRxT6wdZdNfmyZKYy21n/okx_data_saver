@@ -73,9 +73,9 @@ def get_order_book_volumes_key(symbol_id: SymbolId) -> str:
     return f'{TRADES_PREFIX}:{symbol_id}:{ORDER_BOOK_VOLUMES_PREFIX}'
 
 
-def get_velocity_key(symbol_id: SymbolId) -> str:
+def get_velocity_key(symbol_id: SymbolId, interval: str) -> str:
     """Получение ключа для данных скорости."""
-    return f'{TRADES_PREFIX}:{symbol_id}:{VELOCITY_PREFIX}'
+    return f'{TRADES_PREFIX}:{symbol_id}:{VELOCITY_PREFIX}:{interval}'
 
 
 def get_metadata_key(symbol_id: SymbolId) -> str:

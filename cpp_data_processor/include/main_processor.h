@@ -4,6 +4,8 @@
 #include "redis_client.h"
 #include <memory>
 #include <string>
+#include <map>
+#include <pybind11/pybind11.h>
 
 namespace okx_data_processor {
 
@@ -107,6 +109,9 @@ private:
     
     // Redis client
     std::unique_ptr<RedisClient> redis_client_;
+
+    // In-memory cache for processed data
+    std::map<std::string, std::map<std::string, pybind11::object>> processed_data_cache_;
 
     // Processing statistics
     mutable std::atomic<uint64_t> total_trades_processed_{0};

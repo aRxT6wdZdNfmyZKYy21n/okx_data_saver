@@ -102,9 +102,12 @@ class CppDataProcessorWrapper:
         """Обработка данных с использованием C++ процессора."""
         try:
             with Timer() as timer:
-                cpp_symbol_id = cpp_data_processor.SymbolId(symbol_id.value)
+                cpp_symbol_id = cpp_data_processor.SymbolId(
+                    symbol_id.value,
+                )
                 result = self.cpp_processor.process_trades_data(
-                    cpp_symbol_id, trades_df
+                    cpp_symbol_id,
+                    trades_df,
                 )
 
                 if result.success:

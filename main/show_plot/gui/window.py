@@ -62,7 +62,7 @@ if typing.TYPE_CHECKING:
 _IS_NEED_DRAW_PRICE_PLOT_WITH_POINTS = False
 _IS_NEED_SHOW_BOLLINGER_BANDS = False
 _IS_NEED_SHOW_RSI = False
-_IS_NEED_SHOW_VELOCITY = False
+_IS_NEED_SHOW_VELOCITY = True
 
 _BOLLINGER_BANDS_FILL_COLOR = QColor(
     33,
@@ -950,9 +950,9 @@ class FinPlotChartWindow(QMainWindow):
         extreme_lines_image_item = self.__extreme_lines_image_item
 
         if (
-                extreme_lines_position is not None and
-                extreme_lines_array is not None and
-                extreme_lines_scale is not None
+            extreme_lines_position is not None
+            and extreme_lines_array is not None
+            and extreme_lines_scale is not None
         ):
             extreme_lines_image_item.setPos(
                 QPointF(
@@ -984,13 +984,11 @@ class FinPlotChartWindow(QMainWindow):
         order_book_volumes_bids_image_item = self.__order_book_volumes_bids_image_item
 
         if (
-                order_book_volumes_position is not None and
-                order_book_volumes_asks_array is not None and
-                order_book_volumes_bids_array is not None and
-                order_book_volumes_scale is not None
+            order_book_volumes_position is not None
+            and order_book_volumes_asks_array is not None
+            and order_book_volumes_bids_array is not None
+            and order_book_volumes_scale is not None
         ):
-
-
             order_book_volumes_position_point = QPointF(
                 *order_book_volumes_position,
             )
@@ -1045,11 +1043,12 @@ class FinPlotChartWindow(QMainWindow):
                 )
 
         if _IS_NEED_SHOW_VELOCITY:
+            velocity_trade_id_series = processor.get_velocity_trade_id_series()
             velocity_series = processor.get_velocity_series()
 
-            if velocity_series is not None:
+            if velocity_series is not None and velocity_trade_id_series is not None:
                 self.__velocity_plot_data_item.setData(
-                    trade_id_numpy_array,
+                    velocity_trade_id_series.to_numpy(),
                     velocity_series.to_numpy(),
                 )
 

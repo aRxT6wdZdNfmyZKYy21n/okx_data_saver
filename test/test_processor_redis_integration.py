@@ -27,7 +27,7 @@ class TestProcessorRedisIntegration:
         adapter.load_smoothed_dataframe.return_value = None
         adapter.load_extreme_lines_data.return_value = (None, None, None)
         adapter.load_order_book_volumes_data.return_value = (None, None, None, None)
-        adapter.load_velocity_data.return_value = None
+        adapter.load_velocity_series.return_value = None
         adapter.load_available_symbols.return_value = None
 
         return adapter
@@ -152,7 +152,7 @@ class TestProcessorRedisIntegration:
         mock_redis_adapter.load_order_book_volumes_data.assert_called_once_with(
             symbol_id
         )
-        mock_redis_adapter.load_velocity_data.assert_called_once_with(symbol_id)
+        mock_redis_adapter.load_velocity_series.assert_called_once_with(symbol_id)
 
 
 if __name__ == '__main__':

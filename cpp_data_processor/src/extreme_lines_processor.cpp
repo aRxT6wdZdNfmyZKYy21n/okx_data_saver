@@ -11,21 +11,20 @@ ExtremeLinesProcessor::ExtremeLinesProcessor() {
 std::vector<ExtremeLine> ExtremeLinesProcessor::process_extreme_lines(
     SymbolId /* symbol_id */,
     const std::vector<SmoothedLine>& smoothed_lines,
-    const std::vector<TradeData>& /* trades */) {
+    const std::vector<TradeData>& trades) {
     
     if (smoothed_lines.empty()) {
         return std::vector<ExtremeLine>();
     }
     
-    // Find extreme price levels
-    std::vector<double> extreme_prices = find_extreme_prices(smoothed_lines);
-    
-    if (extreme_prices.empty()) {
-        return std::vector<ExtremeLine>();
+    // Get trade ID ranges for completion
+    int64_t max_trade_id = 0;
+    if (!trades.empty()) {
+        max_trade_id = trades.back().trade_id;
     }
     
-    // Process extreme lines with intersection detection
-    return process_extreme_lines_with_intersections(extreme_prices, smoothed_lines);
+    // Process extreme lines using Python-like algorithm
+    return process_extreme_lines_python_style(smoothed_lines, max_trade_id);
 }
 
 std::vector<std::vector<double>> ExtremeLinesProcessor::create_extreme_lines_array(
@@ -98,7 +97,7 @@ double ExtremeLinesProcessor::calculate_scale_factor(
         return 1.0;
     }
     
-    // double aspect_ratio = static_cast<double>(delta_trade_id) / delta_price;
+    // Python logic: extreme_lines_scale = delta_price / height
     double scale = delta_price / height;
     
     return scale;
@@ -144,48 +143,65 @@ std::vector<double> ExtremeLinesProcessor::find_extreme_prices(const std::vector
     return extreme_prices;
 }
 
-std::vector<ExtremeLine> ExtremeLinesProcessor::process_extreme_lines_with_intersections(
-    const std::vector<double>& /* extreme_prices */,
-    const std::vector<SmoothedLine>& smoothed_lines) const {
+std::vector<ExtremeLine> ExtremeLinesProcessor::process_extreme_lines_python_style(
+    const std::vector<SmoothedLine>& smoothed_lines,
+    int64_t max_trade_id) const {
     
     std::vector<ExtremeLine> extreme_lines;
-    std::map<double, int64_t> active_extreme_lines; // price -> start_trade_id
+    
+    // Map to track active extreme lines by price (like Python version)
+    std::map<double, std::pair<int64_t, int64_t>> active_extreme_line_raw_data_by_price_map;
     
     for (const auto& line : smoothed_lines) {
-        double start_price = line.start_price;
-        double end_price = line.end_price;
-        int64_t start_trade_id = line.start_trade_id;
         int64_t end_trade_id = line.end_trade_id;
+        int64_t start_trade_id = line.start_trade_id;
+        double end_price = line.end_price;
+        double start_price = line.start_price;
         
-        double left_price = std::min(start_price, end_price);
-        double right_price = std::max(start_price, end_price);
+        double left_price = std::min(end_price, start_price);
+        double right_price = std::max(end_price, start_price);
         
-        // Check for intersections with active extreme lines
-        std::vector<double> prices_to_remove;
-        for (auto& [price, trade_id] : active_extreme_lines) {
-            if (price >= left_price && price <= right_price) {
-                // Intersection found - complete the extreme line
-                extreme_lines.emplace_back(price, trade_id, start_trade_id);
-                prices_to_remove.push_back(price);
+        std::vector<double> active_extreme_line_prices_to_delete;
+        
+        // Check for intersections with active lines (Python logic)
+        for (auto it = active_extreme_line_raw_data_by_price_map.begin(); 
+             it != active_extreme_line_raw_data_by_price_map.end(); ++it) {
+            
+            double price = it->first;
+            if (!(left_price <= price && price <= right_price)) {
+                continue;
             }
+            
+            active_extreme_line_prices_to_delete.push_back(price);
+            
+            // Add to completed extreme lines
+            extreme_lines.emplace_back(price, it->second.first, start_trade_id);
         }
         
         // Remove completed extreme lines
-        for (double price : prices_to_remove) {
-            active_extreme_lines.erase(price);
+        for (double price : active_extreme_line_prices_to_delete) {
+            active_extreme_line_raw_data_by_price_map.erase(price);
         }
         
-        // Add new extreme lines
-        active_extreme_lines[start_price] = start_trade_id;
-        active_extreme_lines[end_price] = end_trade_id;
+        // Check for duplicate prices (Python assertions)
+        if (active_extreme_line_raw_data_by_price_map.find(end_price) != active_extreme_line_raw_data_by_price_map.end()) {
+            // Handle duplicate end_price
+            continue;
+        }
+        
+        if (active_extreme_line_raw_data_by_price_map.find(start_price) != active_extreme_line_raw_data_by_price_map.end()) {
+            // Handle duplicate start_price
+            continue;
+        }
+        
+        // Add new active lines (Python logic)
+        active_extreme_line_raw_data_by_price_map[end_price] = std::make_pair(end_trade_id, 0);
+        active_extreme_line_raw_data_by_price_map[start_price] = std::make_pair(start_trade_id, 0);
     }
     
-    // Complete remaining active extreme lines
-    if (!smoothed_lines.empty()) {
-        int64_t max_trade_id = smoothed_lines.back().end_trade_id;
-        for (auto& [price, trade_id] : active_extreme_lines) {
-            extreme_lines.emplace_back(price, trade_id, max_trade_id);
-        }
+    // Complete remaining active lines
+    for (const auto& [price, trade_data] : active_extreme_line_raw_data_by_price_map) {
+        extreme_lines.emplace_back(price, trade_data.first, max_trade_id);
     }
     
     return extreme_lines;
@@ -224,17 +240,17 @@ void ExtremeLinesProcessor::fill_extreme_lines_array(
         int64_t end_trade_id = extreme_line.end_trade_id;
         double price = extreme_line.price;
         
-        // Calculate array coordinates
-        int32_t start_x = static_cast<int32_t>((start_trade_id - min_trade_id) / scale);
+        // Calculate array coordinates (Python logic)
         int32_t end_x = static_cast<int32_t>((end_trade_id - min_trade_id) / scale);
-        int32_t y = static_cast<int32_t>((price - min_price) / scale);
+        int32_t start_x = static_cast<int32_t>((start_trade_id - min_trade_id) / scale);
+        int32_t y = std::min(static_cast<int32_t>((price - min_price) / scale), height - 1);
         
         // Clamp coordinates to array bounds
         start_x = std::max(0, std::min(start_x, width - 1));
         end_x = std::max(0, std::min(end_x, width - 1));
         y = std::max(0, std::min(y, height - 1));
         
-        // Fill array with line values
+        // Fill array with values from 0 to line length (Python logic: numpy.arange(end_x - start_x))
         for (int32_t x = start_x; x < end_x; ++x) {
             array[x][y] = static_cast<double>(x - start_x);
         }

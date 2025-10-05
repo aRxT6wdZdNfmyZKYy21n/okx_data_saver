@@ -78,7 +78,7 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
                               additional_params["max_price"].cast<double>() : 0.0;
             
             // Call Python async method synchronously
-            pybind11::object result = pybind11::module::import("asyncio")
+            pybind11::object task = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_trades_data")(
                     python_symbol_id, dataframe, min_trade_id, max_trade_id, min_price, max_price));
             
@@ -92,7 +92,7 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             pybind11::object middle_band = dataframe.attr("get_column")("middle_band");
             pybind11::object lower_band = dataframe.attr("get_column")("lower_band");
             
-            pybind11::object result = pybind11::module::import("asyncio")
+            pybind11::object task = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_bollinger_data")(
                     python_symbol_id, upper_band, middle_band, lower_band, timeperiod));
             
@@ -105,19 +105,19 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             
             pybind11::object rsi_series = dataframe.attr("get_column")("rsi_values");
             
-            pybind11::object result = pybind11::module::import("asyncio")
+            pybind11::object task = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_rsi_data")(
                     python_symbol_id, interval, rsi_series, timeperiod));
             
         } else if (data_type == "velocity") {
             // Extract parameters for velocity
-            std::string interval = additional_params.contains("interval") ? 
-                                  additional_params["interval"].cast<std::string>() : "1m";
+            std::string interval = additional_params["interval"].cast<std::string>();
             
-            pybind11::object velocity_series = dataframe.attr("get_column")("velocity_values");
+            // dataframe is already a Series for velocity, pass it directly
+            pybind11::object velocity_series = dataframe;
             
-            pybind11::object result = pybind11::module::import("asyncio")
-                .attr("create_task")(redis_service_.attr("save_velocity_data")(
+            pybind11::object task = pybind11::module::import("asyncio")
+                .attr("create_task")(redis_service_.attr("save_velocity_series")(
                     python_symbol_id, interval, velocity_series));
             
         } else if (data_type == "candles") {
@@ -129,9 +129,35 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             int max_trade_id = additional_params.contains("max_trade_id") ? 
                               additional_params["max_trade_id"].cast<int>() : 0;
             
-            pybind11::object result = pybind11::module::import("asyncio")
+            pybind11::object task = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_candles_data")(
                     python_symbol_id, interval, dataframe, min_trade_id, max_trade_id));
+            
+        } else if (data_type == "lines") {
+            // Extract level from additional_params
+            std::string level = additional_params.contains("level") ? 
+                               additional_params["level"].cast<std::string>() : "Raw (0)";
+            int min_trade_id = additional_params.contains("min_trade_id") ? 
+                              additional_params["min_trade_id"].cast<int>() : 0;
+            int max_trade_id = additional_params.contains("max_trade_id") ? 
+                              additional_params["max_trade_id"].cast<int>() : 0;
+            
+            pybind11::object task = pybind11::module::import("asyncio")
+                .attr("create_task")(redis_service_.attr("save_lines_data")(
+                    python_symbol_id, level, dataframe, min_trade_id, max_trade_id));
+            
+        } else if (data_type == "smoothed") {
+            // Extract level from additional_params
+            std::string level = additional_params.contains("level") ? 
+                               additional_params["level"].cast<std::string>() : "Raw (0)";
+            int min_trade_id = additional_params.contains("min_trade_id") ? 
+                              additional_params["min_trade_id"].cast<int>() : 0;
+            int max_trade_id = additional_params.contains("max_trade_id") ? 
+                              additional_params["max_trade_id"].cast<int>() : 0;
+            
+            pybind11::object task = pybind11::module::import("asyncio")
+                .attr("create_task")(redis_service_.attr("save_smoothed_data")(
+                    python_symbol_id, level, dataframe, min_trade_id, max_trade_id));
             
         } else if (data_type.substr(0, 9) == "smoothed_") {
             // Extract level from data_type (e.g., "smoothed_Smoothed (1)" -> "Smoothed (1)")
@@ -143,7 +169,7 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             int max_trade_id = additional_params.contains("max_trade_id") ? 
                               additional_params["max_trade_id"].cast<int>() : 0;
             
-            pybind11::object result = pybind11::module::import("asyncio")
+            pybind11::object task = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_smoothed_data")(
                     python_symbol_id, level, dataframe, min_trade_id, max_trade_id));
             
@@ -160,12 +186,12 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
             double min_price = additional_params.contains("min_price") ? 
                               additional_params["min_price"].cast<double>() : 0.0;
             
-            pybind11::object result = pybind11::module::import("asyncio")
+            pybind11::object task = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_extreme_lines_data")(
                     python_symbol_id, dataframe, width, height, scale, min_trade_id, min_price));
             
         } else if (data_type == "order_book_volumes") {
-            pybind11::object result = pybind11::module::import("asyncio")
+            pybind11::object task = pybind11::module::import("asyncio")
                 .attr("create_task")(redis_service_.attr("save_order_book_volumes_data")(
                     python_symbol_id, dataframe));
             
@@ -180,84 +206,6 @@ bool RedisClient::save_dataframe(SymbolId symbol_id,
         
     } catch (const std::exception& e) {
         std::cerr << "❌ Failed to save " << data_type << " data: " << e.what() << std::endl;
-        return false;
-    }
-}
-
-pybind11::object RedisClient::load_dataframe(SymbolId symbol_id, 
-                                           const std::string& data_type,
-                                           [[maybe_unused]] const pybind11::dict& additional_params) {
-    try {
-        if (!connected_) {
-            std::cerr << "Redis client not connected" << std::endl;
-            return pybind11::none();
-        }
-
-        pybind11::object result;
-        
-        // Call appropriate Python method based on data type
-        if (data_type == "trades") {
-            result = pybind11::module::import("asyncio")
-                .attr("run")(redis_service_.attr("load_trades_data")(symbol_id));
-                
-        } else if (data_type == "bollinger") {
-            result = pybind11::module::import("asyncio")
-                .attr("run")(redis_service_.attr("load_bollinger_data")(symbol_id));
-                
-        } else if (data_type == "rsi") {
-            result = pybind11::module::import("asyncio")
-                .attr("run")(redis_service_.attr("load_rsi_data")(symbol_id));
-                
-        } else if (data_type == "velocity") {
-            result = pybind11::module::import("asyncio")
-                .attr("run")(redis_service_.attr("load_velocity_data")(symbol_id));
-                
-        } else if (data_type == "candles") {
-            std::string interval = additional_params.contains("interval") ? 
-                                  additional_params["interval"].cast<std::string>() : "1m";
-            result = pybind11::module::import("asyncio")
-                .attr("run")(redis_service_.attr("load_candles_data")(symbol_id, interval));
-                
-        } else if (data_type.substr(0, 9) == "smoothed_") {
-            std::string level = data_type.substr(9); // Remove "smoothed_" prefix
-            result = pybind11::module::import("asyncio")
-                .attr("run")(redis_service_.attr("load_smoothed_data")(symbol_id, level));
-                
-        } else if (data_type == "extreme_lines") {
-            result = pybind11::module::import("asyncio")
-                .attr("run")(redis_service_.attr("load_extreme_lines_data")(symbol_id));
-                
-        } else if (data_type == "order_book_volumes") {
-            result = pybind11::module::import("asyncio")
-                .attr("run")(redis_service_.attr("load_order_book_volumes_data")(symbol_id));
-                
-        } else {
-            std::cerr << "Unsupported data type: " << data_type << std::endl;
-            return pybind11::none();
-        }
-        
-        return result;
-        
-    } catch (const std::exception& e) {
-        std::cerr << "❌ Failed to load " << data_type << " data: " << e.what() << std::endl;
-        return pybind11::none();
-    }
-}
-
-bool RedisClient::data_exists(SymbolId symbol_id, 
-                            const std::string& data_type,
-                            const pybind11::dict& additional_params) {
-    try {
-        if (!connected_) {
-            return false;
-        }
-
-        // Try to load the data and check if it's not None
-        pybind11::object data = load_dataframe(symbol_id, data_type, additional_params);
-        return !data.is_none();
-        
-    } catch (const std::exception& e) {
-        std::cerr << "❌ Failed to check data existence: " << e.what() << std::endl;
         return false;
     }
 }

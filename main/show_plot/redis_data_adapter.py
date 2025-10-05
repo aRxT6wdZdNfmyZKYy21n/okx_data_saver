@@ -299,13 +299,15 @@ class RedisDataAdapter:
             return None, None, None, None
 
     @staticmethod
-    async def load_velocity_data(
+    async def load_velocity_series(
         symbol_id: SymbolId,
+        interval_name: str,
     ) -> Series | None:
         """Загрузка данных скорости из Redis."""
         try:
-            velocity_df = await g_redis_data_service.load_velocity_data(
+            velocity_df = await g_redis_data_service.load_velocity_series(
                 symbol_id,
+                interval_name,
             )
 
             if velocity_df is None:

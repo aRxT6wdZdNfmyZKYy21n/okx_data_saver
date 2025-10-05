@@ -318,7 +318,7 @@ public:
     static pybind11::object to_polars_smoothed_lines(const std::vector<SmoothedLine>& lines);
     static pybind11::object to_polars_smoothed_data(const std::vector<SmoothedDataPoint>& data_points);
     static pybind11::object to_polars_extreme_lines(const std::vector<ExtremeLine>& lines);
-    static pybind11::object to_numpy_extreme_lines(const std::vector<ExtremeLine>& lines);
+    static pybind11::object to_numpy_extreme_lines_array(const std::vector<std::vector<double>>& array);
     static pybind11::object to_polars_order_book_volumes(const OrderBookVolumes& volumes);
     static pybind11::object to_polars_velocity(const VelocityData& velocity);
     

@@ -85,6 +85,16 @@ public:
      */
     pybind11::dict get_processing_params() const;
 
+    /**
+     * @brief Get price and trade ID ranges from trades
+     * 
+     * @param trades Vector of trade data
+     * @return std::pair<std::pair<double, double>, std::pair<int64_t, int64_t>> 
+     *         Price range (min, max) and trade ID range (min, max)
+     */
+    std::pair<std::pair<double, double>, std::pair<int64_t, int64_t>> get_ranges(
+        const std::vector<TradeData>& trades) const;
+
 private:
     // Processing parameters
     struct ProcessingParams {
@@ -102,15 +112,15 @@ private:
     std::vector<double> find_extreme_prices(const std::vector<SmoothedLine>& smoothed_lines) const;
 
     /**
-     * @brief Process extreme lines with intersection detection
+     * @brief Process extreme lines using Python-style algorithm
      * 
-     * @param extreme_prices Vector of extreme prices
      * @param smoothed_lines Vector of smoothed lines
+     * @param max_trade_id Maximum trade ID for completion
      * @return std::vector<ExtremeLine> Processed extreme lines
      */
-    std::vector<ExtremeLine> process_extreme_lines_with_intersections(
-        const std::vector<double>& extreme_prices,
-        const std::vector<SmoothedLine>& smoothed_lines) const;
+    std::vector<ExtremeLine> process_extreme_lines_python_style(
+        const std::vector<SmoothedLine>& smoothed_lines,
+        int64_t max_trade_id) const;
 
     /**
      * @brief Check if price is within line range
@@ -148,16 +158,6 @@ private:
         std::vector<std::vector<double>>& array,
         int32_t width, int32_t height, double scale,
         int64_t min_trade_id, double min_price) const;
-
-    /**
-     * @brief Get price and trade ID ranges from trades
-     * 
-     * @param trades Vector of trade data
-     * @return std::pair<std::pair<double, double>, std::pair<int64_t, int64_t>> 
-     *         Price range (min, max) and trade ID range (min, max)
-     */
-    std::pair<std::pair<double, double>, std::pair<int64_t, int64_t>> get_ranges(
-        const std::vector<TradeData>& trades) const;
 };
 
 } // namespace okx_data_processor

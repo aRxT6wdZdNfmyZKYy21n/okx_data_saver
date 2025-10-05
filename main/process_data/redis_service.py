@@ -543,21 +543,23 @@ class RedisDataService:
 
         return np.array(asks_list), np.array(bids_list)
 
-    async def save_velocity_data(
+    async def save_velocity_series(
         self,
         symbol_id: SymbolId,
-        interval: str,
+        interval_name: str,
         velocity_series: polars.Series,
     ) -> VelocityMetadata:
         """Сохранение данных скорости."""
         key = get_velocity_key(
             symbol_id,
+            interval_name,
         )
 
         # Создаем DataFrame из серии
-        import polars
 
-        velocity_df = polars.DataFrame({'velocity': velocity_series})
+        velocity_df = polars.DataFrame({
+            'velocity': velocity_series,
+        })
 
         # Сохраняем DataFrame
         metadata = await g_redis_manager.save_dataframe(
@@ -571,7 +573,7 @@ class RedisDataService:
         velocity_metadata = VelocityMetadata(
             **metadata,
             symbol_id=symbol_id,
-            interval=interval,
+            interval=interval_name,
             last_updated=datetime.now(UTC),
         )
 
@@ -582,19 +584,24 @@ class RedisDataService:
         )
 
         logger.info(
-            f'Saved velocity data for {symbol_id.name}:{interval}: {velocity_metadata.total_size} bytes'
+            f'Saved velocity data for {symbol_id.name}:{interval_name}: {velocity_metadata.total_size} bytes'
         )
         return velocity_metadata
 
-    async def load_velocity_data(
+    async def load_velocity_series(
         self,
         symbol_id: SymbolId,
-    ) -> Any | None:  # Optional[polars.DataFrame]
+        interval_name: str,
+    ) -> polars.DataFrame | None:
         """Загрузка данных скорости."""
         key = get_velocity_key(
             symbol_id,
+            interval_name,
         )
-        return await g_redis_manager.load_dataframe(key)
+
+        return await g_redis_manager.load_dataframe(
+            key,
+        )
 
     async def save_available_symbols(self, symbol_names: list[str]) -> None:
         """Сохранение списка доступных символов."""

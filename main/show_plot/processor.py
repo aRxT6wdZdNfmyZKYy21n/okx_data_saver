@@ -56,6 +56,7 @@ class RedisChartProcessor:
         '__trades_dataframe',
         '__trades_smoothed_dataframe_by_level_map',
         '__velocity_series',
+        '__velocity_trade_id_series',
         '__window',
     )
 
@@ -83,6 +84,7 @@ class RedisChartProcessor:
         self.__trades_dataframe: DataFrame | None = None
         self.__trades_smoothed_dataframe_by_level_map: dict[str, DataFrame] = {}
         self.__velocity_series: Series | None = None
+        self.__velocity_trade_id_series: Series | None = None
         self.__window: FinPlotChartWindow | None = None
 
     def get_bollinger_base_line_series(
@@ -204,6 +206,11 @@ class RedisChartProcessor:
     ) -> Series | None:
         return self.__velocity_series
 
+    def get_velocity_trade_id_series(
+        self,
+    ) -> Series | None:
+        return self.__velocity_trade_id_series
+
     async def init(
         self,
     ) -> None:
@@ -290,6 +297,7 @@ class RedisChartProcessor:
         self.__trades_dataframe = None
         self.__trades_smoothed_dataframe_by_level_map.clear()
         self.__velocity_series = None
+        self.__velocity_trade_id_series = None
 
         # Загружаем данные для нового символа
 
@@ -531,11 +539,30 @@ class RedisChartProcessor:
         """Обновление данных скорости из Redis."""
         logger.info(f'Updating velocity series for {symbol_id.name}')
 
-        velocity_series = await g_redis_data_adapter.load_velocity_data(symbol_id)
+        interval_name = PlotConstants.VelocityIntervalName
+
+        velocity_series = await g_redis_data_adapter.load_velocity_series(
+            symbol_id,
+            interval_name,
+        )
 
         if velocity_series is not None:
             # Обновляем атрибуты процессора
             self.__velocity_series = velocity_series
+
+            candle_dataframe = self.__candle_dataframe_by_interval_name_map.get(
+                interval_name,
+            )
+
+            if candle_dataframe is not None:
+                start_trade_id_series = candle_dataframe.get_column(
+                    'start_trade_id',
+                )
+            else:
+                start_trade_id_series = None
+
+            self.__velocity_trade_id_series = start_trade_id_series
+
             logger.info(f'Updated velocity series for {symbol_id.name}')
 
         return velocity_series

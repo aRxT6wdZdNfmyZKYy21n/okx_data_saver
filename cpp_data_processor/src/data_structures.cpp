@@ -93,7 +93,30 @@ pybind11::object DataConverter::to_polars_candles(const std::vector<CandleData>&
     data["trades_count"] = trades_counts;
     
     pybind11::module polars = pybind11::module::import("polars");
-    return polars.attr("DataFrame")(data);
+    pybind11::object df = polars.attr("DataFrame")(data);
+    
+    // Add datetime columns like in Python version
+    pybind11::module datetime = pybind11::module::import("datetime");
+    pybind11::object UTC = datetime.attr("UTC");
+    
+    // Create datetime columns using polars operations
+    pybind11::object end_datetime_col = polars.attr("col")("end_timestamp_ms")
+        .attr("cast")(polars.attr("Datetime")(pybind11::arg("time_unit")="ms", pybind11::arg("time_zone")=UTC))
+        .attr("alias")("end_datetime");
+    
+    pybind11::object start_datetime_col = polars.attr("col")("start_timestamp_ms")
+        .attr("cast")(polars.attr("Datetime")(pybind11::arg("time_unit")="ms", pybind11::arg("time_zone")=UTC))
+        .attr("alias")("start_datetime");
+    
+    // Create list of columns to add
+    pybind11::list columns_to_add;
+    columns_to_add.append(end_datetime_col);
+    columns_to_add.append(start_datetime_col);
+    
+    // Apply the transformations
+    df = df.attr("with_columns")(columns_to_add);
+    
+    return df;
 }
 
 
@@ -196,25 +219,27 @@ pybind11::object DataConverter::to_polars_extreme_lines(const std::vector<Extrem
     return polars.attr("DataFrame")(data);
 }
 
-pybind11::object DataConverter::to_numpy_extreme_lines(const std::vector<ExtremeLine>& lines) {
-    if (lines.empty()) {
-        // Return empty numpy array with shape (0, 3)
+pybind11::object DataConverter::to_numpy_extreme_lines_array(const std::vector<std::vector<double>>& array) {
+    if (array.empty()) {
         pybind11::module numpy = pybind11::module::import("numpy");
-        return numpy.attr("array")(pybind11::list(), pybind11::str("float64")).attr("reshape")(0, 3);
+        return numpy.attr("zeros")(pybind11::make_tuple(0, 0));
     }
     
-    // Create 2D array: each row is [price, start_trade_id, end_trade_id]
-    pybind11::list rows;
-    for (const auto& line : lines) {
-        pybind11::list row;
-        row.append(line.price);
-        row.append(static_cast<double>(line.start_trade_id));
-        row.append(static_cast<double>(line.end_trade_id));
-        rows.append(row);
-    }
+    int32_t height = array[0].size();
+    int32_t width = array.size();
     
+    // Create numpy array
     pybind11::module numpy = pybind11::module::import("numpy");
-    return numpy.attr("array")(rows, pybind11::str("float64"));
+    pybind11::object np_array = numpy.attr("zeros")(pybind11::make_tuple(width, height));
+    
+    // Fill the array
+    for (int32_t x = 0; x < width; ++x) {
+        for (int32_t y = 0; y < height; ++y) {
+            np_array.attr("__setitem__")(pybind11::make_tuple(x, y), array[x][y]);
+        }
+    }
+    
+    return np_array;
 }
 
 

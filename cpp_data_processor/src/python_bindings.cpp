@@ -217,7 +217,8 @@ PYBIND11_MODULE(cpp_data_processor, m) {
              py::arg("trades"), py::arg("width"), py::arg("height"))
         .def("set_processing_params", &okx_data_processor::ExtremeLinesProcessor::set_processing_params,
              py::arg("params"))
-        .def("get_processing_params", &okx_data_processor::ExtremeLinesProcessor::get_processing_params);
+        .def("get_ranges", &okx_data_processor::ExtremeLinesProcessor::get_ranges,
+             py::arg("trades"));
 
     // Bind OrderBookProcessor class
     py::class_<okx_data_processor::OrderBookProcessor>(m, "OrderBookProcessor")
@@ -272,8 +273,6 @@ PYBIND11_MODULE(cpp_data_processor, m) {
              py::arg("params"))
         .def("save_results_to_redis", &okx_data_processor::DataProcessor::save_results_to_redis,
              py::arg("symbol_id"), py::arg("data_type"), py::arg("data"), py::arg("additional_params") = py::dict())
-        .def("load_data_from_redis", &okx_data_processor::DataProcessor::load_data_from_redis,
-             py::arg("symbol_id"), py::arg("data_type"))
         .def("is_redis_connected", &okx_data_processor::DataProcessor::is_redis_connected);
 
     // Bind DataConverter class
@@ -292,8 +291,8 @@ PYBIND11_MODULE(cpp_data_processor, m) {
                     py::arg("data_points"))
         .def_static("to_polars_extreme_lines", &okx_data_processor::DataConverter::to_polars_extreme_lines,
                     py::arg("lines"))
-        .def_static("to_numpy_extreme_lines", &okx_data_processor::DataConverter::to_numpy_extreme_lines,
-                    py::arg("lines"))
+        .def_static("to_numpy_extreme_lines_array", &okx_data_processor::DataConverter::to_numpy_extreme_lines_array,
+                    py::arg("array"))
         .def_static("to_polars_order_book_volumes", &okx_data_processor::DataConverter::to_polars_order_book_volumes,
                     py::arg("volumes"))
         .def_static("to_polars_velocity", &okx_data_processor::DataConverter::to_polars_velocity,

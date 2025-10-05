@@ -2,11 +2,14 @@
 """
 Simple test script to verify C++ Data Processor build and basic functionality.
 """
+
 import asyncio
 import logging
 import sys
 import time
 from datetime import UTC, datetime
+
+import polars as pl
 
 from utils.redis import g_redis_manager
 
@@ -17,7 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def test_import():
+async def test_import():
     """Test importing the C++ module."""
     logger.info('Testing C++ module import...')
 
@@ -34,7 +37,7 @@ def test_import():
         return False
 
 
-def test_basic_functionality():
+async def test_basic_functionality():
     """Test basic functionality of the C++ module."""
     logger.info('Testing basic functionality...')
 
@@ -74,7 +77,7 @@ def test_basic_functionality():
         return False
 
 
-def test_data_structures():
+async def test_data_structures():
     """Test data structures."""
     logger.info('Testing data structures...')
 
@@ -121,7 +124,7 @@ def test_data_structures():
         return False
 
 
-def test_simple_calculations():
+async def test_simple_calculations():
     """Test simple calculations."""
     logger.info('Testing simple calculations...')
 
@@ -172,7 +175,7 @@ def test_simple_calculations():
         return False
 
 
-def test_performance():
+async def test_performance():
     """Test performance with larger dataset."""
     logger.info('Testing performance...')
 
@@ -196,20 +199,23 @@ def test_performance():
         processor = cpp_data_processor.DataProcessor()
 
         # Convert trades to Polars DataFrame format
-        import polars as pl
-        
-        trades_df = pl.DataFrame({
-            'trade_id': [t.trade_id for t in trades],
-            'price': [t.price for t in trades],
-            'quantity': [t.quantity for t in trades],
-            'is_buy': [t.is_buy for t in trades],
-            'datetime': [int(t.datetime.timestamp() * 1000) for t in trades],
-        })
+
+        trades_df = pl.DataFrame(
+            {
+                'trade_id': [t.trade_id for t in trades],
+                'price': [t.price for t in trades],
+                'quantity': [t.quantity for t in trades],
+                'is_buy': [t.is_buy for t in trades],
+                'datetime': [int(t.datetime.timestamp() * 1000) for t in trades],
+            }
+        )
 
         start_time = time.time()
         result = processor.process_trades_data(
-            cpp_data_processor.SymbolId.BTC_USDT, trades_df
+            cpp_data_processor.SymbolId.BTC_USDT,
+            trades_df,
         )
+
         end_time = time.time()
 
         processing_time = end_time - start_time
@@ -251,7 +257,7 @@ async def main():
     for test_name, test_func in tests:
         logger.info(f'\n--- {test_name} ---')
         try:
-            if test_func():
+            if await test_func():
                 passed += 1
                 logger.info(f'✅ {test_name} PASSED')
             else:

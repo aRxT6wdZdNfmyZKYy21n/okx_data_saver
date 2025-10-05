@@ -249,12 +249,20 @@ ProcessingResult DataProcessor::process_candles_data(SymbolId symbol_id, const s
         // Process candles for all configured intervals
         auto candles_map = candles_processor_->process_trades(symbol_id, trades);
         
-        // Save each interval's candles to Redis
+        // Convert symbol_id to string for cache key
+        std::string symbol_key = std::to_string(static_cast<int>(symbol_id));
+        
+        // Save each interval's candles to cache and Redis
         for (const auto& pair : candles_map) {
             const std::string& interval_name = pair.first;
             const std::vector<CandleData>& candles = pair.second;
             
             pybind11::object candles_py = DataConverter::to_polars_candles(candles);
+            
+            // Save to in-memory cache
+            processed_data_cache_[symbol_key]["candles_" + interval_name] = candles_py;
+            
+            // Save to Redis
             pybind11::dict params;
             params["interval"] = interval_name;
             save_results_to_redis(symbol_id, "candles", candles_py, params);
@@ -320,7 +328,13 @@ ProcessingResult DataProcessor::process_smoothed_data(SymbolId symbol_id, const 
             const std::vector<SmoothedLine>& lines = pair.second;
             
             pybind11::object lines_py = DataConverter::to_polars_smoothed_lines(lines);
-            save_results_to_redis(symbol_id, "lines_" + level_name, lines_py, pybind11::dict());
+            
+            // Save lines data with proper parameters
+            pybind11::dict lines_params;
+            lines_params["level"] = level_name;
+            lines_params["min_trade_id"] = 0; // Default value
+            lines_params["max_trade_id"] = 0; // Default value
+            save_results_to_redis(symbol_id, "lines", lines_py, lines_params);
         }
         
         // Save each level's smoothed data points to Redis
@@ -329,7 +343,13 @@ ProcessingResult DataProcessor::process_smoothed_data(SymbolId symbol_id, const 
             const std::vector<SmoothedDataPoint>& data_points = pair.second;
             
             pybind11::object smoothed_py = DataConverter::to_polars_smoothed_data(data_points);
-            save_results_to_redis(symbol_id, "smoothed_" + level_name, smoothed_py, pybind11::dict());
+            
+            // Save smoothed data with proper parameters
+            pybind11::dict smoothed_params;
+            smoothed_params["level"] = level_name;
+            smoothed_params["min_trade_id"] = 0; // Default value
+            smoothed_params["max_trade_id"] = 0; // Default value
+            save_results_to_redis(symbol_id, "smoothed", smoothed_py, smoothed_params);
         }
         
         auto end_time = std::chrono::high_resolution_clock::now();
@@ -361,9 +381,67 @@ ProcessingResult DataProcessor::process_extreme_lines(SymbolId symbol_id, const 
         // Process extreme lines
         auto extreme_lines = extreme_lines_processor_->process_extreme_lines(symbol_id, smoothed_lines, trades);
         
+        if (extreme_lines.empty()) {
+            return ProcessingResult(true, "No extreme lines generated", 0.0);
+        }
+        
+        // Calculate array dimensions and scale (Python logic)
+        auto [price_range, trade_id_range] = extreme_lines_processor_->get_ranges(trades);
+        double min_price = price_range.first;
+        double max_price = price_range.second;
+        int64_t min_trade_id = trade_id_range.first;
+        int64_t max_trade_id = trade_id_range.second;
+        
+        double delta_price = max_price - min_price;
+        int64_t delta_trade_id = max_trade_id - min_trade_id;
+        
+        if (delta_price <= 0 || delta_trade_id <= 0) {
+            return ProcessingResult(true, "Invalid price or trade ID range", 0.0);
+        }
+        
+        // Python logic: aspect_ratio = delta_trade_id / delta_price
+        double aspect_ratio = static_cast<double>(delta_trade_id) / delta_price;
+        int32_t height = 100;
+        double extreme_lines_scale = delta_price / height;  // Python logic
+        int32_t width = static_cast<int32_t>(height * aspect_ratio);
+        
+        // Create 2D array (Python logic: numpy.zeros((width, height)))
+        std::vector<std::vector<double>> extreme_lines_array(width, std::vector<double>(height, 0.0));
+        
+        // Fill array with extreme lines (Python logic)
+        for (const auto& extreme_line : extreme_lines) {
+            int64_t end_trade_id = extreme_line.end_trade_id;
+            int64_t start_trade_id = extreme_line.start_trade_id;
+            double price = extreme_line.price;
+            
+            // Python logic: end_x = int((end_trade_id - min_trade_id) / extreme_lines_scale)
+            int32_t end_x = static_cast<int32_t>((end_trade_id - min_trade_id) / extreme_lines_scale);
+            int32_t start_x = static_cast<int32_t>((start_trade_id - min_trade_id) / extreme_lines_scale);
+            int32_t y = std::min(static_cast<int32_t>((price - min_price) / extreme_lines_scale), height - 1);
+            
+            // Clamp coordinates to array bounds
+            start_x = std::max(0, std::min(start_x, width - 1));
+            end_x = std::max(0, std::min(end_x, width - 1));
+            y = std::max(0, std::min(y, height - 1));
+            
+            // Python logic: extreme_lines_array[start_x:end_x, y] = numpy.arange(end_x - start_x)
+            for (int32_t x = start_x; x < end_x; ++x) {
+                extreme_lines_array[x][y] = static_cast<double>(x - start_x);
+            }
+        }
+        
         // Convert to numpy array and save to Redis
-        pybind11::object extreme_lines_py = DataConverter::to_numpy_extreme_lines(extreme_lines);
-        save_results_to_redis(symbol_id, "extreme_lines", extreme_lines_py, pybind11::dict());
+        pybind11::object extreme_lines_py = DataConverter::to_numpy_extreme_lines_array(extreme_lines_array);
+        
+        // Create metadata dict (Python style)
+        pybind11::dict metadata;
+        metadata["width"] = width;
+        metadata["height"] = height;
+        metadata["scale"] = extreme_lines_scale;
+        metadata["min_trade_id"] = min_trade_id;
+        metadata["min_price"] = min_price;
+        
+        save_results_to_redis(symbol_id, "extreme_lines", extreme_lines_py, metadata);
         
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -404,7 +482,7 @@ ProcessingResult DataProcessor::process_order_book_volumes(SymbolId symbol_id, c
 }
 */
 
-ProcessingResult DataProcessor::process_velocity_data(SymbolId symbol_id, const std::vector<TradeData>& trades) {
+ProcessingResult DataProcessor::process_velocity_data(SymbolId symbol_id, const std::vector<TradeData>& /* trades */) {
     if (!processing_params_.enable_velocity) {
         return ProcessingResult(true, "Velocity data processing disabled", 0.0);
     }
@@ -412,18 +490,30 @@ ProcessingResult DataProcessor::process_velocity_data(SymbolId symbol_id, const 
     try {
         auto start_time = std::chrono::high_resolution_clock::now();
         
-        // Process velocity for all configured intervals
-        auto velocity_map = velocity_calculator_->calculate_velocity_for_intervals(symbol_id, {});
+        // Convert symbol_id to string for cache key
+        std::string symbol_key = std::to_string(static_cast<int>(symbol_id));
         
-        // Also calculate from trades directly
+        // Match Python implementation: get candles data and use trades_count as velocity
         for (const auto& interval : processing_params_.candle_intervals) {
-            VelocityData velocity = velocity_calculator_->calculate_velocity_from_trades(symbol_id, trades, interval);
+            // Get candles data from in-memory cache
+            std::string cache_key = "candles_" + interval;
             
-            // Convert to Python object and save to Redis
-            pybind11::object velocity_py = DataConverter::to_polars_velocity(velocity);
-            pybind11::dict params;
-            params["interval"] = interval;
-            save_results_to_redis(symbol_id, "velocity", velocity_py, params);
+            if (processed_data_cache_.find(symbol_key) != processed_data_cache_.end() &&
+                processed_data_cache_[symbol_key].find(cache_key) != processed_data_cache_[symbol_key].end()) {
+                
+                pybind11::object candles_data = processed_data_cache_[symbol_key][cache_key];
+                
+                // Extract trades_count column as velocity (matching Python implementation)
+                pybind11::module polars = pybind11::module::import("polars");
+                pybind11::object velocity_series = candles_data.attr("get_column")("trades_count");
+                
+                // Save velocity data to Redis (Redis service expects Series, not DataFrame)
+                pybind11::dict velocity_params;
+                velocity_params["interval"] = interval;
+                save_results_to_redis(symbol_id, "velocity", velocity_series, velocity_params);
+            } else {
+                pybind11::print("⚠️  No candles data found in cache for interval:", interval);
+            }
         }
         
         auto end_time = std::chrono::high_resolution_clock::now();
@@ -471,43 +561,6 @@ void DataProcessor::save_results_to_redis(SymbolId symbol_id, const std::string&
         
     } catch (const std::exception& e) {
         pybind11::print("❌ Error saving DataFrame to Redis:", e.what());
-    }
-}
-
-pybind11::object DataProcessor::load_data_from_redis(SymbolId symbol_id, const std::string& data_type) {
-    try {
-        if (!redis_client_ || !redis_client_->is_connected()) {
-            pybind11::print("Redis client not connected, returning None");
-            return pybind11::none();
-        }
-
-        // Create additional parameters dict for specific data types
-        pybind11::dict additional_params;
-        
-        // Add specific parameters based on data type
-        if (data_type == "bollinger") {
-            additional_params["timeperiod"] = 20; // Default timeperiod
-        } else if (data_type == "rsi") {
-            additional_params["interval"] = "1m";  // Default interval
-            additional_params["timeperiod"] = 14;  // Default timeperiod
-        } else if (data_type == "velocity") {
-            additional_params["interval"] = "1m"; // Default interval
-        }
-        
-        // Load DataFrame from Redis using Python service
-        pybind11::object dataframe = redis_client_->load_dataframe(symbol_id, data_type, additional_params);
-        
-        if (dataframe.is_none()) {
-            pybind11::print("No", data_type, "DataFrame found for symbol", static_cast<int>(symbol_id), "in Redis");
-        } else {
-            pybind11::print("✅ Successfully loaded", data_type, "DataFrame for symbol", static_cast<int>(symbol_id), "from Redis");
-        }
-        
-        return dataframe;
-        
-    } catch (const std::exception& e) {
-        pybind11::print("❌ Error loading DataFrame from Redis:", e.what());
-        return pybind11::none();
     }
 }
 

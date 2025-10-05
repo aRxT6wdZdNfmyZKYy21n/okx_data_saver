@@ -756,9 +756,9 @@ class DataProcessor:
             if candles_df is not None and candles_df.height > 0:
                 velocity_series = candles_df.get_column('trades_count')
 
-                await g_redis_data_service.save_velocity_data(
+                await g_redis_data_service.save_velocity_series(
                     symbol_id=symbol_id,
-                    interval='1m',
+                    interval_name='1m',
                     velocity_series=velocity_series,
                 )
 

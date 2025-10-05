@@ -13,7 +13,7 @@
   - `load_smoothed_dataframe()` - загрузка сглаженных данных
   - `load_extreme_lines_data()` - загрузка экстремальных линий
   - `load_order_book_volumes_data()` - загрузка объемов стакана
-  - `load_velocity_data()` - загрузка данных скорости
+  - `load_velocity_series()` - загрузка данных скорости
   - `load_available_symbols()` - загрузка списка символов
 
 ### 2. Обновлен FinPlotChartProcessor
