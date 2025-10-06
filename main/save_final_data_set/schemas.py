@@ -34,7 +34,7 @@ class OKXDataSetRecordData(Base):
 
     __table_args__ = (
         PrimaryKeyConstraint(  # Explicitly define composite primary key
-            'symbol_name',
+            'symbol_id',
             'data_set_idx',
             'record_idx',
         ),
@@ -76,7 +76,7 @@ class OKXDataSetRecordData(Base):
     # - buy_volume_percent = buy_volume / total_volume
     # - buy_volume_by_max_percent = buy_volume / max_volume
 
-    close_price_delta: Mapped[Decimal] = Column(  # = close_price - open_price
+    close_price_delta: Mapped[Decimal | None] = Column(  # = close_price - open_price
         Numeric,
     )
 
@@ -221,7 +221,7 @@ class OKXDataSetRecordData(Base):
         BigInteger,
     )
 
-    end_trade_id: Mapped[int] = Column(
+    end_trade_id: Mapped[int | None] = Column(
         BigInteger,
     )
 
@@ -354,7 +354,7 @@ class OKXDataSetRecordData(Base):
         BigInteger,
     )
 
-    start_trade_id: Mapped[int] = Column(
+    start_trade_id: Mapped[int | None] = Column(
         BigInteger,
     )
 
