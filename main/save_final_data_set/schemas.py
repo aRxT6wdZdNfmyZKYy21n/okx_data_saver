@@ -217,6 +217,10 @@ class OKXDataSetRecordData(Base):
     # - mid_end_price_delta_2 = mid_end_price - mid_start_price
     # - mid_end_price_delta_percent_2 = 1 + mid_end_price_delta_2 / mid_start_price
 
+    end_timestamp_ms: Mapped[int] = Column(
+        BigInteger,
+    )
+
     end_trade_id: Mapped[int] = Column(
         BigInteger,
     )
@@ -345,6 +349,10 @@ class OKXDataSetRecordData(Base):
     # - sell_volume_percent = sell_volume / total_volume
     # - sell_volume_by_max_percent = sell_volume / max_volume
     # - sell_price_average = sell_volume / sell_quantity
+
+    start_timestamp_ms: Mapped[int] = Column(
+        BigInteger,
+    )
 
     start_trade_id: Mapped[int] = Column(
         BigInteger,
