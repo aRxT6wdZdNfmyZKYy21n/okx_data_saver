@@ -6,7 +6,6 @@ from sqlalchemy import (
     BigInteger,
     Column,
     Integer,
-    JSON,
     PrimaryKeyConstraint,
     Numeric,
 )
@@ -89,15 +88,138 @@ class OKXDataSetRecordData(Base):
     #     JSON,
     # )
 
+    end_asks_total_quantity: Mapped[Decimal] = Column(  # = sum(end_ask_quantity_i)
+        Numeric,
+    )
+
+    end_asks_total_volume: Mapped[Decimal] = Column(  # = sum(end_ask_price_i * end_ask_quantity_i)
+        Numeric,
+    )
+
+    max_end_ask_price: Mapped[Decimal] = Column(  # = max(end_ask_price_i)
+        Numeric,
+    )
+
+    max_end_ask_quantity: Mapped[Decimal] = Column(  # = max(end_ask_quantity_i)
+        Numeric,
+    )
+
+    max_end_ask_volume: Mapped[Decimal] = Column(  # = max(end_ask_price_i * end_ask_quantity_i)
+        Numeric,
+    )
+
+    min_end_ask_price: Mapped[Decimal] = Column(  # = min(end_ask_price_i)
+        Numeric,
+    )
+
+    min_end_ask_quantity: Mapped[Decimal] = Column(  # = min(end_ask_quantity_i)
+        Numeric,
+    )
+
+    min_end_ask_volume: Mapped[Decimal] = Column(  # = min(end_ask_price_i * end_ask_quantity_i)
+        Numeric,
+    )
+
     # Computed fields:
-    # - TODO
+    # - end_asks_total_quantity_delta = end_asks_total_quantity - start_asks_total_quantity
+    # - end_asks_total_quantity_delta_percent = 1 + end_asks_total_quantity_delta / start_asks_total_quantity
+    # - end_asks_total_volume_by_max_percent = end_asks_total_volume / max_volume
+    # - end_asks_total_volume_delta = end_asks_total_volume - start_asks_total_volume
+    # - end_asks_total_volume_delta_percent = 1 + end_asks_total_volume_delta / start_asks_total_volume
+    # - max_end_ask_price_delta_1 = max_end_ask_price - close_price
+    # - max_end_ask_price_delta_percent_1 = 1 + max_end_ask_price_delta_1 / close_price
+    # - max_end_ask_price_delta_2 = max_end_ask_price - max_start_ask_price
+    # - max_end_ask_price_delta_percent_2 = 1 + max_end_ask_price_delta_2 / max_start_ask_price
+    # - max_end_ask_quantity_delta = max_end_ask_quantity - max_start_ask_quantity
+    # - max_end_ask_quantity_delta_percent = 1 + max_end_ask_quantity_delta / max_start_ask_quantity
+    # - max_end_ask_volume_by_max_percent = max_end_ask_volume / max_volume
+    # - max_end_ask_volume_delta = max_end_ask_volume - max_start_ask_volume
+    # - max_end_ask_volume_delta_percent = 1 + max_end_ask_volume_delta / max_start_ask_volume
+    # - min_end_ask_price_delta_1 = min_end_ask_price - close_price
+    # - min_end_ask_price_delta_percent_1 = 1 + min_end_ask_price_delta_1 / close_price
+    # - min_end_ask_price_delta_2 = min_end_ask_price - min_start_ask_price
+    # - min_end_ask_price_delta_percent_2 = 1 + min_end_ask_price_delta_2 / min_start_ask_price
+    # - min_end_ask_quantity_delta = min_end_ask_quantity - min_start_ask_quantity
+    # - min_end_ask_quantity_delta_percent = 1 + min_end_ask_quantity_delta / min_start_ask_quantity
+    # - min_end_ask_volume_by_max_percent = min_end_ask_volume / max_volume
+    # - min_end_ask_volume_delta = min_end_ask_volume - min_start_ask_volume
+    # - min_end_ask_volume_delta_percent = 1 + min_end_ask_volume_delta / min_start_ask_volume
 
     # delta_bid_quantity_raw_by_price_raw_map: dict[str, str] = Column(
     #     JSON,
     # )
 
+    end_bids_total_quantity: Mapped[Decimal] = Column(  # = sum(end_bid_quantity_i)
+        Numeric,
+    )
+
+    end_bids_total_volume: Mapped[Decimal] = Column(  # = sum(end_bid_price_i * end_bid_quantity_i)
+        Numeric,
+    )
+
+    max_end_bid_price: Mapped[Decimal] = Column(  # = max(end_bid_price_i)
+        Numeric,
+    )
+
+    max_end_bid_quantity: Mapped[Decimal] = Column(  # = max(end_bid_quantity_i)
+        Numeric,
+    )
+
+    max_end_bid_volume: Mapped[Decimal] = Column(  # = max(end_bid_price_i * end_bid_quantity_i)
+        Numeric,
+    )
+
+    min_end_bid_price: Mapped[Decimal] = Column(  # = min(end_bid_price_i)
+        Numeric,
+    )
+
+    min_end_bid_quantity: Mapped[Decimal] = Column(  # = min(end_bid_quantity_i)
+        Numeric,
+    )
+
+    min_end_bid_volume: Mapped[Decimal] = Column(  # = min(end_bid_price_i * end_bid_quantity_i)
+        Numeric,
+    )
+
     # Computed fields:
-    # - TODO
+    # - end_bids_total_quantity_delta = end_bids_total_quantity - start_bids_total_quantity
+    # - end_bids_total_quantity_delta_percent = 1 + end_bids_total_quantity_delta / start_bids_total_quantity
+    # - end_bids_total_volume_by_max_percent = end_bids_total_volume / max_volume
+    # - end_bids_total_volume_delta = end_bids_total_volume - start_bids_total_volume
+    # - end_bids_total_volume_delta_percent = 1 + end_bids_total_volume_delta / start_bids_total_volume
+    # - max_end_bid_price_delta_1 = max_end_bid_price - close_price
+    # - max_end_bid_price_delta_percent_1 = 1 + max_end_bid_price_delta_1 / close_price
+    # - max_end_bid_price_delta_2 = max_end_bid_price - max_start_bid_price
+    # - max_end_bid_price_delta_percent_2 = 1 + max_end_bid_price_delta_2 / max_start_bid_price
+    # - max_end_bid_quantity_delta = max_end_bid_quantity - max_start_bid_quantity
+    # - max_end_bid_quantity_delta_percent = 1 + max_end_bid_quantity_delta / max_start_bid_quantity
+    # - max_end_bid_volume_by_max_percent = max_end_bid_volume / max_volume
+    # - max_end_bid_volume_delta = max_end_bid_volume - max_start_bid_volume
+    # - max_end_bid_volume_delta_percent = 1 + max_end_bid_volume_delta / max_start_bid_volume
+    # - min_end_bid_price_delta_1 = min_end_bid_price - close_price
+    # - min_end_bid_price_delta_percent_1 = 1 + min_end_bid_price_delta_1 / close_price
+    # - min_end_bid_price_delta_2 = min_end_bid_price - min_start_bid_price
+    # - min_end_bid_price_delta_percent_2 = 1 + min_end_bid_price_delta_2 / min_start_bid_price
+    # - min_end_bid_quantity_delta = min_end_bid_quantity - min_start_bid_quantity
+    # - min_end_bid_quantity_delta_percent = 1 + min_end_bid_quantity_delta / min_start_bid_quantity
+    # - min_end_bid_volume_by_max_percent = min_end_bid_volume / max_volume
+    # - min_end_bid_volume_delta = min_end_bid_volume - min_start_bid_volume
+    # - min_end_bid_volume_delta_percent = 1 + min_end_bid_volume_delta / min_start_bid_volume
+    # - end_spread = min_end_ask_price - max_end_bid_price
+    # - end_spread_delta = end_spread - start_spread
+    # - end_spread_delta_percent = 1 + end_spread_delta / start_spread
+    # - end_spread_percent = end_spread / max_end_bid_price
+    # - end_spread_percent_delta = end_spread_percent - start_spread_percent
+    # - end_spread_percent_delta_percent = 1 + end_spread_percent / start_spread_percent
+    # - mid_end_price = max_end_bid_price + end_spread / 2
+    # - mid_end_price_delta_1 = mid_end_price - close_price
+    # - mid_end_price_delta_percent_1 = 1 + mid_end_price_delta_1 / close_price
+    # - mid_end_price_delta_2 = mid_end_price - mid_start_price
+    # - mid_end_price_delta_percent_2 = 1 + mid_end_price_delta_2 / mid_start_price
+
+    end_trade_id: Mapped[int] = Column(
+        BigInteger,
+    )
 
     high_price_delta: Mapped[Decimal] = Column(  # = high_price - open_price
         Numeric,
@@ -107,68 +229,100 @@ class OKXDataSetRecordData(Base):
     # - high_price = open_price + high_price_delta
     # - high_price_delta_percent = 1 + high_price_delta / open_price
 
-    # initial_ask_quantity_raw_by_price_raw_map: dict[str, str] = Column(
+    # start_ask_quantity_raw_by_price_raw_map: dict[str, str] = Column(
     #     JSON,
     # )
 
-    initial_asks_total_quantity: Mapped[Decimal] = Column( # = sum(initial_ask_quantity_i)
+    start_asks_total_quantity: Mapped[Decimal] = Column( # = sum(start_ask_quantity_i)
         Numeric,
     )
 
-    initial_asks_total_volume: Mapped[Decimal] = Column(  # = sum(initial_ask_price_i * initial_ask_quantity_i)
+    start_asks_total_volume: Mapped[Decimal] = Column(  # = sum(start_ask_price_i * start_ask_quantity_i)
         Numeric,
     )
 
-    max_initial_ask_price: Mapped[Decimal] = Column(  # = max(initial_ask_price_i)
+    max_start_ask_price: Mapped[Decimal] = Column(  # = max(start_ask_price_i)
         Numeric,
     )
 
-    max_initial_ask_quantity: Mapped[Decimal] = Column(  # = max(initial_ask_quantity_i)
+    max_start_ask_quantity: Mapped[Decimal] = Column(  # = max(start_ask_quantity_i)
         Numeric,
     )
 
-    max_initial_ask_volume: Mapped[Decimal] = Column(  # = max(initial_ask_price_i * initial_ask_quantity_i)
+    max_start_ask_volume: Mapped[Decimal] = Column(  # = max(start_ask_price_i * start_ask_quantity_i)
         Numeric,
     )
 
-    # TODO
-    # - min_initial_ask_price = min(initial_ask_price_i)
-    # - min_initial_ask_quantity = min(initial_ask_quantity_i)
-    # - min_initial_ask_volume = min(initial_ask_price_i * initial_ask_quantity_i)
+    min_start_ask_price: Mapped[Decimal] = Column(  # = min(start_ask_price_i)
+        Numeric,
+    )
+
+    min_start_ask_quantity: Mapped[Decimal] = Column(  # = min(start_ask_quantity_i)
+        Numeric,
+    )
+
+    min_start_ask_volume: Mapped[Decimal] = Column(  # = min(start_ask_price_i * start_ask_quantity_i)
+        Numeric,
+    )
 
     # Computed fields:
-    # - initial_asks_total_volume_by_max_percent = initial_asks_total_volume / max_volume
-    # - max_initial_ask_price_delta = max_initial_ask_price - open_price
-    # - max_initial_ask_price_delta_percent = 1 + max_initial_ask_price_delta / open_price
-    # - max_initial_ask_volume_by_max_percent = max_initial_ask_volume / max_volume
-    # - min_initial_ask_price_delta = min_initial_ask_price - open_price
-    # - min_initial_ask_price_delta_percent = 1 + min_initial_ask_price_delta / open_price
-    # - min_initial_ask_volume_by_max_percent = min_initial_ask_volume / max_volume
+    # - start_asks_total_volume_by_max_percent = start_asks_total_volume / max_volume
+    # - max_start_ask_price_delta = max_start_ask_price - open_price
+    # - max_start_ask_price_delta_percent = 1 + max_start_ask_price_delta / open_price
+    # - max_start_ask_volume_by_max_percent = max_start_ask_volume / max_volume
+    # - min_start_ask_price_delta = min_start_ask_price - open_price
+    # - min_start_ask_price_delta_percent = 1 + min_start_ask_price_delta / open_price
+    # - min_start_ask_volume_by_max_percent = min_start_ask_volume / max_volume
 
-    # initial_bid_quantity_raw_by_price_raw_map: dict[str, str] = Column(
+    # start_bid_quantity_raw_by_price_raw_map: dict[str, str] = Column(
     #     JSON,
     # )
 
-    # Computed fields:  # TODO: uncomment
-    # - initial_bids_total_quantity = sum(initial_bid_quantity_i)
-    # - initial_bids_total_volume = sum(initial_bid_price_i * initial_bid_quantity_i)
-    # - initial_bids_total_volume_by_max_percent = initial_bids_total_volume / max_volume
-    # - max_initial_bid_price = max(initial_bid_price_i)
-    # - max_initial_bid_price_delta = max_initial_bid_price - open_price
-    # - max_initial_bid_price_delta_percent = 1 + max_initial_bid_price_delta / open_price
-    # - max_initial_bid_quantity = max(initial_bid_quantity_i)
-    # - max_initial_bid_volume = max(initial_bid_price_i * initial_bid_quantity_i)
-    # - max_initial_bid_volume_by_max_percent = max_initial_bid_volume / max_volume
-    # - min_initial_bid_price = min(initial_bid_price_i)
-    # - min_initial_bid_price_delta = min_initial_bid_price - open_price
-    # - min_initial_bid_price_delta_percent = 1 + min_initial_bid_price_delta / open_price
-    # - min_initial_bid_quantity = min(initial_bid_quantity_i)
-    # - min_initial_bid_volume = min(initial_bid_price_i * initial_bid_quantity_i)
-    # - min_initial_bid_volume_by_max_percent = min_initial_bid_volume / max_volume
+    start_bids_total_quantity: Mapped[Decimal] = Column( # = sum(start_bid_quantity_i)
+        Numeric,
+    )
 
-    # - initial_spread = min_initial_ask_price - max_initial_bid_price
-    # - initial_spread_percent = initial_spread / max_initial_bid_price
-    # - mid_initial_price = max_initial_bid_price + initial_spread / 2
+    start_bids_total_volume: Mapped[Decimal] = Column(  # = sum(start_bid_price_i * start_bid_quantity_i)
+        Numeric,
+    )
+
+    max_start_bid_price: Mapped[Decimal] = Column(  # = max(start_bid_price_i)
+        Numeric,
+    )
+
+    max_start_bid_quantity: Mapped[Decimal] = Column(  # = max(start_bid_quantity_i)
+        Numeric,
+    )
+
+    max_start_bid_volume: Mapped[Decimal] = Column(  # = max(start_bid_price_i * start_bid_quantity_i)
+        Numeric,
+    )
+
+    min_start_bid_price: Mapped[Decimal] = Column(  # = min(start_bid_price_i)
+        Numeric,
+    )
+
+    min_start_bid_quantity: Mapped[Decimal] = Column(  # = min(start_bid_quantity_i)
+        Numeric,
+    )
+
+    min_start_bid_volume: Mapped[Decimal] = Column(  # = min(start_bid_price_i * start_bid_quantity_i)
+        Numeric,
+    )
+
+    # Computed fields:
+    # - start_bids_total_volume_by_max_percent = start_bids_total_volume / max_volume
+    # - max_start_bid_price_delta = max_start_bid_price - open_price
+    # - max_start_bid_price_delta_percent = 1 + max_start_bid_price_delta / open_price
+    # - max_start_bid_volume_by_max_percent = max_start_bid_volume / max_volume
+    # - min_start_bid_price_delta = min_start_bid_price - open_price
+    # - min_start_bid_price_delta_percent = 1 + min_start_bid_price_delta / open_price
+    # - min_start_bid_volume_by_max_percent = min_start_bid_volume / max_volume
+    # - start_spread = min_start_ask_price - max_start_bid_price
+    # - start_spread_percent = start_spread / max_start_bid_price
+    # - mid_start_price = max_start_bid_price + start_spread / 2
+    # - mid_start_price_delta = mid_start_price - open_price
+    # - mid_start_price_delta_percent = 1 + mid_start_price_delta / open_price
 
     low_price_delta: Mapped[Decimal] = Column(  # = low_price - open_price
         Numeric,
@@ -191,6 +345,10 @@ class OKXDataSetRecordData(Base):
     # - sell_volume_percent = sell_volume / total_volume
     # - sell_volume_by_max_percent = sell_volume / max_volume
     # - sell_price_average = sell_volume / sell_quantity
+
+    start_trade_id: Mapped[int] = Column(
+        BigInteger,
+    )
 
     total_quantity: Mapped[Decimal] = Column(
         Numeric,
