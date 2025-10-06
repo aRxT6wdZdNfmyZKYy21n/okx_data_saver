@@ -40,7 +40,7 @@ class Globals:
             f'{settings.POSTGRES_DB_PORT}'
             '/'
             f'{settings.POSTGRES_DB_NAME}',
-            echo=False,  # TODO: enable only for debug mode
+            echo=True,  # TODO: enable only for debug mode
         )
 
         self.__postgres_db_session_maker = async_sessionmaker(

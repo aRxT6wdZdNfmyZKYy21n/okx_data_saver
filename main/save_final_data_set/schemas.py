@@ -76,12 +76,12 @@ class OKXDataSetRecordData(Base):
     # - buy_volume_percent = buy_volume / total_volume
     # - buy_volume_by_max_percent = buy_volume / max_volume
 
-    close_price_delta: Mapped[Decimal | None] = Column(  # = close_price - open_price
+    close_price: Mapped[Decimal | None] = Column(
         Numeric,
     )
 
     # Computed fields:
-    # - close_price = open_price + close_price_delta
+    # - close_price_delta = close_price - open_price
     # - close_price_delta_percent = 1 + close_price_delta / open_price
 
     # delta_ask_quantity_raw_by_price_raw_map: dict[str, str] = Column(
@@ -225,12 +225,12 @@ class OKXDataSetRecordData(Base):
         BigInteger,
     )
 
-    high_price_delta: Mapped[Decimal] = Column(  # = high_price - open_price
+    high_price: Mapped[Decimal] = Column(
         Numeric,
     )
 
     # Computed fields:
-    # - high_price = open_price + high_price_delta
+    # - high_price_delta = high_price - open_price
     # - high_price_delta_percent = 1 + high_price_delta / open_price
 
     # start_ask_quantity_raw_by_price_raw_map: dict[str, str] = Column(
@@ -328,15 +328,15 @@ class OKXDataSetRecordData(Base):
     # - mid_start_price_delta = mid_start_price - open_price
     # - mid_start_price_delta_percent = 1 + mid_start_price_delta / open_price
 
-    low_price_delta: Mapped[Decimal] = Column(  # = low_price - open_price
+    low_price: Mapped[Decimal | None] = Column(
         Numeric,
     )
 
     # Computed fields:
-    # - low_price = open_price + low_price_delta
+    # - low_price_delta = low_price - open_price
     # - low_price_delta_percent = 1 + low_price_delta / open_price
 
-    open_price: Mapped[Decimal] = Column(
+    open_price: Mapped[Decimal | None] = Column(
         Numeric,
     )
 

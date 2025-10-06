@@ -191,14 +191,18 @@ async def save_final_data_set(
                         trade_data_db_schema.timestamp_ms < end_order_book_snapshot_timestamp_ms,
                     )
                 ).order_by(
-                    order_book_data_db_schema.symbol_id.asc(),
-                    order_book_data_db_schema.timestamp_ms.asc(),
+                    trade_data_db_schema.symbol_id.asc(),
+                    trade_data_db_schema.timestamp_ms.asc(),
                 ),
             )
 
             trades: (
                 list[main.save_trades.schemas.OKXTradeData2]
             ) = result.scalars().all()
+
+        trades_count = len(
+            trades,
+        )
 
         logger.info(
             f'Fetched {len(trades)} trades',
@@ -221,11 +225,13 @@ async def save_final_data_set(
         ask_quantity_by_price_map: dict[Decimal, Decimal] | None = None
         bid_quantity_by_price_map: dict[Decimal, Decimal] | None = None
 
+        start_trade_idx = 0  # Optimization
+
         async with session.begin():
             for current_order_book_idx in range(
                 order_books_count - 1
             ):
-                if current_order_book_idx % 1000 == 0:
+                if current_order_book_idx % 100 == 0:
                     logger.info(
                         f'Processed {current_order_book_idx} / {order_books_count} order books',
                     )
@@ -257,12 +263,19 @@ async def save_final_data_set(
                 total_trades_count = 0
                 total_volume = 0
 
-                for trade_data in trades:
+                for trade_idx in range(
+                        start_trade_idx,
+                        trades_count
+                ):
+                    trade_data = trades[trade_idx]
+
                     trade_timestamp_ms = trade_data.timestamp_ms
 
                     if trade_timestamp_ms < current_order_book_timestamp_ms:
                         continue
                     elif trade_timestamp_ms >= next_order_book_timestamp_ms:
+                        start_trade_idx = trade_idx
+
                         break
 
                     trade_id = trade_data.trade_id
@@ -273,6 +286,12 @@ async def save_final_data_set(
                     end_trade_id = trade_id
 
                     trade_price = trade_data.price
+
+                    if high_price is None or trade_price > high_price:
+                        high_price = trade_price
+
+                    if low_price is None or trade_price < low_price:
+                        low_price = trade_price
 
                     if open_price is None:
                         open_price = trade_price
@@ -295,22 +314,14 @@ async def save_final_data_set(
                     total_trades_count += 1
                     total_volume += trade_volume
 
-                close_price_delta: Decimal | None
-                high_price_delta: Decimal | None
-                low_price_delta: Decimal | None
-
                 if open_price is not None:
                     assert close_price is not None, None
                     assert high_price is not None, None
                     assert low_price is not None, None
-
-                    close_price_delta = close_price - open_price
-                    high_price_delta = high_price - open_price
-                    low_price_delta = low_price - open_price
                 else:
-                    close_price_delta = None
-                    high_price_delta = None
-                    low_price_delta = None
+                    assert close_price is None, None
+                    assert high_price is None, None
+                    assert low_price is None, None
 
                 # Processing start order book
 
@@ -615,7 +626,7 @@ async def save_final_data_set(
                         buy_quantity=buy_quantity,
                         buy_trades_count=buy_trades_count,
                         buy_volume=buy_volume,
-                        close_price_delta=close_price_delta,
+                        close_price=close_price,
                         end_asks_total_quantity=end_asks_total_quantity,
                         end_asks_total_volume=end_asks_total_volume,
                         max_end_ask_price=max_end_ask_price,
@@ -634,7 +645,7 @@ async def save_final_data_set(
                         min_end_bid_volume=min_end_bid_volume,
                         end_timestamp_ms=next_order_book_timestamp_ms,
                         end_trade_id=end_trade_id,
-                        high_price_delta=high_price_delta,
+                        high_price=high_price,
                         start_asks_total_quantity=start_asks_total_quantity,
                         start_asks_total_volume=start_asks_total_volume,
                         max_start_ask_price=max_start_ask_price,
@@ -651,7 +662,7 @@ async def save_final_data_set(
                         min_start_bid_price=min_start_bid_price,
                         min_start_bid_quantity=min_start_bid_quantity,
                         min_start_bid_volume=min_start_bid_volume,
-                        low_price_delta=low_price_delta,
+                        low_price=low_price,
                         open_price=open_price,
                         start_timestamp_ms=current_order_book_timestamp_ms,
                         start_trade_id=start_trade_id,
@@ -664,6 +675,10 @@ async def save_final_data_set(
                 session.add(
                     final_data_set_record_data,
                 )
+
+        logger.info(
+            'Final data set records were saved!',
+        )
 
 
 async def start_save_final_data_sets_loop() -> None:
