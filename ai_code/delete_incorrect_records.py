@@ -794,11 +794,11 @@ class DatabaseMigrator:
 
         try:
             # Получаем количество записей для миграции
-            total_rows = await self.get_table_row_count(OKXOrderBookData)
-            logger.info(f'Найдено {total_rows} записей в okx_order_book_data')
+            total_rows = await self.get_table_row_count(OKXOrderBookData2)
+            logger.info(f'Найдено {total_rows} записей в okx_order_book_data_2')
 
             if total_rows == 0:
-                logger.info('Таблица okx_order_book_data пуста, пропускаем миграцию')
+                logger.info('Таблица okx_order_book_data_2 пуста, пропускаем миграцию')
                 return
 
             # Подготавливаем аргументы для процесса
