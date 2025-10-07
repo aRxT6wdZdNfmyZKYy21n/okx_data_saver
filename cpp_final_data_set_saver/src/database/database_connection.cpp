@@ -186,7 +186,8 @@ std::vector<OrderBookSnapshot> DatabaseConnection::getOrderBookSnapshots(
         WHERE symbol_id = $1 
           AND timestamp_ms >= $2 
           AND timestamp_ms <= $3
-        ORDER BY timestamp_ms DESC 
+          AND action_id = 'Snapshot'
+        ORDER BY timestamp_ms ASC 
         LIMIT $4
     )";
     
@@ -227,7 +228,7 @@ std::vector<OrderBookSnapshot> DatabaseConnection::getOrderBookSnapshots(
             } else if (action_str == "Update") {
                 action_id = OKXOrderBookActionId::Update;
             } else {
-                action_id = OKXOrderBookActionId::Snapshot; // По умолчанию
+                throw std::runtime_error("Unknown action_id: " + action_str);
             }
             
             // Получаем asks и bids из JSON
@@ -257,6 +258,87 @@ std::vector<OrderBookSnapshot> DatabaseConnection::getOrderBookSnapshots(
     }
 }
 
+std::vector<OrderBookSnapshot> DatabaseConnection::getOrderBookUpdates(
+    const std::string& symbol_id,
+    int64_t start_timestamp_ms,
+    int64_t end_timestamp_ms) {
+    
+    validateConnection();
+    
+    std::string query = R"(
+        SELECT symbol_id, timestamp_ms, action_id, asks, bids
+        FROM okx_order_book_data_2 
+        WHERE symbol_id = $1 
+          AND timestamp_ms >= $2 
+          AND timestamp_ms < $3
+          AND action_id = 'Update'
+        ORDER BY timestamp_ms ASC
+    )";
+    
+    try {
+        pqxx::work txn(*connection_);
+        pqxx::result result = txn.exec_params(query, 
+            symbol_id, 
+            start_timestamp_ms, 
+            end_timestamp_ms);
+        txn.commit();
+        
+        std::vector<OrderBookSnapshot> updates;
+        updates.reserve(result.size());
+        
+        for (const auto& row : result) {
+            // Конвертируем строку в SymbolId
+            std::string symbol_name = row["symbol_id"].as<std::string>();
+            SymbolId symbol_id_enum;
+            if (symbol_name == "BTC_USDT") {
+                symbol_id_enum = SymbolId::BTC_USDT;
+            } else if (symbol_name == "ETH_USDT") {
+                symbol_id_enum = SymbolId::ETH_USDT;
+            } else if (symbol_name == "SOL_USDT") {
+                symbol_id_enum = SymbolId::SOL_USDT;
+            } else {
+                continue; // Пропускаем неизвестные символы
+            }
+            
+            // Получаем timestamp_ms
+            int64_t timestamp_ms = row["timestamp_ms"].as<int64_t>();
+            
+            // Получаем action_id (должен быть Update)
+            std::string action_str = row["action_id"].as<std::string>();
+            OKXOrderBookActionId action_id;
+            if (action_str == "Update") {
+                action_id = OKXOrderBookActionId::Update;
+            } else {
+                continue; // Пропускаем не-обновления
+            }
+            
+            // Получаем asks и bids из JSON
+            std::vector<std::vector<std::string>> asks;
+            std::vector<std::vector<std::string>> bids;
+            
+            try {
+                // Парсим asks из JSON
+                std::string asks_json = row["asks"].as<std::string>();
+                asks = parseJsonArray(asks_json);
+                
+                // Парсим bids из JSON
+                std::string bids_json = row["bids"].as<std::string>();
+                bids = parseJsonArray(bids_json);
+            } catch (const std::exception& e) {
+                // В случае ошибки парсинга JSON, оставляем пустые векторы
+                LOG_WARN("Failed to parse JSON for asks/bids: " + std::string(e.what()));
+            }
+            
+            updates.emplace_back(symbol_id_enum, timestamp_ms, action_id, asks, bids);
+        }
+        
+        return updates;
+        
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to get order book updates: " + std::string(e.what()));
+    }
+}
+
 std::vector<TradeData> DatabaseConnection::getTrades(
     const std::string& symbol_id,
     const std::chrono::system_clock::time_point& start_time,
@@ -270,7 +352,7 @@ std::vector<TradeData> DatabaseConnection::getTrades(
         WHERE symbol_id = $1 
           AND timestamp_ms >= $2 
           AND timestamp_ms <= $3
-        ORDER BY timestamp_ms ASC
+        ORDER BY trade_id ASC
     )";
     
     try {
@@ -407,48 +489,6 @@ void DatabaseConnection::saveFinalDataSetRecord(const OKXDataSetRecordData& reco
         
     } catch (const std::exception& e) {
         throw std::runtime_error("Failed to save final dataset record: " + std::string(e.what()));
-    }
-}
-
-DatabaseConnection::TradeStats DatabaseConnection::calculateTradeStats(
-    const std::string& symbol_id,
-    const std::chrono::system_clock::time_point& start_time,
-    const std::chrono::system_clock::time_point& end_time) {
-    
-    validateConnection();
-    
-    std::string query = R"(
-        SELECT MIN(price) as min_price, MAX(price) as max_price, 
-               SUM(size) as total_volume, COUNT(*) as count
-        FROM okx_trades 
-        WHERE symbol_id = $1 
-          AND timestamp >= $2 
-          AND timestamp <= $3
-    )";
-    
-    try {
-        pqxx::work txn(*connection_);
-        pqxx::result result = txn.exec_params(query, 
-            symbol_id, 
-            timestampToMs(start_time), 
-            timestampToMs(end_time));
-        txn.commit();
-        
-        if (result.empty()) {
-            return {0.0, 0.0, 0.0, 0};
-        }
-        
-        const auto& row = result[0];
-        TradeStats stats;
-        stats.min_price = row["min_price"].is_null() ? 0.0 : row["min_price"].as<double>();
-        stats.max_price = row["max_price"].is_null() ? 0.0 : row["max_price"].as<double>();
-        stats.total_volume = row["total_volume"].is_null() ? 0.0 : row["total_volume"].as<double>();
-        stats.count = row["count"].as<int>();
-        
-        return stats;
-        
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Failed to calculate trade stats: " + std::string(e.what()));
     }
 }
 

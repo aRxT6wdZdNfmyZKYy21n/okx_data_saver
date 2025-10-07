@@ -16,10 +16,8 @@ static MainLoop* g_main_loop = nullptr;
 
 // Обработчик сигналов
 void signalHandler(int signal) {
-    if (g_main_loop) {
-        LOG_INFO("Received signal {}, shutting down gracefully...", signal);
-        g_main_loop->stop();
-    }
+    LOG_INFO("Received signal {}, terminating immediately...", signal);
+    std::exit(0);
 }
 
 MainLoop::MainLoop(const utils::Config& config)
@@ -36,7 +34,7 @@ MainLoop::MainLoop(const utils::Config& config)
 }
 
 MainLoop::~MainLoop() {
-    stop();
+    // Агрессивное завершение - не ждем graceful shutdown
 }
 
 void MainLoop::start() {
@@ -72,22 +70,9 @@ void MainLoop::stop() {
     LOG_INFO("Stopping main loop...");
     
     should_stop_ = true;
-    
-    if (main_thread_.joinable()) {
-        main_thread_.join();
-    }
-    
     running_ = false;
     
-    // Отключаемся от базы данных
-    try {
-        db_connection_->disconnect();
-        LOG_INFO("Disconnected from database");
-    } catch (const std::exception& e) {
-        LOG_ERROR("Error disconnecting from database: {}", e.what());
-    }
-    
-    LOG_INFO("Main loop stopped");
+    LOG_INFO("Main loop stop requested");
 }
 
 void MainLoop::setupSignalHandlers() {
@@ -95,6 +80,8 @@ void MainLoop::setupSignalHandlers() {
     
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
+    // SIGKILL нельзя перехватить, но добавим для полноты
+    std::signal(SIGQUIT, signalHandler);
 }
 
 void MainLoop::mainLoop() {
@@ -164,30 +151,57 @@ void MainLoop::processSymbol(const std::string& symbol_id) {
     auto last_record = db_connection_->getLastFinalDataSetRecord(symbol_id_enum);
     
     // Определяем временной диапазон для поиска данных
-    auto end_time = std::chrono::system_clock::now();
-    auto start_time = last_record ? 
-        std::chrono::system_clock::from_time_t(last_record->end_timestamp_ms / 1000) : 
-        end_time - std::chrono::hours(24); // Если нет записей, берем последние 24 часа
+    int64_t min_timestamp_ms = last_record ? last_record->end_timestamp_ms : 0;
+    int32_t new_data_set_idx = last_record ? last_record->data_set_idx + 1 : 0;
     
-    // Получаем снимки order book
+    // Получаем 2 снапшота order book (как в Python коде)
     auto order_book_snapshots = db_connection_->getOrderBookSnapshots(
-        symbol_id, start_time, end_time, 2);
+        symbol_id, 
+        std::chrono::system_clock::from_time_t(min_timestamp_ms / 1000),
+        std::chrono::system_clock::now(),
+        2);
     
-    if (order_book_snapshots.empty()) {
-        LOG_DEBUG("No order book snapshots found for symbol: {}", symbol_id);
+    if (order_book_snapshots.size() < 2) {
+        LOG_INFO("There are only {} order book snapshots; skipping final data set saving.", 
+                 order_book_snapshots.size());
         return;
     }
     
-    // Получаем сделки
-    auto trades = db_connection_->getTrades(symbol_id, start_time, end_time);
+    // Берем первый и второй снапшоты
+    const auto& start_snapshot = order_book_snapshots[0];
+    const auto& end_snapshot = order_book_snapshots[1];
+    
+    int64_t start_timestamp_ms = start_snapshot.timestamp_ms;
+    int64_t end_timestamp_ms = end_snapshot.timestamp_ms;
+    
+    LOG_INFO("Start order book snapshot timestamp (ms): {}; end order book snapshot timestamp (ms): {}", 
+             start_timestamp_ms, end_timestamp_ms);
+    
+    // Получаем обновления order book между снапшотами
+    auto order_book_updates = db_connection_->getOrderBookUpdates(
+        symbol_id, start_timestamp_ms, end_timestamp_ms);
+    
+    LOG_INFO("Fetched {} order book updates", order_book_updates.size());
+    
+    // Получаем сделки между снапшотами
+    auto trades = db_connection_->getTrades(
+        symbol_id, 
+        std::chrono::system_clock::from_time_t(start_timestamp_ms / 1000),
+        std::chrono::system_clock::from_time_t(end_timestamp_ms / 1000));
+    
+    LOG_INFO("Fetched {} trades", trades.size());
+    
+    // Объединяем снапшоты и обновления (как в Python коде)
+    std::vector<OrderBookSnapshot> all_order_books;
+    all_order_books.push_back(start_snapshot);
+    all_order_books.insert(all_order_books.end(), order_book_updates.begin(), order_book_updates.end());
     
     // Рассчитываем финальный датасет
-    int32_t data_set_idx = last_record ? last_record->data_set_idx + 1 : 1;
     auto final_records = calculator_->calculateFinalDataSet(
         symbol_id_enum,
-        order_book_snapshots,
+        all_order_books,
         trades,
-        data_set_idx
+        new_data_set_idx
     );
     
     // Сохраняем результаты
@@ -195,8 +209,8 @@ void MainLoop::processSymbol(const std::string& symbol_id) {
         db_connection_->saveFinalDataSetRecord(record);
     }
     
-    LOG_INFO("Processed symbol {} - trades: {}, snapshots: {}", 
-             symbol_id, trades.size(), order_book_snapshots.size());
+    LOG_INFO("Processed symbol {} - trades: {}, snapshots: {}, updates: {}", 
+             symbol_id, trades.size(), order_book_snapshots.size(), order_book_updates.size());
 }
 
 std::vector<std::string> MainLoop::getSymbolsToProcess() {

@@ -23,6 +23,9 @@ find_package(spdlog REQUIRED)
 # nlohmann/json для работы с JSON
 find_package(nlohmann_json REQUIRED)
 
+# Boost для Multiprecision
+find_package(Boost REQUIRED COMPONENTS system)
+
 # Создание исполняемого файла
 add_executable(okx_final_data_set_saver
     src/main.cpp
@@ -48,6 +51,7 @@ target_link_libraries(okx_final_data_set_saver
     Threads::Threads
     spdlog::spdlog
     nlohmann_json::nlohmann_json
+    Boost::system
 )
 
 # Компиляционные флаги

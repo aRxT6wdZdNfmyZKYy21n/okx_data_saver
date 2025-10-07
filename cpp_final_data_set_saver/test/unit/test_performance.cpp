@@ -85,7 +85,7 @@ TEST_F(PerformanceTest, DataSetCalculatorPerformance) {
     for (int size : test_sizes) {
         auto trades = generateTestTrades(size);
         auto snapshots = generateTestSnapshots(10);
-        
+
         auto start = std::chrono::high_resolution_clock::now();
         
         auto result = calculator.calculateFinalDataSet(

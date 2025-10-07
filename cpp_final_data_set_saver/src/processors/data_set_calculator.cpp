@@ -30,6 +30,7 @@ std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
     int32_t record_idx = 0;
     
     // Переменные для статистик начального ордер-бука (как в Python)
+    // Используем статические константы класса для избежания проблем с инициализацией
     utils::Decimal start_asks_total_quantity = utils::Decimal::ZERO;
     utils::Decimal start_asks_total_volume = utils::Decimal::ZERO;
     utils::Decimal max_start_ask_price = utils::Decimal::ZERO;

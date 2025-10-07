@@ -34,6 +34,13 @@ public:
         int limit = 2
     );
     
+    // Получение обновлений order book
+    std::vector<OrderBookSnapshot> getOrderBookUpdates(
+        const std::string& symbol_id,
+        int64_t start_timestamp_ms,
+        int64_t end_timestamp_ms
+    );
+    
     // Получение сделок
     std::vector<TradeData> getTrades(
         const std::string& symbol_id,
@@ -43,20 +50,6 @@ public:
     
     // Сохранение финального датасета
     void saveFinalDataSetRecord(const OKXDataSetRecordData& record);
-    
-    // Получение статистики
-    struct TradeStats {
-        double min_price;
-        double max_price;
-        double total_volume;
-        int count;
-    };
-    
-    TradeStats calculateTradeStats(
-        const std::string& symbol_id,
-        const std::chrono::system_clock::time_point& start_time,
-        const std::chrono::system_clock::time_point& end_time
-    );
 
 private:
     DatabaseConfig config_;

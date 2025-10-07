@@ -4,48 +4,49 @@
 #include <cstdint>
 #include <stdexcept>
 #include <iostream>
+#include <boost/multiprecision/cpp_dec_float.hpp>
 
 namespace okx {
 namespace utils {
 
 /**
- * @brief High-precision decimal class for financial calculations
+ * @brief High-precision decimal class for financial calculations using Boost.Multiprecision
  * 
- * This class provides decimal arithmetic similar to Python's Decimal class,
+ * This class provides decimal arithmetic using Boost.Multiprecision cpp_dec_float,
  * avoiding floating-point precision issues in financial calculations.
  */
 class Decimal {
 private:
-    int64_t value_;      // Stored as integer (scaled by precision)
-    int32_t precision_;  // Number of decimal places
+    using boost_decimal = boost::multiprecision::cpp_dec_float_50;
+    boost_decimal value_;
     
     static constexpr int32_t DEFAULT_PRECISION = 16;
-    static constexpr int32_t MAX_PRECISION = 36;
+    static constexpr int32_t MAX_PRECISION = 50; // cpp_dec_float_50 supports up to 50 digits
     
 public:
     /**
      * @brief Default constructor (creates 0.0)
      */
-    Decimal() : value_(0), precision_(DEFAULT_PRECISION) {}
+    Decimal() : value_(0) {}
     
     /**
      * @brief Constructor from double
      * @param val Double value to convert
-     * @param precision Number of decimal places (default: 16)
+     * @param precision Number of decimal places (ignored, kept for compatibility)
      */
     explicit Decimal(double val, int32_t precision = DEFAULT_PRECISION);
     
     /**
      * @brief Constructor from string
      * @param val String representation of decimal number
-     * @param precision Number of decimal places (default: 16)
+     * @param precision Number of decimal places (ignored, kept for compatibility)
      */
     explicit Decimal(const std::string& val, int32_t precision = DEFAULT_PRECISION);
     
     /**
      * @brief Constructor from integer
      * @param val Integer value
-     * @param precision Number of decimal places (default: 16
+     * @param precision Number of decimal places (ignored, kept for compatibility)
      */
     Decimal(int64_t val, int32_t precision = DEFAULT_PRECISION);
     
@@ -96,13 +97,13 @@ public:
     std::string toString() const;
     
     /**
-     * @brief Get precision
+     * @brief Get precision (always returns MAX_PRECISION for compatibility)
      * @return Number of decimal places
      */
-    int32_t getPrecision() const { return precision_; }
+    int32_t getPrecision() const { return MAX_PRECISION; }
     
     /**
-     * @brief Set precision
+     * @brief Set precision (no-op for compatibility)
      * @param precision New precision value
      */
     void setPrecision(int32_t precision);
@@ -111,19 +112,19 @@ public:
      * @brief Check if value is zero
      * @return True if zero
      */
-    bool isZero() const { return value_ == 0; }
+    bool isZero() const;
     
     /**
      * @brief Check if value is positive
      * @return True if positive
      */
-    bool isPositive() const { return value_ > 0; }
+    bool isPositive() const;
     
     /**
      * @brief Check if value is negative
      * @return True if negative
      */
-    bool isNegative() const { return value_ < 0; }
+    bool isNegative() const;
     
     /**
      * @brief Get absolute value
@@ -162,34 +163,19 @@ public:
     static Decimal TEN;
     static Decimal HUNDRED;
     
+public:
+    /**
+     * @brief Internal constructor for Boost decimal values
+     * @param val Boost decimal value
+     */
+    Decimal(const boost_decimal& val) : value_(val) {}
+    
 private:
     /**
-     * @brief Internal constructor for already scaled values
-     * @param val Already scaled value
-     * @param precision Precision
+     * @brief Get the underlying Boost decimal value
+     * @return Boost decimal value
      */
-    Decimal(int64_t val, int32_t precision, bool /*internal*/) : value_(val), precision_(precision) {}
-    
-    /**
-     * @brief Normalize precision between two decimals
-     * @param other Other decimal
-     * @return Pair of normalized values
-     */
-    std::pair<int64_t, int64_t> normalizePrecision(const Decimal& other) const;
-    
-    /**
-     * @brief Calculate scale factor for precision
-     * @param precision Target precision
-     * @return Scale factor
-     */
-    static int64_t getScaleFactor(int32_t precision);
-    
-    /**
-     * @brief Parse string to decimal
-     * @param str String to parse
-     * @return Parsed value
-     */
-    static int64_t parseString(const std::string& str, int32_t precision);
+    const boost_decimal& getBoostDecimal() const { return value_; }
 };
 
 // Stream operators

@@ -30,30 +30,30 @@ public:
     };
     
     struct OrderBookStatistics {
-        utils::Decimal total_quantity = utils::Decimal::ZERO;
-        utils::Decimal total_volume = utils::Decimal::ZERO;
-        utils::Decimal max_price = utils::Decimal::ZERO;
-        utils::Decimal max_quantity = utils::Decimal::ZERO;
-        utils::Decimal max_volume = utils::Decimal::ZERO;
-        utils::Decimal min_price = utils::Decimal::ZERO;
-        utils::Decimal min_quantity = utils::Decimal::ZERO;
-        utils::Decimal min_volume = utils::Decimal::ZERO;
+        utils::Decimal total_quantity = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal total_volume = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal max_price = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal max_quantity = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal max_volume = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal min_price = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal min_quantity = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal min_volume = utils::Decimal(static_cast<int64_t>(0));
     };
     
     struct TradeStatistics {
-        utils::Decimal buy_quantity = utils::Decimal::ZERO;
+        utils::Decimal buy_quantity = utils::Decimal(static_cast<int64_t>(0));
         int32_t buy_trades_count = 0;
-        utils::Decimal buy_volume = utils::Decimal::ZERO;
-        utils::Decimal close_price = utils::Decimal::ZERO;
-        utils::Decimal high_price = utils::Decimal::ZERO;
-        utils::Decimal low_price = utils::Decimal::ZERO;
-        utils::Decimal open_price = utils::Decimal::ZERO;
+        utils::Decimal buy_volume = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal close_price = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal high_price = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal low_price = utils::Decimal(static_cast<int64_t>(0));
+        utils::Decimal open_price = utils::Decimal(static_cast<int64_t>(0));
         int64_t start_trade_id = 0;
         int64_t end_trade_id = 0;
         int64_t start_timestamp_ms = 0;
-        utils::Decimal total_quantity = utils::Decimal::ZERO;
+        utils::Decimal total_quantity = utils::Decimal(static_cast<int64_t>(0));
         int32_t total_trades_count = 0;
-        utils::Decimal total_volume = utils::Decimal::ZERO;
+        utils::Decimal total_volume = utils::Decimal(static_cast<int64_t>(0));
     };
 
 private:

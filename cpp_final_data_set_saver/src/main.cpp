@@ -26,25 +26,20 @@ int main(int /*argc*/, char* /*argv*/[]) {
         // Запускаем основной цикл
         main_loop.start();
         
-        // Ждем завершения
-        while (main_loop.isRunning()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Агрессивное завершение - просто ждем сигнала завершения
+        // Сигнал-обработчик вызовет std::exit(0)
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         
-        LOG_INFO("Application stopped successfully");
-        
-        // Очищаем ресурсы логгера
-        ::okx::utils::Logger::getInstance().shutdown();
-        
+        // Этот код никогда не выполнится из-за std::exit() в signalHandler
         return 0;
         
     } catch (const std::exception& e) {
         LOG_ERROR("Fatal error: {}", e.what());
-        ::okx::utils::Logger::getInstance().shutdown();
         return 1;
     } catch (...) {
         LOG_ERROR("Unknown fatal error occurred");
-        ::okx::utils::Logger::getInstance().shutdown();
         return 1;
     }
 }
