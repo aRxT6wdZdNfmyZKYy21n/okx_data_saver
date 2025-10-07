@@ -205,9 +205,7 @@ void MainLoop::processSymbol(const std::string& symbol_id) {
     );
     
     // Сохраняем результаты
-    for (const auto& record : final_records) {
-        db_connection_->saveFinalDataSetRecord(record);
-    }
+    db_connection_->saveFinalDataSetRecords(final_records);
     
     LOG_INFO("Processed symbol {} - trades: {}, snapshots: {}, updates: {}", 
              symbol_id, trades.size(), order_book_snapshots.size(), order_book_updates.size());

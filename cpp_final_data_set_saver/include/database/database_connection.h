@@ -50,6 +50,9 @@ public:
     
     // Сохранение финального датасета
     void saveFinalDataSetRecord(const OKXDataSetRecordData& record);
+    
+    // Пакетное сохранение финального датасета в рамках одной транзакции
+    void saveFinalDataSetRecords(const std::vector<OKXDataSetRecordData>& records);
 
 private:
     DatabaseConfig config_;

@@ -560,5 +560,102 @@ std::vector<std::vector<std::string>> DatabaseConnection::parseJsonArray(const s
     return result;
 }
 
+void DatabaseConnection::saveFinalDataSetRecords(const std::vector<OKXDataSetRecordData>& records) {
+    if (records.empty()) {
+        return;
+    }
+    
+    validateConnection();
+    
+    std::string query = R"(
+        INSERT INTO okx_data_set_record_data 
+        (symbol_id, data_set_idx, record_idx,
+         buy_quantity, buy_trades_count, buy_volume, close_price,
+         end_asks_total_quantity, end_asks_total_volume,
+         max_end_ask_price, max_end_ask_quantity, max_end_ask_volume,
+         min_end_ask_price, min_end_ask_quantity, min_end_ask_volume,
+         end_bids_total_quantity, end_bids_total_volume,
+         max_end_bid_price, max_end_bid_quantity, max_end_bid_volume,
+         min_end_bid_price, min_end_bid_quantity, min_end_bid_volume,
+         end_timestamp_ms, end_trade_id, high_price,
+         start_asks_total_quantity, start_asks_total_volume,
+         max_start_ask_price, max_start_ask_quantity, max_start_ask_volume,
+         min_start_ask_price, min_start_ask_quantity, min_start_ask_volume,
+         start_bids_total_quantity, start_bids_total_volume,
+         max_start_bid_price, max_start_bid_quantity, max_start_bid_volume,
+         min_start_bid_price, min_start_bid_quantity, min_start_bid_volume,
+         low_price, open_price, start_timestamp_ms, start_trade_id,
+         total_quantity, total_trades_count, total_volume)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49)
+    )";
+    
+    try {
+        pqxx::work txn(*connection_);
+        
+        for (const auto& record : records) {
+            std::string symbol_name = SymbolConstants::getNameById(record.symbol_id);
+            
+            txn.exec_params(query,
+                symbol_name,
+                record.data_set_idx,
+                record.record_idx,
+                record.buy_quantity.toString(),
+                record.buy_trades_count,
+                record.buy_volume.toString(),
+                record.close_price.toString(),
+                record.end_asks_total_quantity.toString(),
+                record.end_asks_total_volume.toString(),
+                record.max_end_ask_price.toString(),
+                record.max_end_ask_quantity.toString(),
+                record.max_end_ask_volume.toString(),
+                record.min_end_ask_price.toString(),
+                record.min_end_ask_quantity.toString(),
+                record.min_end_ask_volume.toString(),
+                record.end_bids_total_quantity.toString(),
+                record.end_bids_total_volume.toString(),
+                record.max_end_bid_price.toString(),
+                record.max_end_bid_quantity.toString(),
+                record.max_end_bid_volume.toString(),
+                record.min_end_bid_price.toString(),
+                record.min_end_bid_quantity.toString(),
+                record.min_end_bid_volume.toString(),
+                record.end_timestamp_ms,
+                record.end_trade_id,
+                record.high_price.toString(),
+                record.start_asks_total_quantity.toString(),
+                record.start_asks_total_volume.toString(),
+                record.max_start_ask_price.toString(),
+                record.max_start_ask_quantity.toString(),
+                record.max_start_ask_volume.toString(),
+                record.min_start_ask_price.toString(),
+                record.min_start_ask_quantity.toString(),
+                record.min_start_ask_volume.toString(),
+                record.start_bids_total_quantity.toString(),
+                record.start_bids_total_volume.toString(),
+                record.max_start_bid_price.toString(),
+                record.max_start_bid_quantity.toString(),
+                record.max_start_bid_volume.toString(),
+                record.min_start_bid_price.toString(),
+                record.min_start_bid_quantity.toString(),
+                record.min_start_bid_volume.toString(),
+                record.low_price.toString(),
+                record.open_price.toString(),
+                record.start_timestamp_ms,
+                record.start_trade_id,
+                record.total_quantity.toString(),
+                record.total_trades_count,
+                record.total_volume.toString()
+            );
+        }
+        
+        txn.commit();
+        LOG_INFO("Successfully saved {} final dataset records in batch", records.size());
+        
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to save final dataset records batch: {}", e.what());
+        throw std::runtime_error("Database batch save error: " + std::string(e.what()));
+    }
+}
+
 } // namespace database
 } // namespace okx
