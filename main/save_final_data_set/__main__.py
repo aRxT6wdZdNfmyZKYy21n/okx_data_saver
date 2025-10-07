@@ -192,7 +192,7 @@ async def save_final_data_set(
                     )
                 ).order_by(
                     trade_data_db_schema.symbol_id.asc(),
-                    trade_data_db_schema.timestamp_ms.asc(),
+                    trade_data_db_schema.trade_id.asc(),
                 ),
             )
 
@@ -227,7 +227,44 @@ async def save_final_data_set(
 
         start_trade_idx = 0  # Optimization
 
+        buy_quantity = 0
+        buy_trades_count = 0
+        buy_volume = 0
+
+        close_price: Decimal | None = None
+        high_price: Decimal | None = None
+        low_price: Decimal | None = None
+        open_price: Decimal | None = None
+        start_trade_id: int | None = None
+        end_trade_id: int | None = None
+
+        start_timestamp_ms: int | None = None
+
+        start_asks_total_quantity = 0
+        start_asks_total_volume = 0
+        max_start_ask_price: Decimal | None = None
+        max_start_ask_quantity: Decimal | None = None
+        max_start_ask_volume: Decimal | None = None
+        min_start_ask_price: Decimal | None = None
+        min_start_ask_quantity: Decimal | None = None
+        min_start_ask_volume: Decimal | None = None
+
+        start_bids_total_quantity = 0
+        start_bids_total_volume = 0
+        max_start_bid_price: Decimal | None = None
+        max_start_bid_quantity: Decimal | None = None
+        max_start_bid_volume: Decimal | None = None
+        min_start_bid_price: Decimal | None = None
+        min_start_bid_quantity: Decimal | None = None
+        min_start_bid_volume: Decimal | None = None
+
+        total_quantity = 0
+        total_trades_count = 0
+        total_volume = 0
+
         async with session.begin():
+            record_idx = 0
+
             for current_order_book_idx in range(
                 order_books_count - 1
             ):
@@ -239,89 +276,13 @@ async def save_final_data_set(
                 current_order_book_data = order_books[current_order_book_idx]
                 current_order_book_timestamp_ms = current_order_book_data.timestamp_ms
 
+                if start_timestamp_ms is None:
+                    start_timestamp_ms = current_order_book_timestamp_ms
+
                 next_order_book_idx = current_order_book_idx + 1
 
                 next_order_book_data = order_books[next_order_book_idx]
                 next_order_book_timestamp_ms = next_order_book_data.timestamp_ms
-
-                record_idx = current_order_book_idx
-
-                # Processing trades
-
-                buy_quantity = 0
-                buy_trades_count = 0
-                buy_volume = 0
-
-                close_price: Decimal | None = None
-                high_price: Decimal | None = None
-                low_price: Decimal | None = None
-                open_price: Decimal | None = None
-                start_trade_id: int | None = None
-                end_trade_id: int | None = None
-
-                total_quantity = 0
-                total_trades_count = 0
-                total_volume = 0
-
-                for trade_idx in range(
-                        start_trade_idx,
-                        trades_count
-                ):
-                    trade_data = trades[trade_idx]
-
-                    trade_timestamp_ms = trade_data.timestamp_ms
-
-                    if trade_timestamp_ms < current_order_book_timestamp_ms:
-                        continue
-                    elif trade_timestamp_ms >= next_order_book_timestamp_ms:
-                        start_trade_idx = trade_idx
-
-                        break
-
-                    trade_id = trade_data.trade_id
-
-                    if start_trade_id is None:
-                        start_trade_id = trade_id
-
-                    end_trade_id = trade_id
-
-                    trade_price = trade_data.price
-
-                    if high_price is None or trade_price > high_price:
-                        high_price = trade_price
-
-                    if low_price is None or trade_price < low_price:
-                        low_price = trade_price
-
-                    if open_price is None:
-                        open_price = trade_price
-
-                    close_price = trade_price
-
-                    trade_quantity = trade_data.quantity
-
-                    trade_volume = (
-                        trade_price
-                        * trade_quantity
-                    )
-
-                    if trade_data.is_buy:
-                        buy_quantity += trade_quantity
-                        buy_trades_count += 1
-                        buy_volume += trade_volume
-
-                    total_quantity += trade_quantity
-                    total_trades_count += 1
-                    total_volume += trade_volume
-
-                if open_price is not None:
-                    assert close_price is not None, None
-                    assert high_price is not None, None
-                    assert low_price is not None, None
-                else:
-                    assert close_price is None, None
-                    assert high_price is None, None
-                    assert low_price is None, None
 
                 # Processing start order book
 
@@ -385,43 +346,37 @@ async def save_final_data_set(
                     assert bid_quantity_by_price_map is not None, None
                     assert current_order_book_data.action_id == OKXOrderBookActionId.Update, None
 
-                start_asks_total_quantity = 0
-                start_asks_total_volume = 0
-                max_start_ask_price: Decimal | None = None
-                max_start_ask_quantity: Decimal | None = None
-                max_start_ask_volume: Decimal | None = None
-                min_start_ask_price: Decimal | None = None
-                min_start_ask_quantity: Decimal | None = None
-                min_start_ask_volume: Decimal | None = None
+                if not start_asks_total_volume:
+                    for ask_price, ask_quantity in ask_quantity_by_price_map.items():
+                        if max_start_ask_price is None or ask_price > max_start_ask_price:
+                            max_start_ask_price = ask_price
 
-                for ask_price, ask_quantity in ask_quantity_by_price_map.items():
-                    if max_start_ask_price is None or ask_price > max_start_ask_price:
-                        max_start_ask_price = ask_price
+                        if min_start_ask_price is None or ask_price < min_start_ask_price:
+                            min_start_ask_price = ask_price
 
-                    if min_start_ask_price is None or ask_price < min_start_ask_price:
-                        min_start_ask_price = ask_price
+                        start_asks_total_quantity += ask_quantity
 
-                    start_asks_total_quantity += ask_quantity
+                        if max_start_ask_quantity is None or ask_quantity > max_start_ask_quantity:
+                            max_start_ask_quantity = ask_quantity
 
-                    if max_start_ask_quantity is None or ask_quantity > max_start_ask_quantity:
-                        max_start_ask_quantity = ask_quantity
+                        if min_start_ask_quantity is None or ask_quantity < min_start_ask_quantity:
+                            min_start_ask_quantity = ask_quantity
 
-                    if min_start_ask_quantity is None or ask_quantity < min_start_ask_quantity:
-                        min_start_ask_quantity = ask_quantity
+                        ask_volume = (
+                            ask_price
+                            * ask_quantity
+                        )
 
-                    ask_volume = (
-                        ask_price
-                        * ask_quantity
-                    )
+                        start_asks_total_volume += ask_volume
 
-                    start_asks_total_volume += ask_volume
+                        if max_start_ask_volume is None or ask_volume > max_start_ask_volume:
+                            max_start_ask_volume = ask_volume
 
-                    if max_start_ask_volume is None or ask_volume > max_start_ask_volume:
-                        max_start_ask_volume = ask_volume
+                        if min_start_ask_volume is None or ask_volume < min_start_ask_volume:
+                            min_start_ask_volume = ask_volume
 
-                    if min_start_ask_volume is None or ask_volume < min_start_ask_volume:
-                        min_start_ask_volume = ask_volume
-
+                assert start_asks_total_quantity, None
+                assert start_asks_total_volume, None
                 assert max_start_ask_price is not None, None
                 assert max_start_ask_quantity is not None, None
                 assert max_start_ask_volume is not None, None
@@ -429,43 +384,37 @@ async def save_final_data_set(
                 assert min_start_ask_quantity is not None, None
                 assert min_start_ask_volume is not None, None
 
-                start_bids_total_quantity = 0
-                start_bids_total_volume = 0
-                max_start_bid_price: Decimal | None = None
-                max_start_bid_quantity: Decimal | None = None
-                max_start_bid_volume: Decimal | None = None
-                min_start_bid_price: Decimal | None = None
-                min_start_bid_quantity: Decimal | None = None
-                min_start_bid_volume: Decimal | None = None
+                if not start_bids_total_volume:
+                    for bid_price, bid_quantity in bid_quantity_by_price_map.items():
+                        if max_start_bid_price is None or bid_price > max_start_bid_price:
+                            max_start_bid_price = bid_price
 
-                for bid_price, bid_quantity in bid_quantity_by_price_map.items():
-                    if max_start_bid_price is None or bid_price > max_start_bid_price:
-                        max_start_bid_price = bid_price
+                        if min_start_bid_price is None or bid_price < min_start_bid_price:
+                            min_start_bid_price = bid_price
 
-                    if min_start_bid_price is None or bid_price < min_start_bid_price:
-                        min_start_bid_price = bid_price
+                        start_bids_total_quantity += bid_quantity
 
-                    start_bids_total_quantity += bid_quantity
+                        if max_start_bid_quantity is None or bid_quantity > max_start_bid_quantity:
+                            max_start_bid_quantity = bid_quantity
 
-                    if max_start_bid_quantity is None or bid_quantity > max_start_bid_quantity:
-                        max_start_bid_quantity = bid_quantity
+                        if min_start_bid_quantity is None or bid_quantity < min_start_bid_quantity:
+                            min_start_bid_quantity = bid_quantity
 
-                    if min_start_bid_quantity is None or bid_quantity < min_start_bid_quantity:
-                        min_start_bid_quantity = bid_quantity
+                        bid_volume = (
+                            bid_price
+                            * bid_quantity
+                        )
 
-                    bid_volume = (
-                        bid_price
-                        * bid_quantity
-                    )
+                        start_bids_total_volume += bid_volume
 
-                    start_bids_total_volume += bid_volume
+                        if max_start_bid_volume is None or bid_volume > max_start_bid_volume:
+                            max_start_bid_volume = bid_volume
 
-                    if max_start_bid_volume is None or bid_volume > max_start_bid_volume:
-                        max_start_bid_volume = bid_volume
+                        if min_start_bid_volume is None or bid_volume < min_start_bid_volume:
+                            min_start_bid_volume = bid_volume
 
-                    if min_start_bid_volume is None or bid_volume < min_start_bid_volume:
-                        min_start_bid_volume = bid_volume
-
+                assert start_bids_total_quantity, None
+                assert start_bids_total_volume, None
                 assert max_start_bid_price is not None, None
                 assert max_start_bid_quantity is not None, None
                 assert max_start_bid_volume is not None, None
@@ -565,6 +514,8 @@ async def save_final_data_set(
                     if min_end_ask_volume is None or ask_volume < min_end_ask_volume:
                         min_end_ask_volume = ask_volume
 
+                assert end_asks_total_quantity, None
+                assert end_asks_total_volume, None
                 assert max_end_ask_price is not None, None
                 assert max_end_ask_quantity is not None, None
                 assert max_end_ask_volume is not None, None
@@ -609,12 +560,75 @@ async def save_final_data_set(
                     if min_end_bid_volume is None or bid_volume < min_end_bid_volume:
                         min_end_bid_volume = bid_volume
 
+                assert end_bids_total_quantity, None
+                assert end_bids_total_volume, None
                 assert max_end_bid_price is not None, None
                 assert max_end_bid_quantity is not None, None
                 assert max_end_bid_volume is not None, None
                 assert min_end_bid_price is not None, None
                 assert min_end_bid_quantity is not None, None
                 assert min_end_bid_volume is not None, None
+
+                # Processing trades
+
+                for trade_idx in range(
+                        start_trade_idx,
+                        trades_count
+                ):
+                    trade_data = trades[trade_idx]
+
+                    trade_timestamp_ms = trade_data.timestamp_ms
+
+                    if trade_timestamp_ms < start_timestamp_ms:
+                        continue
+                    elif trade_timestamp_ms >= next_order_book_timestamp_ms:
+                        start_trade_idx = trade_idx
+
+                        break
+
+                    trade_id = trade_data.trade_id
+
+                    if start_trade_id is None:
+                        start_trade_id = trade_id
+
+                    end_trade_id = trade_id
+
+                    trade_price = trade_data.price
+
+                    if high_price is None or trade_price > high_price:
+                        high_price = trade_price
+
+                    if low_price is None or trade_price < low_price:
+                        low_price = trade_price
+
+                    if open_price is None:
+                        open_price = trade_price
+
+                    close_price = trade_price
+
+                    trade_quantity = trade_data.quantity
+
+                    trade_volume = (
+                        trade_price
+                        * trade_quantity
+                    )
+
+                    if trade_data.is_buy:
+                        buy_quantity += trade_quantity
+                        buy_trades_count += 1
+                        buy_volume += trade_volume
+
+                    total_quantity += trade_quantity
+                    total_trades_count += 1
+                    total_volume += trade_volume
+
+                if not total_trades_count:
+                    continue
+
+                assert open_price is not None, None
+                assert close_price is not None, None
+                assert high_price is not None, None
+                assert low_price is not None, None
 
                 final_data_set_record_data = (
                     main.save_final_data_set.schemas.OKXDataSetRecordData(
@@ -664,7 +678,7 @@ async def save_final_data_set(
                         min_start_bid_volume=min_start_bid_volume,
                         low_price=low_price,
                         open_price=open_price,
-                        start_timestamp_ms=current_order_book_timestamp_ms,
+                        start_timestamp_ms=start_timestamp_ms,
                         start_trade_id=start_trade_id,
                         total_quantity=total_quantity,
                         total_trades_count=total_trades_count,
@@ -675,6 +689,43 @@ async def save_final_data_set(
                 session.add(
                     final_data_set_record_data,
                 )
+
+                buy_quantity = 0
+                buy_trades_count = 0
+                buy_volume = 0
+
+                close_price = None
+                high_price = None
+                low_price = None
+                open_price = None
+                start_trade_id = None
+                end_trade_id = None
+
+                start_timestamp_ms = None
+
+                start_asks_total_quantity = 0
+                start_asks_total_volume = 0
+                max_start_ask_price = None
+                max_start_ask_quantity = None
+                max_start_ask_volume = None
+                min_start_ask_price = None
+                min_start_ask_quantity = None
+                min_start_ask_volume = None
+
+                start_bids_total_quantity = 0
+                start_bids_total_volume = 0
+                max_start_bid_price = None
+                max_start_bid_quantity = None
+                max_start_bid_volume = None
+                min_start_bid_price = None
+                min_start_bid_quantity = None
+                min_start_bid_volume = None
+
+                total_quantity = 0
+                total_trades_count = 0
+                total_volume = 0
+
+                record_idx += 1
 
         logger.info(
             'Final data set records were saved!',

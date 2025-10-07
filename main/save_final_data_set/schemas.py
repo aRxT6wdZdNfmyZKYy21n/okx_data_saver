@@ -76,7 +76,7 @@ class OKXDataSetRecordData(Base):
     # - buy_volume_percent = buy_volume / total_volume
     # - buy_volume_by_max_percent = buy_volume / max_volume
 
-    close_price: Mapped[Decimal | None] = Column(
+    close_price: Mapped[Decimal] = Column(
         Numeric,
     )
 
@@ -221,7 +221,7 @@ class OKXDataSetRecordData(Base):
         BigInteger,
     )
 
-    end_trade_id: Mapped[int | None] = Column(
+    end_trade_id: Mapped[int] = Column(
         BigInteger,
     )
 
@@ -328,7 +328,7 @@ class OKXDataSetRecordData(Base):
     # - mid_start_price_delta = mid_start_price - open_price
     # - mid_start_price_delta_percent = 1 + mid_start_price_delta / open_price
 
-    low_price: Mapped[Decimal | None] = Column(
+    low_price: Mapped[Decimal] = Column(
         Numeric,
     )
 
@@ -336,7 +336,7 @@ class OKXDataSetRecordData(Base):
     # - low_price_delta = low_price - open_price
     # - low_price_delta_percent = 1 + low_price_delta / open_price
 
-    open_price: Mapped[Decimal | None] = Column(
+    open_price: Mapped[Decimal] = Column(
         Numeric,
     )
 
@@ -354,7 +354,7 @@ class OKXDataSetRecordData(Base):
         BigInteger,
     )
 
-    start_trade_id: Mapped[int | None] = Column(
+    start_trade_id: Mapped[int] = Column(
         BigInteger,
     )
 
