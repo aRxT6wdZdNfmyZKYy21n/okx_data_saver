@@ -8,23 +8,18 @@ namespace processors {
 
 std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
     SymbolId symbol_id,
-    const std::vector<OrderBookSnapshot>& order_book_snapshots,
+    const std::vector<OrderBookSnapshot>& order_books,
     const std::vector<TradeData>& trades,
     int32_t data_set_idx) {
     
     std::vector<OKXDataSetRecordData> records;
     
-    if (order_book_snapshots.size() < 2) {
+    if (order_books.size() < 2) {
         LOG_INFO("There are only {} order book snapshots; skipping final data set saving.", 
-                 order_book_snapshots.size());
+                 order_books.size());
         return records;
     }
-    
-    // Создаем объединенный список ордер-буков (как в Python)
-    std::vector<OrderBookSnapshot> order_books;
-    order_books.push_back(order_book_snapshots[0]); // start snapshot
-    order_books.insert(order_books.end(), order_book_snapshots.begin() + 1, order_book_snapshots.end());
-    
+
     OrderBookState order_book_state;
     size_t start_trade_idx = 0;
     int32_t record_idx = 0;

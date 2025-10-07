@@ -194,8 +194,11 @@ void MainLoop::processSymbol(const std::string& symbol_id) {
     // Объединяем снапшоты и обновления (как в Python коде)
     std::vector<OrderBookSnapshot> all_order_books;
     all_order_books.push_back(start_snapshot);
+
     all_order_books.insert(all_order_books.end(), order_book_updates.begin(), order_book_updates.end());
-    
+
+    order_book_updates.clear();
+
     // Рассчитываем финальный датасет
     auto final_records = calculator_->calculateFinalDataSet(
         symbol_id_enum,

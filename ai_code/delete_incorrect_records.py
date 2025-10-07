@@ -337,7 +337,7 @@ def clean_order_book_data_batch(args):
     async def _clean_batch():
         engine = create_async_engine(
             database_url,
-            echo=True,
+            echo=False,
         )
 
         session_factory = async_sessionmaker(
