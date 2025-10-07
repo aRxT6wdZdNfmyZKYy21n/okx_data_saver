@@ -61,6 +61,9 @@ from main.save_trades.schemas import (
     OKXTradeData,
     OKXTradeData2,
 )
+from settings import (
+    settings,
+)
 
 # Настройка логирования
 logging.basicConfig(
@@ -83,11 +86,6 @@ def check_trade_data_batch(args):
     database_url, offset, limit = args
 
     async def _check_batch():
-        # Импортируем settings только когда нужно
-        from settings import (
-            settings,
-        )
-
         # Формируем URI для подключения к БД
         uri = (
             'postgresql'
@@ -103,106 +101,112 @@ def check_trade_data_batch(args):
             f'{settings.POSTGRES_DB_NAME}'
         )
 
-        # Загружаем батч данных из таблицы
-        dataframe = polars.read_database_uri(
-            query=(
-                'SELECT'
-                ' symbol_id'
-                ', trade_id'
-                ', is_buy'
-                ', price'
-                ', quantity'
-                ', timestamp_ms'
-                f' FROM {OKXTradeData2.__tablename__}'
-                ' ORDER BY'
-                ' symbol_id ASC'
-                ', trade_id ASC'
-                f' OFFSET {offset}'
-                f' LIMIT {limit}'
-                ';'
-            ),
-            engine='connectorx',
-            uri=uri,
-        )
-
         checked_count = 0
 
-        is_buy: bool
-        price: Decimal
-        quantity: Decimal
-        symbol_id_raw: str
-        timestamp_ms: int
-        trade_id: int
-
-        # Проверяем каждую строку из таблицы
-        for (
-            symbol_id_raw,
-            trade_id,
-            is_buy,
-            price,
-            quantity,
-            timestamp_ms,
-        ) in dataframe.iter_rows(
-            named=False,
-        ):
-            assert type(symbol_id_raw) is str, (type(symbol_id_raw),)
-            assert type(trade_id) is int, (type(trade_id),)
-            assert type(is_buy) is bool, (type(is_buy),)
-            assert type(price) is Decimal, (type(price),)
-            assert type(quantity) is Decimal, (type(quantity),)
-            assert type(timestamp_ms) is int, (type(timestamp_ms),)
-
-            symbol_id: SymbolId | None = getattr(
-                SymbolId,
-                symbol_id_raw,
-                None,
+        try:
+            # Загружаем батч данных из таблицы
+            dataframe = polars.read_database_uri(
+                query=(
+                    'SELECT'
+                    ' symbol_id'
+                    ', trade_id'
+                    ', is_buy'
+                    ', price'
+                    ', quantity'
+                    ', timestamp_ms'
+                    f' FROM {OKXTradeData2.__tablename__}'
+                    ' ORDER BY'
+                    ' symbol_id ASC'
+                    ', trade_id ASC'
+                    f' OFFSET {offset}'
+                    f' LIMIT {limit}'
+                    ';'
+                ),
+                engine='connectorx',
+                uri=uri,
             )
 
-            if symbol_id is None:
-                print(
-                    f'[check_trade_data_batch] found incorrect symbol ID (raw): {symbol_id_raw!r}'
+            is_buy: bool
+            price: Decimal
+            quantity: Decimal
+            symbol_id_raw: str
+            timestamp_ms: int
+            trade_id: int
+
+            # Проверяем каждую строку из таблицы
+            for (
+                symbol_id_raw,
+                trade_id,
+                is_buy,
+                price,
+                quantity,
+                timestamp_ms,
+            ) in dataframe.iter_rows(
+                named=False,
+            ):
+                assert type(symbol_id_raw) is str, (type(symbol_id_raw),)
+                assert type(trade_id) is int, (type(trade_id),)
+                assert type(is_buy) is bool, (type(is_buy),)
+                assert type(price) is Decimal, (type(price),)
+                assert type(quantity) is Decimal, (type(quantity),)
+                assert type(timestamp_ms) is int, (type(timestamp_ms),)
+
+                symbol_id: SymbolId | None = getattr(
+                    SymbolId,
+                    symbol_id_raw,
+                    None,
                 )
 
-                continue
+                if symbol_id is None:
+                    print(
+                        f'[check_trade_data_batch] found incorrect symbol ID (raw): {symbol_id_raw!r}'
+                    )
 
-            if trade_id < 0:
-                print(
-                    f'[check_trade_data_batch] found incorrect trade ID {trade_id}'
-                    f' of row with symbol ID {symbol_id.name!r}'
-                )
+                    continue
 
-                continue
+                if trade_id < 0:
+                    print(
+                        f'[check_trade_data_batch] found incorrect trade ID {trade_id}'
+                        f' of row with symbol ID {symbol_id.name!r}'
+                    )
 
-            if price < 0:
-                print(
-                    f'[check_trade_data_batch] found incorrect price {price}'
-                    f' of row with symbol ID {symbol_id.name!r} and trade ID {trade_id}'
-                )
+                    continue
 
-                continue
+                if price < 0:
+                    print(
+                        f'[check_trade_data_batch] found incorrect price {price}'
+                        f' of row with symbol ID {symbol_id.name!r} and trade ID {trade_id}'
+                    )
 
-            if quantity < 0:
-                print(
-                    f'[check_trade_data_batch] found incorrect quantity {quantity}'
-                    f' of row with symbol ID {symbol_id.name!r} and trade ID {trade_id}'
-                )
+                    continue
 
-                continue
+                if quantity < 0:
+                    print(
+                        f'[check_trade_data_batch] found incorrect quantity {quantity}'
+                        f' of row with symbol ID {symbol_id.name!r} and trade ID {trade_id}'
+                    )
 
-            if not (-10800000 <= timestamp_ms <= 1767214800000):
-                print(
-                    f'[check_order_book_data_batch] found incorrect timestamp (ms): {timestamp_ms!r}'
-                    f' of row with symbol ID {symbol_id.name!r} and trade ID {trade_id}'
-                )
+                    continue
 
-                continue
+                if not (-10800000 <= timestamp_ms <= 1767214800000):
+                    print(
+                        f'[check_order_book_data_batch] found incorrect timestamp (ms): {timestamp_ms!r}'
+                        f' of row with symbol ID {symbol_id.name!r} and trade ID {trade_id}'
+                    )
 
-            checked_count += 1
+                    continue
 
-            if checked_count % 10000 == 0:
-                print(
-                    f'[check_trade_data_batch] checked {checked_count} rows',
-                )
+                checked_count += 1
+
+                if checked_count % 10000 == 0:
+                    print(
+                        f'[check_trade_data_batch] checked {checked_count} rows',
+                    )
+        except Exception as exception:
+            print(
+                'Handled exception'
+                f': {"".join(traceback.format_exception(exception))}',
+            )
 
         return checked_count
 
@@ -216,132 +220,136 @@ def check_order_book_data_batch(args):
     database_url, offset, limit = args
 
     async def _check_batch() -> int:
-        # Импортируем settings только когда нужно
-
-        # Создаем engine и session factory
-        engine = create_async_engine(
-            database_url,
-            echo=True,
-        )
-
-        session_factory = async_sessionmaker(
-            engine,
-            expire_on_commit=False,
-        )
-
         checked_count = 0
 
-        async with session_factory() as session:
-            # Создаем запрос для получения батча данных
-            query = (
-                select(
-                    OKXOrderBookData2.symbol_id,
-                    OKXOrderBookData2.timestamp_ms,
-                    OKXOrderBookData2.action_id,
-                    OKXOrderBookData2.asks,
-                    OKXOrderBookData2.bids,
-                )
-                .order_by(
-                    OKXOrderBookData2.symbol_id.asc(),
-                    OKXOrderBookData2.timestamp_ms.asc(),
-                )
-                .offset(
-                    offset,
-                )
-                .limit(
-                    limit,
-                )
-                .execution_options(
-                    yield_per=_YIELD_PER,
-                )
+        try:
+            # Создаем engine и session factory
+            engine = create_async_engine(
+                database_url,
+                echo=True,
             )
 
-            result = await session.stream(
-                query,
+            session_factory = async_sessionmaker(
+                engine,
+                expire_on_commit=False,
             )
 
-            # Используем stream для обработки данных по частям
-            async for row_data in result:
-                symbol_id_raw = row_data.symbol_id
-                timestamp_ms = row_data.timestamp_ms
-                action_id_raw = row_data.action_id
-                asks_raw = row_data.asks
-                bids_raw = row_data.bids
-
-                assert type(symbol_id_raw) is str, (type(symbol_id_raw),)
-                assert type(timestamp_ms) is int, (type(timestamp_ms),)
-                assert type(action_id_raw) is str, (type(action_id_raw),)
-                assert type(asks_raw) is str, (type(asks_raw),)
-                assert type(bids_raw) is str, (type(bids_raw),)
-
-                symbol_id: SymbolId | None = getattr(
-                    SymbolId,
-                    symbol_id_raw,
-                    None,
+            async with session_factory() as session:
+                # Создаем запрос для получения батча данных
+                query = (
+                    select(
+                        OKXOrderBookData2.symbol_id,
+                        OKXOrderBookData2.timestamp_ms,
+                        OKXOrderBookData2.action_id,
+                        OKXOrderBookData2.asks,
+                        OKXOrderBookData2.bids,
+                    )
+                    .order_by(
+                        OKXOrderBookData2.symbol_id.asc(),
+                        OKXOrderBookData2.timestamp_ms.asc(),
+                    )
+                    .offset(
+                        offset,
+                    )
+                    .limit(
+                        limit,
+                    )
+                    .execution_options(
+                        yield_per=_YIELD_PER,
+                    )
                 )
 
-                if symbol_id is None:
-                    print(
-                        f'[check_order_book_data_batch] found incorrect symbol ID (raw): {symbol_id_raw!r}'
-                    )
-
-                    continue
-
-                if not (-10800000 <= timestamp_ms <= 1767214800000):
-                    print(
-                        f'[check_order_book_data_batch] found incorrect timestamp (ms): {timestamp_ms!r}'
-                        f' of row with symbol ID {symbol_id.name!r}'
-                    )
-
-                    continue
-
-                action_id: OKXOrderBookActionId | None = getattr(
-                    OKXOrderBookActionId,
-                    action_id_raw,
-                    None,
+                result = await session.stream(
+                    query,
                 )
 
-                if action_id is None:
-                    print(
-                        f'[check_order_book_data_batch] found incorrect action ID (raw): {action_id_raw!r}'
-                        f' of row with symbol ID {symbol_id.name!r} and timestamp (ms) {timestamp_ms}'
+                # Используем stream для обработки данных по частям
+                async for row_data in result:
+                    symbol_id_raw = row_data.symbol_id
+                    timestamp_ms = row_data.timestamp_ms
+                    action_id_raw = row_data.action_id
+                    asks_raw = row_data.asks
+                    bids_raw = row_data.bids
+
+                    assert type(symbol_id_raw) is str, (type(symbol_id_raw),)
+                    assert type(timestamp_ms) is int, (type(timestamp_ms),)
+                    assert type(action_id_raw) is str, (type(action_id_raw),)
+                    assert type(asks_raw) is str, (type(asks_raw),)
+                    assert type(bids_raw) is str, (type(bids_raw),)
+
+                    symbol_id: SymbolId | None = getattr(
+                        SymbolId,
+                        symbol_id_raw,
+                        None,
                     )
 
-                    continue
+                    if symbol_id is None:
+                        print(
+                            f'[check_order_book_data_batch] found incorrect symbol ID (raw): {symbol_id_raw!r}'
+                        )
 
-                try:
-                    asks = orjson.loads(
-                        asks_raw,
-                    )
-                except orjson.JSONDecodeError:
-                    print(
-                        f'[check_order_book_data_batch] found incorrect asks (raw) {asks_raw!r}'
-                        f' of row with symbol ID {symbol_id.name!r} and timestamp (ms) {timestamp_ms}'
-                    )
+                        continue
 
-                    continue
+                    if not (-10800000 <= timestamp_ms <= 1767214800000):
+                        print(
+                            f'[check_order_book_data_batch] found incorrect timestamp (ms): {timestamp_ms!r}'
+                            f' of row with symbol ID {symbol_id.name!r}'
+                        )
 
-                try:
-                    bids = orjson.loads(
-                        bids_raw,
-                    )
-                except orjson.JSONDecodeError:
-                    print(
-                        f'[check_order_book_data_batch] found incorrect bids (raw) {bids_raw!r}'
-                        f' of row with symbol ID {symbol_id.name!r} and timestamp (ms) {timestamp_ms}'
+                        continue
+
+                    action_id: OKXOrderBookActionId | None = getattr(
+                        OKXOrderBookActionId,
+                        action_id_raw,
+                        None,
                     )
 
-                    continue
+                    if action_id is None:
+                        print(
+                            f'[check_order_book_data_batch] found incorrect action ID (raw): {action_id_raw!r}'
+                            f' of row with symbol ID {symbol_id.name!r} and timestamp (ms) {timestamp_ms}'
+                        )
 
-                checked_count += 1
+                        continue
 
-                if checked_count % 10000 == 0:
-                    print(
-                        f'[check_order_book_data_batch] checked {checked_count} rows',
-                    )
+                    try:
+                        asks = orjson.loads(
+                            asks_raw,
+                        )
+                    except orjson.JSONDecodeError:
+                        print(
+                            f'[check_order_book_data_batch] found incorrect asks (raw) {asks_raw!r}'
+                            f' of row with symbol ID {symbol_id.name!r} and timestamp (ms) {timestamp_ms}'
+                        )
 
-        # Закрываем engine
-        await engine.dispose()
+                        continue
+
+                    try:
+                        bids = orjson.loads(
+                            bids_raw,
+                        )
+                    except orjson.JSONDecodeError:
+                        print(
+                            f'[check_order_book_data_batch] found incorrect bids (raw) {bids_raw!r}'
+                            f' of row with symbol ID {symbol_id.name!r} and timestamp (ms) {timestamp_ms}'
+                        )
+
+                        continue
+
+                    checked_count += 1
+
+                    if checked_count % 10000 == 0:
+                        print(
+                            f'[check_order_book_data_batch] checked {checked_count} rows',
+                        )
+
+            # Закрываем engine
+            await engine.dispose()
+        except Exception as exception:
+            print(
+                'Handled exception'
+                f': {"".join(traceback.format_exception(exception))}',
+            )
 
         return checked_count
 

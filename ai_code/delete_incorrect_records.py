@@ -13,6 +13,9 @@ import os
 import sys
 import traceback
 from concurrent.futures import ProcessPoolExecutor
+from decimal import (
+    Decimal,
+)
 
 import numpy
 from sqlalchemy import (
@@ -47,14 +50,12 @@ from main.save_order_books.schemas import (
     Base as BaseOKXOrderBookData,
 )
 from main.save_order_books.schemas import (
-    OKXOrderBookData,
     OKXOrderBookData2,
 )
 from main.save_trades.schemas import (
     Base as BaseOKXTradeData,
 )
 from main.save_trades.schemas import (
-    OKXTradeData,
     OKXTradeData2,
 )
 
@@ -453,16 +454,38 @@ def clean_order_book_data_batch(args):
                         async with session_read.begin():
                             result = await session_read.execute(
                                 select(
-                                    OKXOrderBookData,
+                                    OKXOrderBookData2,
                                 ).where(
                                     and_(
-                                        OKXOrderBookData.symbol_name == symbol_name,
-                                        OKXOrderBookData.timestamp_ms == timestamp_ms,
+                                        OKXOrderBookData2.symbol_id == symbol_id,
+                                        OKXOrderBookData2.timestamp_ms == timestamp_ms,
                                     )
                                 ),
                             )
 
                             order_book_data = result.scalar()
+
+                            for ask_list in order_book_data.asks:
+                                (
+                                    price_raw,
+                                    quantity_raw,
+                                    _,
+                                    _
+                                ) = ask_list
+
+                                price = Decimal(price_raw)
+                                quantity = Decimal(price_raw)
+
+                            for bid_list in order_book_data.bids:
+                                (
+                                    price_raw,
+                                    quantity_raw,
+                                    _,
+                                    _
+                                ) = bid_list
+
+                                price = Decimal(price_raw)
+                                quantity = Decimal(price_raw)
                     except Exception as exception:
                         print(
                             f'[PID {os.getpid()}] Ошибка при получении timestamp_ms={timestamp_ms}: {str(exception)}'
@@ -858,7 +881,7 @@ class DatabaseMigrator:
         logger.info('Проверка результатов миграции...')
 
         tables_to_verify = [
-            (OKXTradeData, OKXTradeData2),
+            # (OKXTradeData, OKXTradeData2),
             (OKXOrderBookData, OKXOrderBookData2),
             (OKXCandleData15m, OKXCandleData15m2),
             (OKXCandleData1H, OKXCandleData1H2),
@@ -883,8 +906,8 @@ class DatabaseMigrator:
             await self.connect()
 
             logger.info('Начинаем миграцию...')
-            logger.info('Создание новых таблиц...')
-            await self.create_new_tables()
+            # logger.info('Создание новых таблиц...')
+            # await self.create_new_tables()
 
             logger.info('Миграция данных...')
             await asyncio.gather(
@@ -894,8 +917,8 @@ class DatabaseMigrator:
                 # self.clean_candle_data_1h(),
             )
 
-            logger.info('Проверка результатов...')
-            await self.verify_migration()
+            # logger.info('Проверка результатов...')
+            # await self.verify_migration()
 
             logger.info('Миграция завершена успешно!')
         except Exception as exception:
