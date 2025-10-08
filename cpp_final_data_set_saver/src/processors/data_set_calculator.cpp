@@ -1,6 +1,8 @@
 #include "processors/data_set_calculator.h"
 #include "utils/logger.h"
 #include <algorithm>
+#include <cassert>
+#include <optional>
 #include <stdexcept>
 
 namespace okx {
@@ -25,27 +27,27 @@ std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
     int32_t record_idx = 0;
     
     // Переменные для статистик начального ордер-бука (как в Python)
-    // Используем статические константы класса для избежания проблем с инициализацией
+    // Используем std::optional для соответствия None в Python
     utils::Decimal start_asks_total_quantity = utils::Decimal::ZERO;
     utils::Decimal start_asks_total_volume = utils::Decimal::ZERO;
-    utils::Decimal max_start_ask_price = utils::Decimal::ZERO;
-    utils::Decimal max_start_ask_quantity = utils::Decimal::ZERO;
-    utils::Decimal max_start_ask_volume = utils::Decimal::ZERO;
-    utils::Decimal min_start_ask_price = utils::Decimal::ZERO;
-    utils::Decimal min_start_ask_quantity = utils::Decimal::ZERO;
-    utils::Decimal min_start_ask_volume = utils::Decimal::ZERO;
+    std::optional<utils::Decimal> max_start_ask_price;
+    std::optional<utils::Decimal> max_start_ask_quantity;
+    std::optional<utils::Decimal> max_start_ask_volume;
+    std::optional<utils::Decimal> min_start_ask_price;
+    std::optional<utils::Decimal> min_start_ask_quantity;
+    std::optional<utils::Decimal> min_start_ask_volume;
     
     utils::Decimal start_bids_total_quantity = utils::Decimal::ZERO;
     utils::Decimal start_bids_total_volume = utils::Decimal::ZERO;
-    utils::Decimal max_start_bid_price = utils::Decimal::ZERO;
-    utils::Decimal max_start_bid_quantity = utils::Decimal::ZERO;
-    utils::Decimal max_start_bid_volume = utils::Decimal::ZERO;
-    utils::Decimal min_start_bid_price = utils::Decimal::ZERO;
-    utils::Decimal min_start_bid_quantity = utils::Decimal::ZERO;
-    utils::Decimal min_start_bid_volume = utils::Decimal::ZERO;
+    std::optional<utils::Decimal> max_start_bid_price;
+    std::optional<utils::Decimal> max_start_bid_quantity;
+    std::optional<utils::Decimal> max_start_bid_volume;
+    std::optional<utils::Decimal> min_start_bid_price;
+    std::optional<utils::Decimal> min_start_bid_quantity;
+    std::optional<utils::Decimal> min_start_bid_volume;
     
     // Переменная для start_timestamp_ms (как в Python)
-    int64_t start_timestamp_ms = 0;
+    std::optional<int64_t> start_timestamp_ms;
     
     // Обрабатываем каждый интервал между ордер-буками
     for (size_t current_order_book_idx = 0; current_order_book_idx < order_books.size() - 1; ++current_order_book_idx) {
@@ -73,58 +75,56 @@ std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
         
         // Рассчитываем статистики начального ордер-бука (как в Python - на каждой итерации до первого ненулевого объема)
         if (start_asks_total_volume.isZero()) {
-            bool first_ask = true;
             for (const auto& [price, quantity] : order_book_state.ask_quantity_by_price) {
-                if (first_ask) {
+                if (!max_start_ask_price || price > *max_start_ask_price) {
                     max_start_ask_price = price;
+                }
+                if (!min_start_ask_price || price < *min_start_ask_price) {
                     min_start_ask_price = price;
+                }
+                if (!max_start_ask_quantity || quantity > *max_start_ask_quantity) {
                     max_start_ask_quantity = quantity;
+                }
+                if (!min_start_ask_quantity || quantity < *min_start_ask_quantity) {
                     min_start_ask_quantity = quantity;
-                    first_ask = false;
-                } else {
-                    if (price > max_start_ask_price) max_start_ask_price = price;
-                    if (price < min_start_ask_price) min_start_ask_price = price;
-                    if (quantity > max_start_ask_quantity) max_start_ask_quantity = quantity;
-                    if (quantity < min_start_ask_quantity) min_start_ask_quantity = quantity;
                 }
                 
                 start_asks_total_quantity += quantity;
                 utils::Decimal ask_volume = price * quantity;
                 start_asks_total_volume += ask_volume;
                 
-                if (max_start_ask_volume.isZero() || ask_volume > max_start_ask_volume) {
+                if (!max_start_ask_volume || ask_volume > *max_start_ask_volume) {
                     max_start_ask_volume = ask_volume;
                 }
-                if (min_start_ask_volume.isZero() || ask_volume < min_start_ask_volume) {
+                if (!min_start_ask_volume || ask_volume < *min_start_ask_volume) {
                     min_start_ask_volume = ask_volume;
                 }
             }
         }
         
         if (start_bids_total_volume.isZero()) {
-            bool first_bid = true;
             for (const auto& [price, quantity] : order_book_state.bid_quantity_by_price) {
-                if (first_bid) {
+                if (!max_start_bid_price || price > *max_start_bid_price) {
                     max_start_bid_price = price;
+                }
+                if (!min_start_bid_price || price < *min_start_bid_price) {
                     min_start_bid_price = price;
+                }
+                if (!max_start_bid_quantity || quantity > *max_start_bid_quantity) {
                     max_start_bid_quantity = quantity;
+                }
+                if (!min_start_bid_quantity || quantity < *min_start_bid_quantity) {
                     min_start_bid_quantity = quantity;
-                    first_bid = false;
-                } else {
-                    if (price > max_start_bid_price) max_start_bid_price = price;
-                    if (price < min_start_bid_price) min_start_bid_price = price;
-                    if (quantity > max_start_bid_quantity) max_start_bid_quantity = quantity;
-                    if (quantity < min_start_bid_quantity) min_start_bid_quantity = quantity;
                 }
                 
                 start_bids_total_quantity += quantity;
                 utils::Decimal bid_volume = price * quantity;
                 start_bids_total_volume += bid_volume;
                 
-                if (max_start_bid_volume.isZero() || bid_volume > max_start_bid_volume) {
+                if (!max_start_bid_volume || bid_volume > *max_start_bid_volume) {
                     max_start_bid_volume = bid_volume;
                 }
-                if (min_start_bid_volume.isZero() || bid_volume < min_start_bid_volume) {
+                if (!min_start_bid_volume || bid_volume < *min_start_bid_volume) {
                     min_start_bid_volume = bid_volume;
                 }
             }
@@ -142,19 +142,43 @@ std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
         
         // КРИТИЧЕСКИ ВАЖНО: Устанавливаем start_timestamp_ms как в Python коде
         // В Python коде это происходит внутри цикла обработки сделок
-        if (start_timestamp_ms == 0) {
+        if (!start_timestamp_ms) {
             start_timestamp_ms = current_timestamp_ms;
         }
         
         // Создаем запись только если есть сделки
         if (trade_stats.total_trades_count > 0) {
+            assert(max_start_ask_price.has_value());
+            assert(max_start_ask_quantity.has_value());
+            assert(max_start_ask_volume.has_value());
+            assert(min_start_ask_price.has_value());
+            assert(min_start_ask_quantity.has_value());
+            assert(min_start_ask_volume.has_value());
+
+            assert(max_start_bid_price.has_value());
+            assert(max_start_bid_quantity.has_value());
+            assert(max_start_bid_volume.has_value());
+            assert(min_start_bid_price.has_value());
+            assert(min_start_bid_quantity.has_value());
+            assert(min_start_bid_volume.has_value());
+
+            assert(start_timestamp_ms.has_value());
+
+            assert(trade_stats.end_trade_id.has_value());
+            assert(trade_stats.start_trade_id.has_value());
+
+            assert(trade_stats.close_price.has_value());
+            assert(trade_stats.high_price.has_value());
+            assert(trade_stats.low_price.has_value());
+            assert(trade_stats.open_price.has_value());
+
             OKXDataSetRecordData record(symbol_id, data_set_idx, record_idx);
             
             // Заполняем поля записи
             record.buy_quantity = trade_stats.buy_quantity;
             record.buy_trades_count = trade_stats.buy_trades_count;
             record.buy_volume = trade_stats.buy_volume;
-            record.close_price = trade_stats.close_price;
+            record.close_price = *trade_stats.close_price;
             
             // End order book statistics
             record.end_asks_total_quantity = end_ask_stats.total_quantity;
@@ -177,76 +201,78 @@ std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
             
             // Timestamps and IDs
             record.end_timestamp_ms = next_timestamp_ms;
-            record.end_trade_id = trade_stats.end_trade_id;
-            record.high_price = trade_stats.high_price;
+            record.end_trade_id = *trade_stats.end_trade_id;
+            record.high_price = *trade_stats.high_price;
             
             // Start order book statistics (используем рассчитанные выше)
             record.start_asks_total_quantity = start_asks_total_quantity;
             record.start_asks_total_volume = start_asks_total_volume;
-            record.max_start_ask_price = max_start_ask_price;
-            record.max_start_ask_quantity = max_start_ask_quantity;
-            record.max_start_ask_volume = max_start_ask_volume;
-            record.min_start_ask_price = min_start_ask_price;
-            record.min_start_ask_quantity = min_start_ask_quantity;
-            record.min_start_ask_volume = min_start_ask_volume;
+            record.max_start_ask_price = *max_start_ask_price;
+            record.max_start_ask_quantity = *max_start_ask_quantity;
+            record.max_start_ask_volume = *max_start_ask_volume;
+            record.min_start_ask_price = *min_start_ask_price;
+            record.min_start_ask_quantity = *min_start_ask_quantity;
+            record.min_start_ask_volume = *min_start_ask_volume;
             
             record.start_bids_total_quantity = start_bids_total_quantity;
             record.start_bids_total_volume = start_bids_total_volume;
-            record.max_start_bid_price = max_start_bid_price;
-            record.max_start_bid_quantity = max_start_bid_quantity;
-            record.max_start_bid_volume = max_start_bid_volume;
-            record.min_start_bid_price = min_start_bid_price;
-            record.min_start_bid_quantity = min_start_bid_quantity;
-            record.min_start_bid_volume = min_start_bid_volume;
+            record.max_start_bid_price = *max_start_bid_price;
+            record.max_start_bid_quantity = *max_start_bid_quantity;
+            record.max_start_bid_volume = *max_start_bid_volume;
+            record.min_start_bid_price = *min_start_bid_price;
+            record.min_start_bid_quantity = *min_start_bid_quantity;
+            record.min_start_bid_volume = *min_start_bid_volume;
             
             // Additional trade statistics
-            record.low_price = trade_stats.low_price;
-            record.open_price = trade_stats.open_price;
-            record.start_timestamp_ms = start_timestamp_ms;  // Используем переменную из цикла
-            record.start_trade_id = trade_stats.start_trade_id;
+            record.low_price = *trade_stats.low_price;
+            record.open_price = *trade_stats.open_price;
+            record.start_timestamp_ms = *start_timestamp_ms;  // Используем переменную из цикла
+            record.start_trade_id = *trade_stats.start_trade_id;
             record.total_quantity = trade_stats.total_quantity;
             record.total_trades_count = trade_stats.total_trades_count;
             record.total_volume = trade_stats.total_volume;
             
             records.push_back(record);
             record_idx++;
-            
+        
             // КРИТИЧЕСКИ ВАЖНО: Обнуляем переменные ПОСЛЕ создания записи (как в Python коде)
             // Это должно происходить ТОЛЬКО после успешного создания записи
+
             trade_stats.buy_quantity = utils::Decimal::ZERO;
             trade_stats.buy_trades_count = 0;
             trade_stats.buy_volume = utils::Decimal::ZERO;
-            trade_stats.close_price = utils::Decimal::ZERO;
-            trade_stats.high_price = utils::Decimal::ZERO;
-            trade_stats.low_price = utils::Decimal::ZERO;
-            trade_stats.open_price = utils::Decimal::ZERO;
-            trade_stats.start_trade_id = 0;
-            trade_stats.end_trade_id = 0;
-            trade_stats.start_timestamp_ms = 0;
+            trade_stats.close_price = std::nullopt;
+            trade_stats.high_price = std::nullopt;
+            trade_stats.low_price = std::nullopt;
+            trade_stats.open_price = std::nullopt;
+            trade_stats.start_trade_id = std::nullopt;
+            trade_stats.end_trade_id = std::nullopt;
+            trade_stats.start_timestamp_ms = std::nullopt;
             trade_stats.total_quantity = utils::Decimal::ZERO;
             trade_stats.total_trades_count = 0;
             trade_stats.total_volume = utils::Decimal::ZERO;
             
             // Обнуляем start_timestamp_ms для следующей итерации (как в Python коде)
-            start_timestamp_ms = 0;
+            start_timestamp_ms = std::nullopt;
 
+            // Обнуляем переменные начального ордер-бука (как в Python коде)
             start_asks_total_quantity = utils::Decimal::ZERO;
             start_asks_total_volume = utils::Decimal::ZERO;
-            max_start_ask_price = utils::Decimal::ZERO;
-            max_start_ask_quantity = utils::Decimal::ZERO;
-            max_start_ask_volume = utils::Decimal::ZERO;
-            min_start_ask_price = utils::Decimal::ZERO;
-            min_start_ask_quantity = utils::Decimal::ZERO;
-            min_start_ask_volume = utils::Decimal::ZERO;
+            max_start_ask_price = std::nullopt;
+            max_start_ask_quantity = std::nullopt;
+            max_start_ask_volume = std::nullopt;
+            min_start_ask_price = std::nullopt;
+            min_start_ask_quantity = std::nullopt;
+            min_start_ask_volume = std::nullopt;
             
             start_bids_total_quantity = utils::Decimal::ZERO;
             start_bids_total_volume = utils::Decimal::ZERO;
-            max_start_bid_price = utils::Decimal::ZERO;
-            max_start_bid_quantity = utils::Decimal::ZERO;
-            max_start_bid_volume = utils::Decimal::ZERO;
-            min_start_bid_price = utils::Decimal::ZERO;
-            min_start_bid_quantity = utils::Decimal::ZERO;
-            min_start_bid_volume = utils::Decimal::ZERO;
+            max_start_bid_price = std::nullopt;
+            max_start_bid_quantity = std::nullopt;
+            max_start_bid_volume = std::nullopt;
+            min_start_bid_price = std::nullopt;
+            min_start_bid_quantity = std::nullopt;
+            min_start_bid_volume = std::nullopt;
         }
     }
     
@@ -372,23 +398,23 @@ DataSetCalculator::TradeStatistics DataSetCalculator::calculateTradeStatistics(
         }
         
         // Обновляем статистики
-        if (stats.start_trade_id == 0) {
+        if (!stats.start_trade_id) {
             stats.start_trade_id = trade.trade_id;
             stats.start_timestamp_ms = trade.timestamp_ms;
         }
         
         stats.end_trade_id = trade.trade_id;
         
-        if (stats.open_price.isZero()) {
+        if (!stats.open_price) {
             stats.open_price = trade.price;
         }
         stats.close_price = trade.price;
         
-        if (stats.high_price.isZero() || trade.price > stats.high_price) {
+        if (!stats.high_price || trade.price > *stats.high_price) {
             stats.high_price = trade.price;
         }
         
-        if (stats.low_price.isZero() || trade.price < stats.low_price) {
+        if (!stats.low_price || trade.price < *stats.low_price) {
             stats.low_price = trade.price;
         }
         
