@@ -229,6 +229,24 @@ std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
             
             // Обнуляем start_timestamp_ms для следующей итерации (как в Python коде)
             start_timestamp_ms = 0;
+
+            start_asks_total_quantity = utils::Decimal::ZERO;
+            start_asks_total_volume = utils::Decimal::ZERO;
+            max_start_ask_price = utils::Decimal::ZERO;
+            max_start_ask_quantity = utils::Decimal::ZERO;
+            max_start_ask_volume = utils::Decimal::ZERO;
+            min_start_ask_price = utils::Decimal::ZERO;
+            min_start_ask_quantity = utils::Decimal::ZERO;
+            min_start_ask_volume = utils::Decimal::ZERO;
+            
+            start_bids_total_quantity = utils::Decimal::ZERO;
+            start_bids_total_volume = utils::Decimal::ZERO;
+            max_start_bid_price = utils::Decimal::ZERO;
+            max_start_bid_quantity = utils::Decimal::ZERO;
+            max_start_bid_volume = utils::Decimal::ZERO;
+            min_start_bid_price = utils::Decimal::ZERO;
+            min_start_bid_quantity = utils::Decimal::ZERO;
+            min_start_bid_volume = utils::Decimal::ZERO;
         }
     }
     
