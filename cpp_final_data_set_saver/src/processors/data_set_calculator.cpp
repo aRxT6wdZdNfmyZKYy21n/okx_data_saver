@@ -30,24 +30,24 @@ std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
     // Используем std::optional для соответствия None в Python
     utils::Decimal start_asks_total_quantity = utils::Decimal::ZERO;
     utils::Decimal start_asks_total_volume = utils::Decimal::ZERO;
-    std::optional<utils::Decimal> max_start_ask_price;
-    std::optional<utils::Decimal> max_start_ask_quantity;
-    std::optional<utils::Decimal> max_start_ask_volume;
-    std::optional<utils::Decimal> min_start_ask_price;
-    std::optional<utils::Decimal> min_start_ask_quantity;
-    std::optional<utils::Decimal> min_start_ask_volume;
+    std::optional<utils::Decimal> max_start_ask_price = std::nullopt;
+    std::optional<utils::Decimal> max_start_ask_quantity = std::nullopt;
+    std::optional<utils::Decimal> max_start_ask_volume = std::nullopt;
+    std::optional<utils::Decimal> min_start_ask_price = std::nullopt;
+    std::optional<utils::Decimal> min_start_ask_quantity = std::nullopt;
+    std::optional<utils::Decimal> min_start_ask_volume = std::nullopt;
     
     utils::Decimal start_bids_total_quantity = utils::Decimal::ZERO;
     utils::Decimal start_bids_total_volume = utils::Decimal::ZERO;
-    std::optional<utils::Decimal> max_start_bid_price;
-    std::optional<utils::Decimal> max_start_bid_quantity;
-    std::optional<utils::Decimal> max_start_bid_volume;
-    std::optional<utils::Decimal> min_start_bid_price;
-    std::optional<utils::Decimal> min_start_bid_quantity;
-    std::optional<utils::Decimal> min_start_bid_volume;
+    std::optional<utils::Decimal> max_start_bid_price = std::nullopt;
+    std::optional<utils::Decimal> max_start_bid_quantity = std::nullopt;
+    std::optional<utils::Decimal> max_start_bid_volume = std::nullopt;
+    std::optional<utils::Decimal> min_start_bid_price = std::nullopt;
+    std::optional<utils::Decimal> min_start_bid_quantity = std::nullopt;
+    std::optional<utils::Decimal> min_start_bid_volume = std::nullopt;
     
     // Переменная для start_timestamp_ms (как в Python)
-    std::optional<int64_t> start_timestamp_ms;
+    std::optional<int64_t> start_timestamp_ms = std::nullopt;
     
     // Обрабатываем каждый интервал между ордер-буками
     for (size_t current_order_book_idx = 0; current_order_book_idx < order_books.size() - 1; ++current_order_book_idx) {
