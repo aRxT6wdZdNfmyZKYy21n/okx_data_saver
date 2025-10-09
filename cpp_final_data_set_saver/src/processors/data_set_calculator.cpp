@@ -66,7 +66,14 @@ std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
             if (current_order_book.action_id != OKXOrderBookActionId::Snapshot) {
                 throw std::runtime_error("First order book must be a snapshot");
             }
-            initializeOrderBookState(order_book_state, current_order_book);
+
+            try {
+                initializeOrderBookState(order_book_state, current_order_book);
+            } catch (const std::exception& e) {
+                LOG_ERROR("Error while initializing order book state (timestamp_ms: {}): {}", current_order_book.timestamp_ms, e.what());
+
+                continue;
+            }
         } else {
             if (current_order_book.action_id != OKXOrderBookActionId::Update) {
                 throw std::runtime_error("Order book must be an update after initialization");
@@ -131,8 +138,15 @@ std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
         }
         
         // Обновляем состояние ордер-бука
-        updateOrderBookState(order_book_state, next_order_book);
-        
+
+        try {
+            updateOrderBookState(order_book_state, next_order_book);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Error while updating order book state (timestamp_ms: {}): {}", current_order_book.timestamp_ms, e.what());
+
+            continue;
+        }
+
         // Рассчитываем статистики конечного ордер-бука
         OrderBookStatistics end_ask_stats = calculateOrderBookStatistics(order_book_state.ask_quantity_by_price);
         OrderBookStatistics end_bid_stats = calculateOrderBookStatistics(order_book_state.bid_quantity_by_price);
@@ -282,7 +296,6 @@ std::vector<OKXDataSetRecordData> DataSetCalculator::calculateFinalDataSet(
 
 void DataSetCalculator::initializeOrderBookState(OrderBookState& state, const OrderBookSnapshot& snapshot) {
     state.ask_quantity_by_price.clear();
-    state.bid_quantity_by_price.clear();
     
     // Обрабатываем asks
     for (const auto& ask_list : snapshot.asks) {
@@ -295,7 +308,9 @@ void DataSetCalculator::initializeOrderBookState(OrderBookState& state, const Or
             }
         }
     }
-    
+
+    state.bid_quantity_by_price.clear();
+
     // Обрабатываем bids
     for (const auto& bid_list : snapshot.bids) {
         if (bid_list.size() >= 2) {
