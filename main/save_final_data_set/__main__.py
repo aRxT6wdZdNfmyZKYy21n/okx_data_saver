@@ -31,6 +31,8 @@ logger = logging.getLogger(
 )
 
 
+_IS_RESCUE_MODE_ENABLED = False
+
 _SYMBOL_IDS = [
     SymbolId.BTC_USDT,
     SymbolId.ETH_USDT,
@@ -53,17 +55,26 @@ async def init_db_models():
 async def save_final_data_set(
         symbol_id: SymbolId,
 ) -> None:
+    logger.info(
+        f'Saving final data set for symbol with ID {symbol_id.name}'
+    )
+
     final_data_set_record_db_schema = (
         main.save_final_data_set.schemas.OKXDataSetRecordData
     )
 
     postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
 
-    async with postgres_db_session_maker() as session:
+    async with (
+        postgres_db_session_maker() as session_read_1,
+        postgres_db_session_maker() as session_read_2,
+        postgres_db_session_maker() as session_read_3,
+        postgres_db_session_maker() as session_write,
+    ):
         # Step 1: get last final data set record data
 
-        async with session.begin():
-            result = await session.execute(
+        async with session_read_1.begin():
+            result = await session_read_1.execute(
                 select(
                     final_data_set_record_db_schema
                 ).where(
@@ -81,60 +92,70 @@ async def save_final_data_set(
                 main.save_final_data_set.schemas.OKXDataSetRecordData | None
             ) = result.scalar_one_or_none()
 
-        min_timestamp_ms: int
+        last_final_data_set_record_end_timestamp_ms: int | None
         new_final_data_set_idx: int
 
         if last_final_data_set_record_data is not None:
-            min_timestamp_ms = last_final_data_set_record_data.end_timestamp_ms
-            new_final_data_set_idx = last_final_data_set_record_data.data_set_idx + 1
+            last_final_data_set_record_end_timestamp_ms = last_final_data_set_record_data.end_timestamp_ms
+            new_final_data_set_idx = last_final_data_set_record_data.data_set_idx
+
+            if not _IS_RESCUE_MODE_ENABLED:
+                new_final_data_set_idx += 1
         else:
-            min_timestamp_ms = 0
+            last_final_data_set_record_end_timestamp_ms = None
             new_final_data_set_idx = 0
 
-        # Step 2: get 2 OKXOrderBookData2 Snapshots after last final data set snapshot
+        # Step 2: get start OKXOrderBookData2 Snapshot
 
         order_book_data_db_schema = (
             main.save_order_books.schemas.OKXOrderBookData2
         )
 
-        async with session.begin():
-            result = await session.execute(
+        async with session_read_1.begin():
+            if last_final_data_set_record_end_timestamp_ms is not None:
+                if _IS_RESCUE_MODE_ENABLED:
+                    where_and_expression = and_(
+                        order_book_data_db_schema.symbol_id == symbol_id,
+                        order_book_data_db_schema.action_id == OKXOrderBookActionId.Snapshot,
+                        order_book_data_db_schema.timestamp_ms < last_final_data_set_record_end_timestamp_ms,
+                    )
+                else:
+                    where_and_expression = and_(
+                        order_book_data_db_schema.symbol_id == symbol_id,
+                        order_book_data_db_schema.action_id == OKXOrderBookActionId.Snapshot,
+                        order_book_data_db_schema.timestamp_ms >= last_final_data_set_record_end_timestamp_ms,
+                    )
+            else:
+                where_and_expression = and_(
+                    order_book_data_db_schema.symbol_id == symbol_id,
+                    order_book_data_db_schema.action_id == OKXOrderBookActionId.Snapshot,
+                    order_book_data_db_schema.timestamp_ms >= 0,
+                )
+
+            result = await session_read_1.execute(
                 select(
                     order_book_data_db_schema,
                 ).where(
-                    and_(
-                        order_book_data_db_schema.symbol_id == symbol_id,
-                        order_book_data_db_schema.timestamp_ms >= min_timestamp_ms,
-                        order_book_data_db_schema.action_id == OKXOrderBookActionId.Snapshot,
-                    )
+                    where_and_expression,
                 ).order_by(
                     order_book_data_db_schema.symbol_id.asc(),
                     order_book_data_db_schema.timestamp_ms.asc(),
                 ).limit(
-                    2,
+                    1,
                 ),
             )
 
-            order_book_snapshots: (
-                list[main.save_order_books.schemas.OKXOrderBookData2]
-            ) = result.scalars().all()
+            start_order_book_snapshot_data: (
+                main.save_order_books.schemas.OKXOrderBookData2 | None
+            ) = result.scalar_one_or_none()
 
-        if len(order_book_snapshots) < 2:
+        if start_order_book_snapshot_data is None:
             logger.info(
-                f'There are only {len(order_book_snapshots)} order book snapshots'
+                f'There are no order book snapshots'
                 '; skipping final data set saving.'
             )
 
             return
-
-        (
-            start_order_book_snapshot_data,
-            end_order_book_snapshot_data,
-        ) = order_book_snapshots
-
-        end_order_book_snapshot_timestamp_ms = (
-            end_order_book_snapshot_data.timestamp_ms
-        )
 
         start_order_book_snapshot_timestamp_ms = (
             start_order_book_snapshot_data.timestamp_ms
@@ -143,146 +164,163 @@ async def save_final_data_set(
         logger.info(
             'Start order book snapshot timestamp (ms)'
             f': {start_order_book_snapshot_timestamp_ms}'
-            '; end order book snapshot timestamp (ms)'
-            f': {end_order_book_snapshot_timestamp_ms}'
         )
 
-        # Step 3: fetch all order book updates between two snapshots
+        # Step 3: get end OKXOrderBookData2 Snapshot (if exists)
 
-        async with session.begin():
-            result = await session.execute(
+        async with session_read_1.begin():
+            result = await session_read_1.execute(
                 select(
                     order_book_data_db_schema,
                 ).where(
                     and_(
                         order_book_data_db_schema.symbol_id == symbol_id,
-                        order_book_data_db_schema.timestamp_ms >= start_order_book_snapshot_timestamp_ms,
-                        order_book_data_db_schema.timestamp_ms < end_order_book_snapshot_timestamp_ms,
-                        order_book_data_db_schema.action_id == OKXOrderBookActionId.Update,
-                    )
+                        order_book_data_db_schema.action_id == OKXOrderBookActionId.Snapshot,
+                        order_book_data_db_schema.timestamp_ms > start_order_book_snapshot_timestamp_ms,
+                    ),
                 ).order_by(
                     order_book_data_db_schema.symbol_id.asc(),
                     order_book_data_db_schema.timestamp_ms.asc(),
+                ).limit(
+                    1,
                 ),
             )
 
-            order_book_updates: (
-                list[main.save_order_books.schemas.OKXOrderBookData2]
-            ) = result.scalars().all()
+            end_order_book_snapshot_data: (
+                main.save_order_books.schemas.OKXOrderBookData2 | None
+            ) = result.scalar_one_or_none()
+
+        end_order_book_snapshot_timestamp_ms: int | None
+
+        if end_order_book_snapshot_data is not None:
+            end_order_book_snapshot_timestamp_ms = end_order_book_snapshot_data.timestamp_ms
+        else:
+            end_order_book_snapshot_timestamp_ms = None
 
         logger.info(
-            f'Fetched {len(order_book_updates)} order book updates',
+            'End order book snapshot timestamp (ms)'
+            f': {end_order_book_snapshot_timestamp_ms}'
         )
 
-        # Step 4: fetch all trades between two snapshots
+        # Step 4:
+        # - Fetch all order books after start snapshot
+
+        ask_quantity_by_price_map: dict[Decimal, Decimal] | None = None
+        bid_quantity_by_price_map: dict[Decimal, Decimal] | None = None
+
+        current_order_book_data: (
+            main.save_order_books.schemas.OKXOrderBookData2 | None
+        ) = start_order_book_snapshot_data
+
+        data_set_record_data_db_schema = (
+            main.save_final_data_set.schemas.OKXDataSetRecordData
+        )
+
+        next_order_book_data: (
+            main.save_order_books.schemas.OKXOrderBookData2 | None
+        ) = None
+
+        record_idx = 0
 
         trade_data_db_schema = (
             main.save_trades.schemas.OKXTradeData2
         )
 
-        async with session.begin():
-            result = await session.execute(
-                select(
-                    trade_data_db_schema,
-                ).where(
-                    and_(
-                        trade_data_db_schema.symbol_id == symbol_id,
-                        trade_data_db_schema.timestamp_ms >= start_order_book_snapshot_timestamp_ms,
-                        trade_data_db_schema.timestamp_ms < end_order_book_snapshot_timestamp_ms,
+        async with (
+            session_read_1.begin(),
+            session_read_3.begin(),
+        ):
+            if end_order_book_snapshot_timestamp_ms is not None:
+                where_and_expression_1 = and_(
+                    order_book_data_db_schema.symbol_id == symbol_id,
+                    order_book_data_db_schema.action_id == OKXOrderBookActionId.Update,
+                    order_book_data_db_schema.timestamp_ms > start_order_book_snapshot_timestamp_ms,
+                    order_book_data_db_schema.timestamp_ms < end_order_book_snapshot_timestamp_ms,
+                )
+
+                where_and_expression_2 = and_(
+                    trade_data_db_schema.symbol_id == symbol_id,
+                    trade_data_db_schema.timestamp_ms >= start_order_book_snapshot_timestamp_ms,
+                    trade_data_db_schema.timestamp_ms < end_order_book_snapshot_timestamp_ms,
+                )
+            else:
+                return  # Not supported for now
+
+                # where_and_expression_1 = and_(
+                #     order_book_data_db_schema.symbol_id == symbol_id,
+                #     order_book_data_db_schema.timestamp_ms > start_order_book_snapshot_timestamp_ms,
+                # )
+
+                # where_and_expression_2 = and_(
+                #     trade_data_db_schema.symbol_id == symbol_id,
+                #     trade_data_db_schema.timestamp_ms >= start_order_book_snapshot_timestamp_ms,
+                # )
+
+            # Fetch all trades between two snapshots
+
+            async with session_read_2.begin():
+                result_2 = await session_read_2.execute(
+                    select(
+                        trade_data_db_schema,
+                    ).where(
+                        where_and_expression_2,
+                    ).order_by(
+                        trade_data_db_schema.symbol_id.asc(),
+                        trade_data_db_schema.trade_id.asc(),
                     )
+                )
+
+                trades: list[main.save_trades.schemas.OKXTradeData2] = result_2.scalars().all()
+
+            trades_count = len(
+                trades,
+            )
+
+            logger.info(
+                f'Fetched {trades_count} trades',
+            )
+
+            if not trades_count:
+                raise NotImplementedError
+
+            order_book_data: (
+                main.save_order_books.schemas.OKXOrderBookData2 | None
+            )
+
+            order_book_idx = 0
+
+            result_1 = await session_read_1.stream(
+                select(
+                    order_book_data_db_schema,
+                ).where(
+                    where_and_expression_1,
                 ).order_by(
-                    trade_data_db_schema.symbol_id.asc(),
-                    trade_data_db_schema.trade_id.asc(),
+                    order_book_data_db_schema.symbol_id.asc(),
+                    order_book_data_db_schema.timestamp_ms.asc(),
+                ).execution_options(
+                    yield_per=1000,
                 ),
             )
 
-            trades: (
-                list[main.save_trades.schemas.OKXTradeData2]
-            ) = result.scalars().all()
+            start_trade_idx = 0  # For optimization purposes
 
-        trades_count = len(
-            trades,
-        )
+            async for order_book_data in result_1.scalars():
+                order_book_idx += 1
 
-        logger.info(
-            f'Fetched {len(trades)} trades',
-        )
-
-        # Step 5: save final data set records into DB
-
-        order_books = [
-            start_order_book_snapshot_data,
-        ]
-
-        order_books.extend(
-            order_book_updates,
-        )
-
-        order_books_count = len(
-            order_books,
-        )
-
-        ask_quantity_by_price_map: dict[Decimal, Decimal] | None = None
-        bid_quantity_by_price_map: dict[Decimal, Decimal] | None = None
-
-        start_trade_idx = 0  # Optimization
-
-        buy_quantity = 0
-        buy_trades_count = 0
-        buy_volume = 0
-
-        close_price: Decimal | None = None
-        high_price: Decimal | None = None
-        low_price: Decimal | None = None
-        open_price: Decimal | None = None
-        start_trade_id: int | None = None
-        end_trade_id: int | None = None
-
-        start_timestamp_ms: int | None = None
-
-        start_asks_total_quantity = 0
-        start_asks_total_volume = 0
-        max_start_ask_price: Decimal | None = None
-        max_start_ask_quantity: Decimal | None = None
-        max_start_ask_volume: Decimal | None = None
-        min_start_ask_price: Decimal | None = None
-        min_start_ask_quantity: Decimal | None = None
-        min_start_ask_volume: Decimal | None = None
-
-        start_bids_total_quantity = 0
-        start_bids_total_volume = 0
-        max_start_bid_price: Decimal | None = None
-        max_start_bid_quantity: Decimal | None = None
-        max_start_bid_volume: Decimal | None = None
-        min_start_bid_price: Decimal | None = None
-        min_start_bid_quantity: Decimal | None = None
-        min_start_bid_volume: Decimal | None = None
-
-        total_quantity = 0
-        total_trades_count = 0
-        total_volume = 0
-
-        async with session.begin():
-            record_idx = 0
-
-            for current_order_book_idx in range(
-                order_books_count - 1
-            ):
-                if current_order_book_idx % 100 == 0:
+                if order_book_idx % 1000 == 0:
                     logger.info(
-                        f'Processed {current_order_book_idx} / {order_books_count} order books',
+                        f'Processed {order_book_idx} order books',
                     )
 
-                current_order_book_data = order_books[current_order_book_idx]
-                current_order_book_timestamp_ms = current_order_book_data.timestamp_ms
+                if current_order_book_data is None:
+                    current_order_book_data = order_book_data
 
-                if start_timestamp_ms is None:
-                    start_timestamp_ms = current_order_book_timestamp_ms
+                    continue
+                elif next_order_book_data is None:
+                    next_order_book_data = order_book_data
 
-                next_order_book_idx = current_order_book_idx + 1
-
-                next_order_book_data = order_books[next_order_book_idx]
-                next_order_book_timestamp_ms = next_order_book_data.timestamp_ms
+                start_timestamp_ms = current_order_book_data.timestamp_ms
+                end_timestamp_ms = next_order_book_data.timestamp_ms
 
                 # Processing start order book
 
@@ -312,7 +350,7 @@ async def save_final_data_set(
                         )
 
                         assert quantity, (
-                            current_order_book_timestamp_ms,
+                            start_timestamp_ms,
                             ask_list,
                         )
 
@@ -337,7 +375,7 @@ async def save_final_data_set(
                         )
 
                         assert quantity, (
-                            current_order_book_timestamp_ms,
+                            start_timestamp_ms,
                             bid_list,
                         )
 
@@ -345,6 +383,15 @@ async def save_final_data_set(
                 else:
                     assert bid_quantity_by_price_map is not None, None
                     assert current_order_book_data.action_id == OKXOrderBookActionId.Update, None
+
+                start_asks_total_quantity = 0
+                start_asks_total_volume = 0
+                max_start_ask_price: Decimal | None = None
+                max_start_ask_quantity: Decimal | None = None
+                max_start_ask_volume: Decimal | None = None
+                min_start_ask_price: Decimal | None = None
+                min_start_ask_quantity: Decimal | None = None
+                min_start_ask_volume: Decimal | None = None
 
                 if not start_asks_total_volume:
                     for ask_price, ask_quantity in ask_quantity_by_price_map.items():
@@ -383,6 +430,15 @@ async def save_final_data_set(
                 assert min_start_ask_price is not None, None
                 assert min_start_ask_quantity is not None, None
                 assert min_start_ask_volume is not None, None
+
+                start_bids_total_quantity = 0
+                start_bids_total_volume = 0
+                max_start_bid_price: Decimal | None = None
+                max_start_bid_quantity: Decimal | None = None
+                max_start_bid_volume: Decimal | None = None
+                min_start_bid_price: Decimal | None = None
+                min_start_bid_quantity: Decimal | None = None
+                min_start_bid_volume: Decimal | None = None
 
                 if not start_bids_total_volume:
                     for bid_price, bid_quantity in bid_quantity_by_price_map.items():
@@ -569,7 +625,31 @@ async def save_final_data_set(
                 assert min_end_bid_quantity is not None, None
                 assert min_end_bid_volume is not None, None
 
+                current_order_book_data = next_order_book_data
+                next_order_book_data = None
+
+                if current_order_book_data.action_id == OKXOrderBookActionId.Snapshot:
+                    new_final_data_set_idx += 1
+
+                    ask_quantity_by_price_map = None
+                    bid_quantity_by_price_map = None
+
                 # Processing trades
+
+                buy_quantity = 0
+                buy_trades_count = 0
+                buy_volume = 0
+
+                close_price: Decimal | None = None
+                high_price: Decimal | None = None
+                low_price: Decimal | None = None
+                open_price: Decimal | None = None
+                start_trade_id: int | None = None
+                end_trade_id: int | None = None
+
+                total_quantity = 0
+                total_trades_count = 0
+                total_volume = 0
 
                 for trade_idx in range(
                         start_trade_idx,
@@ -581,7 +661,7 @@ async def save_final_data_set(
 
                     if trade_timestamp_ms < start_timestamp_ms:
                         continue
-                    elif trade_timestamp_ms >= next_order_book_timestamp_ms:
+                    elif trade_timestamp_ms >= end_timestamp_ms:
                         start_trade_idx = trade_idx
 
                         break
@@ -630,106 +710,97 @@ async def save_final_data_set(
                 assert high_price is not None, None
                 assert low_price is not None, None
 
-                final_data_set_record_data = (
-                    main.save_final_data_set.schemas.OKXDataSetRecordData(
-                        # Primary key fields
-                        symbol_id=symbol_id,
-                        data_set_idx=new_final_data_set_idx,
-                        record_idx=record_idx,
-                        # Attribute fields
-                        buy_quantity=buy_quantity,
-                        buy_trades_count=buy_trades_count,
-                        buy_volume=buy_volume,
-                        close_price=close_price,
-                        end_asks_total_quantity=end_asks_total_quantity,
-                        end_asks_total_volume=end_asks_total_volume,
-                        max_end_ask_price=max_end_ask_price,
-                        max_end_ask_quantity=max_end_ask_quantity,
-                        max_end_ask_volume=max_end_ask_volume,
-                        min_end_ask_price=min_end_ask_price,
-                        min_end_ask_quantity=min_end_ask_quantity,
-                        min_end_ask_volume=min_end_ask_volume,
-                        end_bids_total_quantity=end_bids_total_quantity,
-                        end_bids_total_volume=end_bids_total_volume,
-                        max_end_bid_price=max_end_bid_price,
-                        max_end_bid_quantity=max_end_bid_quantity,
-                        max_end_bid_volume=max_end_bid_volume,
-                        min_end_bid_price=min_end_bid_price,
-                        min_end_bid_quantity=min_end_bid_quantity,
-                        min_end_bid_volume=min_end_bid_volume,
-                        end_timestamp_ms=next_order_book_timestamp_ms,
-                        end_trade_id=end_trade_id,
-                        high_price=high_price,
-                        start_asks_total_quantity=start_asks_total_quantity,
-                        start_asks_total_volume=start_asks_total_volume,
-                        max_start_ask_price=max_start_ask_price,
-                        max_start_ask_quantity=max_start_ask_quantity,
-                        max_start_ask_volume=max_start_ask_volume,
-                        min_start_ask_price=min_start_ask_price,
-                        min_start_ask_quantity=min_start_ask_quantity,
-                        min_start_ask_volume=min_start_ask_volume,
-                        start_bids_total_quantity=start_bids_total_quantity,
-                        start_bids_total_volume=start_bids_total_volume,
-                        max_start_bid_price=max_start_bid_price,
-                        max_start_bid_quantity=max_start_bid_quantity,
-                        max_start_bid_volume=max_start_bid_volume,
-                        min_start_bid_price=min_start_bid_price,
-                        min_start_bid_quantity=min_start_bid_quantity,
-                        min_start_bid_volume=min_start_bid_volume,
-                        low_price=low_price,
-                        open_price=open_price,
-                        start_timestamp_ms=start_timestamp_ms,
-                        start_trade_id=start_trade_id,
-                        total_quantity=total_quantity,
-                        total_trades_count=total_trades_count,
-                        total_volume=total_volume,
+                result_3 = await session_read_3.execute(
+                    select(
+                        data_set_record_data_db_schema,
+                    ).where(
+                        and_(
+                            data_set_record_data_db_schema.symbol_id == symbol_id,
+                            data_set_record_data_db_schema.data_set_idx == new_final_data_set_idx,
+                            data_set_record_data_db_schema.record_idx == record_idx,
+                        )
+                    ).limit(
+                        1,
                     )
                 )
 
-                session.add(
-                    final_data_set_record_data,
-                )
+                final_data_set_record_data = result_3.scalar_one_or_none()
 
-                buy_quantity = 0
-                buy_trades_count = 0
-                buy_volume = 0
+                if final_data_set_record_data is None:
+                    final_data_set_record_data = (
+                        data_set_record_data_db_schema(
+                            # Primary key fields
+                            symbol_id=symbol_id,
+                            data_set_idx=new_final_data_set_idx,
+                            record_idx=record_idx,
+                            # Attribute fields
+                            buy_quantity=buy_quantity,
+                            buy_trades_count=buy_trades_count,
+                            buy_volume=buy_volume,
+                            close_price=close_price,
+                            end_asks_total_quantity=end_asks_total_quantity,
+                            end_asks_total_volume=end_asks_total_volume,
+                            max_end_ask_price=max_end_ask_price,
+                            max_end_ask_quantity=max_end_ask_quantity,
+                            max_end_ask_volume=max_end_ask_volume,
+                            min_end_ask_price=min_end_ask_price,
+                            min_end_ask_quantity=min_end_ask_quantity,
+                            min_end_ask_volume=min_end_ask_volume,
+                            end_bids_total_quantity=end_bids_total_quantity,
+                            end_bids_total_volume=end_bids_total_volume,
+                            max_end_bid_price=max_end_bid_price,
+                            max_end_bid_quantity=max_end_bid_quantity,
+                            max_end_bid_volume=max_end_bid_volume,
+                            min_end_bid_price=min_end_bid_price,
+                            min_end_bid_quantity=min_end_bid_quantity,
+                            min_end_bid_volume=min_end_bid_volume,
+                            end_timestamp_ms=end_timestamp_ms,
+                            end_trade_id=end_trade_id,
+                            high_price=high_price,
+                            start_asks_total_quantity=start_asks_total_quantity,
+                            start_asks_total_volume=start_asks_total_volume,
+                            max_start_ask_price=max_start_ask_price,
+                            max_start_ask_quantity=max_start_ask_quantity,
+                            max_start_ask_volume=max_start_ask_volume,
+                            min_start_ask_price=min_start_ask_price,
+                            min_start_ask_quantity=min_start_ask_quantity,
+                            min_start_ask_volume=min_start_ask_volume,
+                            start_bids_total_quantity=start_bids_total_quantity,
+                            start_bids_total_volume=start_bids_total_volume,
+                            max_start_bid_price=max_start_bid_price,
+                            max_start_bid_quantity=max_start_bid_quantity,
+                            max_start_bid_volume=max_start_bid_volume,
+                            min_start_bid_price=min_start_bid_price,
+                            min_start_bid_quantity=min_start_bid_quantity,
+                            min_start_bid_volume=min_start_bid_volume,
+                            low_price=low_price,
+                            open_price=open_price,
+                            start_timestamp_ms=start_timestamp_ms,
+                            start_trade_id=start_trade_id,
+                            total_quantity=total_quantity,
+                            total_trades_count=total_trades_count,
+                            total_volume=total_volume,
+                        )
+                    )
 
-                close_price = None
-                high_price = None
-                low_price = None
-                open_price = None
-                start_trade_id = None
-                end_trade_id = None
-
-                start_timestamp_ms = None
-
-                start_asks_total_quantity = 0
-                start_asks_total_volume = 0
-                max_start_ask_price = None
-                max_start_ask_quantity = None
-                max_start_ask_volume = None
-                min_start_ask_price = None
-                min_start_ask_quantity = None
-                min_start_ask_volume = None
-
-                start_bids_total_quantity = 0
-                start_bids_total_volume = 0
-                max_start_bid_price = None
-                max_start_bid_quantity = None
-                max_start_bid_volume = None
-                min_start_bid_price = None
-                min_start_bid_quantity = None
-                min_start_bid_volume = None
-
-                total_quantity = 0
-                total_trades_count = 0
-                total_volume = 0
+                    session_write.add(
+                        final_data_set_record_data,
+                    )
 
                 record_idx += 1
 
-        logger.info(
-            'Final data set records were saved!',
-        )
+                if record_idx % 1000 == 0:
+                    logger.info(
+                        f'Processed {record_idx} records. Committing...',
+                    )
+
+                    await session_write.commit()
+
+        await session_write.commit()
+
+    logger.info(
+        'Final data set records were saved!',
+    )
 
 
 async def start_save_final_data_sets_loop() -> None:
