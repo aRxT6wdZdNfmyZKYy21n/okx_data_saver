@@ -2,6 +2,8 @@ class PlotConstants:
     __slots__ = ()
 
     IntervalNames = [
+        # '100ms',
+        # '1s',
         # '5s',
         # '15s',
         # '30s',
@@ -36,4 +38,4 @@ class PlotConstants:
         'Smoothed (20)',
     ]
 
-    VelocityIntervalName = '1m'
+    VelocityIntervalName = '100ms'
