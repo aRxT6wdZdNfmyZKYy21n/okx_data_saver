@@ -1077,6 +1077,26 @@ class FinPlotChartProcessor:
                 polars.Float64,
             ),
             polars.col(
+                'max_end_ask_price',
+            ).cast(
+                polars.Float64,
+            ),
+            polars.col(
+                'max_end_bid_price',
+            ).cast(
+                polars.Float64,
+            ),
+            polars.col(
+                'min_end_ask_price',
+            ).cast(
+                polars.Float64,
+            ),
+            polars.col(
+                'min_end_bid_price',
+            ).cast(
+                polars.Float64,
+            ),
+            polars.col(
                 'open_price',
             ).cast(
                 polars.Float64,

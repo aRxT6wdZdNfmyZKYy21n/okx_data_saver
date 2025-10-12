@@ -1160,23 +1160,23 @@ class FinPlotChartWindow(QMainWindow):
             max_end_ask_price_series.to_numpy(),
         )
 
-        max_end_bid_price_series = candles_dataframe.get_column(
-            'max_end_bid_price',
-        )
+        # max_end_bid_price_series = candles_dataframe.get_column(
+        #     'max_end_bid_price',
+        # )
+        #
+        # self.__candle_plot_max_bid_price_data_item.setData(
+        #     start_timestamp_ms_numpy_array,
+        #     max_end_bid_price_series.to_numpy(),
+        # )
 
-        self.__candle_plot_max_bid_price_data_item.setData(
-            start_timestamp_ms_numpy_array,
-            max_end_bid_price_series.to_numpy(),
-        )
-
-        min_end_ask_price_series = candles_dataframe.get_column(
-            'min_end_ask_price',
-        )
-
-        self.__candle_plot_min_ask_price_data_item.setData(
-            start_timestamp_ms_numpy_array,
-            min_end_ask_price_series.to_numpy(),
-        )
+        # min_end_ask_price_series = candles_dataframe.get_column(
+        #     'min_end_ask_price',
+        # )
+        #
+        # self.__candle_plot_min_ask_price_data_item.setData(
+        #     start_timestamp_ms_numpy_array,
+        #     min_end_ask_price_series.to_numpy(),
+        # )
 
         min_end_bid_price_series = candles_dataframe.get_column(
             'min_end_bid_price',
