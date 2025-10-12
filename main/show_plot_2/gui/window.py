@@ -58,8 +58,9 @@ if typing.TYPE_CHECKING:
     )
 
 
-# _IS_NEED_DRAW_PRICE_PLOT_WITH_POINTS = False
+_IS_NEED_DRAW_CLOSE_PRICE_PLOT_WITH_POINTS = False
 # _IS_NEED_SHOW_BOLLINGER_BANDS = False
+_IS_NEED_SHOW_CANDLES = False
 # _IS_NEED_SHOW_RSI = False
 _IS_NEED_SHOW_VELOCITY = True
 
@@ -493,27 +494,29 @@ class FinPlotChartWindow(QMainWindow):
         # self.__order_book_volumes_bids_image_item = order_book_volumes_bids_image_item
         self.__candle_plot = candle_plot
 
-        candle_plot_data_item_kwargs = {}
+        candle_plot_close_price_data_item_kwargs = {
+            'pen': (
+                255,
+                255,
+                255,
+            ),
+        }
 
-        # if _IS_NEED_DRAW_PRICE_PLOT_WITH_POINTS:
-        #     candle_plot_data_item_kwargs.update(
-        #         dict(
-        #             pen=(
-        #                 200,
-        #                 200,
-        #                 200,
-        #             ),
-        #             symbolBrush=(
-        #                 127,
-        #                 0,
-        #                 0,
-        #             ),
-        #             symbolPen='w',
-        #         ),
-        #     )
+        if _IS_NEED_DRAW_CLOSE_PRICE_PLOT_WITH_POINTS:
+            candle_plot_close_price_data_item_kwargs.update(
+                dict(
+                    symbolBrush=(
+                        127,
+                        0,
+                        0,
+                    ),
+                    symbolPen='w',
+                ),
+            )
 
-        self.__candle_plot_data_item = candle_plot.plot(
-            name='Candle', **candle_plot_data_item_kwargs
+        self.__candle_plot_close_price_data_item = candle_plot.plot(
+            name='Close price',
+            **candle_plot_close_price_data_item_kwargs,
         )
 
         self.__price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map: defaultdict[
@@ -906,82 +909,83 @@ class FinPlotChartWindow(QMainWindow):
         #     processor.get_candle_dataframe_by_interval_name_map()
         # )
 
-        price_candlestick_item_by_start_timestamp_ms_map = (
-            price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map[
-                main_candle_interval_name
-            ]
-        )
-
-        candle_start_timestamp_ms_set: set[int] = set()
-
-        for candle_row_data in candles_dataframe.iter_rows(named=True):
-            # start_trade_id: int = candle_row_data['start_trade_id']
-
-            candle_close_price: float = candle_row_data['close_price']
-            candle_high_price: float = candle_row_data['high_price']
-            candle_low_price: float = candle_row_data['low_price']
-            candle_open_price: float = candle_row_data['open_price']
-
-            # end_datetime: datetime = candle_row_data['end_datetime']
-            end_timestamp_ms: int = candle_row_data['end_timestamp_ms']
-            # end_trade_id: int = candle_row_data['end_trade_id']
-
-            # start_datetime: datetime = candle_row_data['start_datetime']
-            start_timestamp_ms: int = candle_row_data['start_timestamp_ms']
-
-            candle_start_timestamp_ms_set.add(
-                start_timestamp_ms,
+        if _IS_NEED_SHOW_CANDLES:
+            price_candlestick_item_by_start_timestamp_ms_map = (
+                price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map[
+                    main_candle_interval_name
+                ]
             )
 
-            price_candlestick_item = (
-                price_candlestick_item_by_start_timestamp_ms_map.get(
-                    start_timestamp_ms,
-                )
-            )
+            candle_start_timestamp_ms_set: set[int] = set()
 
-            if price_candlestick_item is not None:
-                price_candlestick_item.update_data(
-                    candle_close_price,
-                    end_timestamp_ms,
-                    candle_high_price,
-                    candle_low_price,
-                    candle_open_price,
-                    start_timestamp_ms,
-                )
-            else:
-                price_candlestick_item = price_candlestick_item_by_start_timestamp_ms_map[
-                    start_timestamp_ms
-                ] = CandlestickItem(
-                    candle_close_price,
-                    end_timestamp_ms,
-                    candle_high_price,
-                    candle_low_price,
-                    candle_open_price,
-                    start_timestamp_ms,
-                )
+            for candle_row_data in candles_dataframe.iter_rows(named=True):
+                # start_trade_id: int = candle_row_data['start_trade_id']
 
-                candle_plot.addItem(
-                    price_candlestick_item,
-                )
+                candle_close_price: float = candle_row_data['close_price']
+                candle_high_price: float = candle_row_data['high_price']
+                candle_low_price: float = candle_row_data['low_price']
+                candle_open_price: float = candle_row_data['open_price']
 
-        for start_timestamp_ms in tuple(
-            price_candlestick_item_by_start_timestamp_ms_map,
-        ):
-            if start_timestamp_ms not in candle_start_timestamp_ms_set:
-                print(
-                    'Removing candlestick item'
-                    f' by start timestamp (ms) {start_timestamp_ms}',
+                # end_datetime: datetime = candle_row_data['end_datetime']
+                end_timestamp_ms: int = candle_row_data['end_timestamp_ms']
+                # end_trade_id: int = candle_row_data['end_trade_id']
+
+                # start_datetime: datetime = candle_row_data['start_datetime']
+                start_timestamp_ms: int = candle_row_data['start_timestamp_ms']
+
+                candle_start_timestamp_ms_set.add(
+                    start_timestamp_ms,
                 )
 
                 price_candlestick_item = (
-                    price_candlestick_item_by_start_timestamp_ms_map.pop(
+                    price_candlestick_item_by_start_timestamp_ms_map.get(
                         start_timestamp_ms,
                     )
                 )
 
-                candle_plot.removeItem(
-                    price_candlestick_item,
-                )
+                if price_candlestick_item is not None:
+                    price_candlestick_item.update_data(
+                        candle_close_price,
+                        end_timestamp_ms,
+                        candle_high_price,
+                        candle_low_price,
+                        candle_open_price,
+                        start_timestamp_ms,
+                    )
+                else:
+                    price_candlestick_item = price_candlestick_item_by_start_timestamp_ms_map[
+                        start_timestamp_ms
+                    ] = CandlestickItem(
+                        candle_close_price,
+                        end_timestamp_ms,
+                        candle_high_price,
+                        candle_low_price,
+                        candle_open_price,
+                        start_timestamp_ms,
+                    )
+
+                    candle_plot.addItem(
+                        price_candlestick_item,
+                    )
+
+            for start_timestamp_ms in tuple(
+                price_candlestick_item_by_start_timestamp_ms_map,
+            ):
+                if start_timestamp_ms not in candle_start_timestamp_ms_set:
+                    print(
+                        'Removing candlestick item'
+                        f' by start timestamp (ms) {start_timestamp_ms}',
+                    )
+
+                    price_candlestick_item = (
+                        price_candlestick_item_by_start_timestamp_ms_map.pop(
+                            start_timestamp_ms,
+                        )
+                    )
+
+                    candle_plot.removeItem(
+                        price_candlestick_item,
+                    )
 
         # extreme_lines_array = processor.get_extreme_lines_array()
         #
@@ -1070,7 +1074,7 @@ class FinPlotChartWindow(QMainWindow):
             'close_price',
         )
 
-        self.__candle_plot_data_item.setData(
+        self.__candle_plot_close_price_data_item.setData(
             start_timestamp_ms_numpy_array,
             close_price_series.to_numpy(),
         )
