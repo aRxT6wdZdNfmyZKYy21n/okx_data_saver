@@ -105,6 +105,11 @@ async def save_final_data_set(
             last_final_data_set_record_end_timestamp_ms = None
             new_final_data_set_idx = 0
 
+        logger.info(
+            'last_final_data_set_record_end_timestamp_ms'
+            f': {last_final_data_set_record_end_timestamp_ms}'
+        )
+
         # Step 2: get start OKXOrderBookData2 Snapshot
 
         order_book_data_db_schema = (
@@ -112,20 +117,36 @@ async def save_final_data_set(
         )
 
         async with session_read_1.begin():
+            order_by_expressions = [
+                order_book_data_db_schema.symbol_id.asc(),
+            ]
+
             if last_final_data_set_record_end_timestamp_ms is not None:
                 if _IS_RESCUE_MODE_ENABLED:
+                    order_by_expressions.append(
+                        order_book_data_db_schema.timestamp_ms.desc(),
+                    )
+
                     where_and_expression = and_(
                         order_book_data_db_schema.symbol_id == symbol_id,
                         order_book_data_db_schema.action_id == OKXOrderBookActionId.Snapshot,
                         order_book_data_db_schema.timestamp_ms < last_final_data_set_record_end_timestamp_ms,
                     )
                 else:
+                    order_by_expressions.append(
+                        order_book_data_db_schema.timestamp_ms.asc(),
+                    )
+
                     where_and_expression = and_(
                         order_book_data_db_schema.symbol_id == symbol_id,
                         order_book_data_db_schema.action_id == OKXOrderBookActionId.Snapshot,
                         order_book_data_db_schema.timestamp_ms >= last_final_data_set_record_end_timestamp_ms,
                     )
             else:
+                order_by_expressions.append(
+                    order_book_data_db_schema.timestamp_ms.asc(),
+                )
+
                 where_and_expression = and_(
                     order_book_data_db_schema.symbol_id == symbol_id,
                     order_book_data_db_schema.action_id == OKXOrderBookActionId.Snapshot,
@@ -138,8 +159,7 @@ async def save_final_data_set(
                 ).where(
                     where_and_expression,
                 ).order_by(
-                    order_book_data_db_schema.symbol_id.asc(),
-                    order_book_data_db_schema.timestamp_ms.asc(),
+                    *order_by_expressions,
                 ).limit(
                     1,
                 ),
@@ -341,13 +361,33 @@ async def save_final_data_set(
                             _
                         ) = ask_list
 
-                        price = Decimal(
-                            price_raw,
-                        )
+                        try:
+                            price = Decimal(
+                                price_raw,
+                            )
+                        except Exception as exception:
+                            logger.error(
+                                f'Could not convert ask price {price_raw!r} to decimal'
+                                f' (timestamp_ms: {current_order_book_data.timestamp_ms})'
+                                ': handled exception'
+                                f': {"".join(traceback.format_exception(exception))}',
+                            )
 
-                        quantity = Decimal(
-                            quantity_raw,
-                        )
+                            continue
+
+                        try:
+                            quantity = Decimal(
+                                quantity_raw,
+                            )
+                        except Exception as exception:
+                            logger.error(
+                                f'Could not convert ask quantity {quantity_raw!r} to decimal'
+                                f' (timestamp_ms: {current_order_book_data.timestamp_ms})'
+                                ': handled exception'
+                                f': {"".join(traceback.format_exception(exception))}',
+                            )
+
+                            continue
 
                         assert quantity, (
                             start_timestamp_ms,
@@ -366,13 +406,33 @@ async def save_final_data_set(
                             _
                         ) = bid_list
 
-                        price = Decimal(
-                            price_raw,
-                        )
+                        try:
+                            price = Decimal(
+                                price_raw,
+                            )
+                        except Exception as exception:
+                            logger.error(
+                                f'Could not convert bid price {price_raw!r} to decimal'
+                                f' (timestamp_ms: {current_order_book_data.timestamp_ms})'
+                                ': handled exception'
+                                f': {"".join(traceback.format_exception(exception))}',
+                            )
 
-                        quantity = Decimal(
-                            quantity_raw,
-                        )
+                            continue
+
+                        try:
+                            quantity = Decimal(
+                                quantity_raw,
+                            )
+                        except Exception as exception:
+                            logger.error(
+                                f'Could not convert bid quantity {quantity_raw!r} to decimal'
+                                f' (timestamp_ms: {current_order_book_data.timestamp_ms})'
+                                ': handled exception'
+                                f': {"".join(traceback.format_exception(exception))}',
+                            )
+
+                            continue
 
                         assert quantity, (
                             start_timestamp_ms,
@@ -493,13 +553,33 @@ async def save_final_data_set(
                         _
                     ) = ask_list
 
-                    price = Decimal(
-                        price_raw,
-                    )
+                    try:
+                        price = Decimal(
+                            price_raw,
+                        )
+                    except Exception as exception:
+                        logger.error(
+                            f'Could not convert ask price {price_raw!r} to decimal'
+                            f' (timestamp_ms: {next_order_book_data.timestamp_ms})'
+                            ': handled exception'
+                            f': {"".join(traceback.format_exception(exception))}',
+                        )
 
-                    quantity = Decimal(
-                        quantity_raw,
-                    )
+                        continue
+
+                    try:
+                        quantity = Decimal(
+                            quantity_raw,
+                        )
+                    except Exception as exception:
+                        logger.error(
+                            f'Could not convert ask quantity {quantity_raw!r} to decimal'
+                            f' (timestamp_ms: {next_order_book_data.timestamp_ms})'
+                            ': handled exception'
+                            f': {"".join(traceback.format_exception(exception))}',
+                        )
+
+                        continue
 
                     if quantity:
                         ask_quantity_by_price_map[price] = quantity
@@ -517,13 +597,33 @@ async def save_final_data_set(
                         _
                     ) = bid_list
 
-                    price = Decimal(
-                        price_raw,
-                    )
+                    try:
+                        price = Decimal(
+                            price_raw,
+                        )
+                    except Exception as exception:
+                        logger.error(
+                            f'Could not convert bid price {price_raw!r} to decimal'
+                            f' (timestamp_ms: {next_order_book_data.timestamp_ms})'
+                            ': handled exception'
+                            f': {"".join(traceback.format_exception(exception))}',
+                        )
 
-                    quantity = Decimal(
-                        quantity_raw,
-                    )
+                        continue
+
+                    try:
+                        quantity = Decimal(
+                            quantity_raw,
+                        )
+                    except Exception as exception:
+                        logger.error(
+                            f'Could not convert bid quantity {quantity_raw!r} to decimal'
+                            f' (timestamp_ms: {next_order_book_data.timestamp_ms})'
+                            ': handled exception'
+                            f': {"".join(traceback.format_exception(exception))}',
+                        )
+
+                        continue
 
                     if quantity:
                         bid_quantity_by_price_map[price] = quantity
