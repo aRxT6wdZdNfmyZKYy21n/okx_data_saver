@@ -519,6 +519,60 @@ class FinPlotChartWindow(QMainWindow):
             **candle_plot_close_price_data_item_kwargs,
         )
 
+        self.__candle_plot_high_price_data_item = candle_plot.plot(
+            name='High price',
+            pen=(
+                127,
+                127,
+                127,
+            ),
+        )
+
+        self.__candle_plot_low_price_data_item = candle_plot.plot(
+            name='Low price',
+            pen=(
+                127,
+                127,
+                127,
+            ),
+        )
+
+        self.__candle_plot_max_ask_price_data_item = candle_plot.plot(
+            name='Max ask price',
+            pen=(
+                0,  # Red
+                127,  # Green
+                0,
+            ),
+        )
+
+        self.__candle_plot_max_bid_price_data_item = candle_plot.plot(
+            name='Max bid price',
+            pen=(
+                127,  # Red
+                0,  # Green
+                0,
+            ),
+        )
+
+        self.__candle_plot_min_ask_price_data_item = candle_plot.plot(
+            name='Min ask price',
+            pen=(
+                0,  # Red
+                127,  # Green
+                0,
+            ),
+        )
+
+        self.__candle_plot_min_bid_price_data_item = candle_plot.plot(
+            name='Min bid price',
+            pen=(
+                127,  # Red
+                0,  # Green
+                0,
+            ),
+        )
+
         self.__price_candlestick_item_by_start_timestamp_ms_map_by_interval_name_map: defaultdict[
             str, dict[int, CandlestickItem]
         ] = defaultdict(
@@ -1077,6 +1131,60 @@ class FinPlotChartWindow(QMainWindow):
         self.__candle_plot_close_price_data_item.setData(
             start_timestamp_ms_numpy_array,
             close_price_series.to_numpy(),
+        )
+
+        high_price_series = candles_dataframe.get_column(
+            'high_price',
+        )
+
+        self.__candle_plot_high_price_data_item.setData(
+            start_timestamp_ms_numpy_array,
+            high_price_series.to_numpy(),
+        )
+
+        low_price_series = candles_dataframe.get_column(
+            'low_price',
+        )
+
+        self.__candle_plot_low_price_data_item.setData(
+            start_timestamp_ms_numpy_array,
+            low_price_series.to_numpy(),
+        )
+
+        max_end_ask_price_series = candles_dataframe.get_column(
+            'max_end_ask_price',
+        )
+
+        self.__candle_plot_max_ask_price_data_item.setData(
+            start_timestamp_ms_numpy_array,
+            max_end_ask_price_series.to_numpy(),
+        )
+
+        max_end_bid_price_series = candles_dataframe.get_column(
+            'max_end_bid_price',
+        )
+
+        self.__candle_plot_max_bid_price_data_item.setData(
+            start_timestamp_ms_numpy_array,
+            max_end_bid_price_series.to_numpy(),
+        )
+
+        min_end_ask_price_series = candles_dataframe.get_column(
+            'min_end_ask_price',
+        )
+
+        self.__candle_plot_min_ask_price_data_item.setData(
+            start_timestamp_ms_numpy_array,
+            min_end_ask_price_series.to_numpy(),
+        )
+
+        min_end_bid_price_series = candles_dataframe.get_column(
+            'min_end_bid_price',
+        )
+
+        self.__candle_plot_min_bid_price_data_item.setData(
+            start_timestamp_ms_numpy_array,
+            min_end_bid_price_series.to_numpy(),
         )
 
         # if _IS_NEED_SHOW_RSI:
