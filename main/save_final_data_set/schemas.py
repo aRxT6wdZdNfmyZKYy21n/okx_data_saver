@@ -349,6 +349,10 @@ class OKXDataSetRecordData(Base):
     # - sell_volume_percent = sell_volume / total_volume
     # - sell_volume_by_max_percent = sell_volume / max_volume
     # - sell_price_average = sell_volume / sell_quantity
+    # - delta_quantity = buy_quantity - sell_quantity
+    # - delta_quantity_percent = delta_quantity / buy_quantity
+    # - delta_volume = buy_volume - sell_volume
+    # - delta_volume_percent = delta_volume / buy_volume
 
     start_timestamp_ms: Mapped[int] = Column(
         BigInteger,
