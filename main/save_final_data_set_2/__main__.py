@@ -8,7 +8,10 @@ from decimal import (
 from sqlalchemy import (
     and_,
     select,
+    update,
 )
+
+from main.save_final_data_set_2.schemas import OKXDataSetRecordData_2
 
 try:
     import uvloop
@@ -19,7 +22,6 @@ import main.save_order_books.schemas
 import main.save_trades.schemas
 import main.save_final_data_set_2.schemas
 from enumerations import (
-    OKXOrderBookActionId,
     SymbolId,
 )
 from main.save_final_data_set_2.globals import (
@@ -57,7 +59,7 @@ async def save_final_data_set_2(
         f'Saving final data set 2 for symbol with ID {symbol_id.name}'
     )
 
-    final_data_set_record_db_schema = (
+    final_data_set_record_2_db_schema = (
         main.save_final_data_set_2.schemas.OKXDataSetRecordData_2
     )
 
@@ -65,7 +67,6 @@ async def save_final_data_set_2(
 
     async with (
         postgres_db_session_maker() as session_read_1,
-        postgres_db_session_maker() as session_read_2,
         postgres_db_session_maker() as session_write,
     ):
         # Step 1: get last final data set 2 record data
@@ -73,12 +74,12 @@ async def save_final_data_set_2(
         async with session_read_1.begin():
             result = await session_read_1.execute(
                 select(
-                    final_data_set_record_db_schema
+                    final_data_set_record_2_db_schema
                 ).where(
-                    final_data_set_record_db_schema.symbol_id == symbol_id,
+                    final_data_set_record_2_db_schema.symbol_id == symbol_id,
                 ).order_by(
-                    final_data_set_record_db_schema.symbol_id.asc(),
-                    final_data_set_record_db_schema.start_trade_id.desc(),
+                    final_data_set_record_2_db_schema.symbol_id.asc(),
+                    final_data_set_record_2_db_schema.start_trade_id.desc(),
                 ).limit(
                     1,
                 ),
@@ -93,6 +94,7 @@ async def save_final_data_set_2(
         buy_quantity: Decimal
         buy_trades_count: int
         buy_volume: Decimal
+        is_buy: bool | None
 
         # Prices
 
@@ -106,7 +108,7 @@ async def save_final_data_set_2(
         # Timestamp
 
         end_timestamp_ms: int | None
-        start_timestamp_ms: int | None
+        last_final_data_set_record_start_timestamp_ms: int | None
 
         # Total
 
@@ -120,6 +122,7 @@ async def save_final_data_set_2(
             buy_quantity = last_final_data_set_record_data.buy_quantity
             buy_trades_count = last_final_data_set_record_data.buy_trades_count
             buy_volume = last_final_data_set_record_data.buy_volume
+            is_buy = buy_trades_count > 0  # Only for first (initial) level
 
             # Prices
 
@@ -133,7 +136,7 @@ async def save_final_data_set_2(
             # Timestamp
 
             end_timestamp_ms = last_final_data_set_record_data.end_timestamp_ms
-            start_timestamp_ms = last_final_data_set_record_data.start_timestamp_ms
+            last_final_data_set_record_start_timestamp_ms = last_final_data_set_record_data.start_timestamp_ms
 
             total_quantity = last_final_data_set_record_data.total_quantity
             total_trades_count = last_final_data_set_record_data.total_trades_count
@@ -142,6 +145,7 @@ async def save_final_data_set_2(
             buy_quantity = Decimal(0)
             buy_trades_count = 0
             buy_volume = Decimal(0)
+            is_buy = None
 
             close_price = None
             high_price = None
@@ -151,11 +155,13 @@ async def save_final_data_set_2(
             end_trade_id = None
 
             end_timestamp_ms = None
-            start_timestamp_ms = None
+            last_final_data_set_record_start_timestamp_ms = None
 
             total_quantity = Decimal(0)
             total_trades_count = 0
             total_volume = Decimal(0)
+
+        start_timestamp_ms = last_final_data_set_record_start_timestamp_ms
 
         logger.info(
             'start_timestamp_ms'
@@ -206,141 +212,211 @@ async def save_final_data_set_2(
         if not trades_count:
             return
 
-        async with session_read_1.begin():
-            # Processing trades  # TODO
+        # Processing trades  # TODO
 
-            for trade_data in trades:
-                trade_id = trade_data.trade_id
+        data_set_records_2: list[OKXDataSetRecordData_2] = []
 
-                if start_trade_id is None:
-                    start_trade_id = trade_id
-
-                trade_timestamp_ms = trade_data.timestamp_ms
-
-                end_trade_id = trade_id
-
-                trade_price = trade_data.price
-
-                if high_price is None or trade_price > high_price:
-                    high_price = trade_price
-
-                if low_price is None or trade_price < low_price:
-                    low_price = trade_price
-
-                if open_price is None:
-                    open_price = trade_price
-
-                close_price = trade_price
-
-                trade_quantity = trade_data.quantity
-
-                trade_volume = (
-                    trade_price
-                    * trade_quantity
+        for trade_idx, trade_data in enumerate(
+                trades,
+        ):
+            if trade_idx % 1000 == 0:
+                logger.info(
+                    f'Processed {trade_idx} records. Committing...',
                 )
 
-                if trade_data.is_buy:
-                    buy_quantity += trade_quantity
-                    buy_trades_count += 1
-                    buy_volume += trade_volume
+            if is_buy is None:
+                is_buy = trade_data.is_buy
+            else:
+                if is_buy != trade_data.is_buy:
+                    # Flush
 
-                total_quantity += trade_quantity
-                total_trades_count += 1
-                total_volume += trade_volume
+                    data_set_records_2.append(
+                        OKXDataSetRecordData_2(
+                            # Primary key fields
+                            symbol_id=symbol_id,
+                            start_trade_id=start_trade_id,
+                            # Attribute fields
+                            buy_quantity=buy_quantity,
+                            buy_trades_count=buy_trades_count,
+                            buy_volume=buy_volume,
+                            close_price=close_price,
+                            end_timestamp_ms=end_timestamp_ms,
+                            end_trade_id=end_trade_id,
+                            high_price=high_price,
+                            low_price=low_price,
+                            open_price=open_price,
+                            start_timestamp_ms=start_timestamp_ms,
+                            total_quantity=total_quantity,
+                            total_trades_count=total_trades_count,
+                            total_volume=total_volume,
+                        )
+                    )
 
-            if not total_trades_count:
-                continue
+                    buy_quantity = Decimal(0)
+                    buy_trades_count = 0
+                    buy_volume = Decimal(0)
+                    is_buy = None
 
+                    close_price = None
+                    high_price = None
+                    low_price = None
+                    open_price = None
+                    start_trade_id = None
+                    end_trade_id = None
+
+                    end_timestamp_ms = None
+                    start_timestamp_ms = None
+
+                    total_quantity = Decimal(0)
+                    total_trades_count = 0
+                    total_volume = Decimal(0)
+
+                    continue
+
+            trade_id = trade_data.trade_id
+
+            if start_trade_id is None:
+                start_trade_id = trade_id
+
+            end_trade_id = trade_id
+
+            trade_timestamp_ms = trade_data.timestamp_ms
+
+            if start_timestamp_ms is None:
+                start_timestamp_ms = trade_timestamp_ms
+
+            end_timestamp_ms = trade_timestamp_ms
+
+            trade_price = trade_data.price
+
+            if high_price is None or trade_price > high_price:
+                high_price = trade_price
+
+            if low_price is None or trade_price < low_price:
+                low_price = trade_price
+
+            if open_price is None:
+                open_price = trade_price
+
+            close_price = trade_price
+
+            trade_quantity = trade_data.quantity
+
+            trade_volume = (
+                trade_price
+                * trade_quantity
+            )
+
+            if trade_data.is_buy:
+                buy_quantity += trade_quantity
+                buy_trades_count += 1
+                buy_volume += trade_volume
+
+            total_quantity += trade_quantity
+            total_trades_count += 1
+            total_volume += trade_volume
+
+        if total_trades_count:
+            assert is_buy is not None, None
             assert open_price is not None, None
             assert close_price is not None, None
             assert high_price is not None, None
             assert low_price is not None, None
 
-            result_3 = await session_read_2.execute(
-                select(
-                    data_set_record_data_db_schema,
-                ).where(
-                    and_(
-                        data_set_record_data_db_schema.symbol_id == symbol_id,
-                        data_set_record_data_db_schema.data_set_idx == new_final_data_set_idx,
-                        data_set_record_data_db_schema.record_idx == record_idx,
-                    )
-                ).limit(
-                    1,
+            assert start_trade_id is not None, None
+            assert end_trade_id is not None, None
+
+            assert end_timestamp_ms is not None, None
+            assert start_timestamp_ms is not None, None
+
+            assert total_quantity, None
+            assert total_volume, None
+
+            # Flush
+
+            data_set_records_2.append(
+                OKXDataSetRecordData_2(
+                    # Primary key fields
+                    symbol_id=symbol_id,
+                    start_trade_id=start_trade_id,
+                    # Attribute fields
+                    buy_quantity=buy_quantity,
+                    buy_trades_count=buy_trades_count,
+                    buy_volume=buy_volume,
+                    close_price=close_price,
+                    end_timestamp_ms=end_timestamp_ms,
+                    end_trade_id=end_trade_id,
+                    high_price=high_price,
+                    low_price=low_price,
+                    open_price=open_price,
+                    start_timestamp_ms=start_timestamp_ms,
+                    total_quantity=total_quantity,
+                    total_trades_count=total_trades_count,
+                    total_volume=total_volume,
                 )
             )
 
-            final_data_set_record_data = result_3.scalar_one_or_none()
+            buy_quantity = Decimal(0)
+            buy_trades_count = 0
+            buy_volume = Decimal(0)
+            is_buy = None
 
-            if final_data_set_record_data is None:
-                final_data_set_record_data = (
-                    data_set_record_data_db_schema(
-                        # Primary key fields
-                        symbol_id=symbol_id,
-                        data_set_idx=new_final_data_set_idx,
-                        record_idx=record_idx,
-                        # Attribute fields
-                        buy_quantity=buy_quantity,
-                        buy_trades_count=buy_trades_count,
-                        buy_volume=buy_volume,
-                        close_price=close_price,
-                        end_asks_total_quantity=end_asks_total_quantity,
-                        end_asks_total_volume=end_asks_total_volume,
-                        max_end_ask_price=max_end_ask_price,
-                        max_end_ask_quantity=max_end_ask_quantity,
-                        max_end_ask_volume=max_end_ask_volume,
-                        min_end_ask_price=min_end_ask_price,
-                        min_end_ask_quantity=min_end_ask_quantity,
-                        min_end_ask_volume=min_end_ask_volume,
-                        end_bids_total_quantity=end_bids_total_quantity,
-                        end_bids_total_volume=end_bids_total_volume,
-                        max_end_bid_price=max_end_bid_price,
-                        max_end_bid_quantity=max_end_bid_quantity,
-                        max_end_bid_volume=max_end_bid_volume,
-                        min_end_bid_price=min_end_bid_price,
-                        min_end_bid_quantity=min_end_bid_quantity,
-                        min_end_bid_volume=min_end_bid_volume,
-                        end_timestamp_ms=end_timestamp_ms,
-                        end_trade_id=end_trade_id,
-                        high_price=high_price,
-                        start_asks_total_quantity=start_asks_total_quantity,
-                        start_asks_total_volume=start_asks_total_volume,
-                        max_start_ask_price=max_start_ask_price,
-                        max_start_ask_quantity=max_start_ask_quantity,
-                        max_start_ask_volume=max_start_ask_volume,
-                        min_start_ask_price=min_start_ask_price,
-                        min_start_ask_quantity=min_start_ask_quantity,
-                        min_start_ask_volume=min_start_ask_volume,
-                        start_bids_total_quantity=start_bids_total_quantity,
-                        start_bids_total_volume=start_bids_total_volume,
-                        max_start_bid_price=max_start_bid_price,
-                        max_start_bid_quantity=max_start_bid_quantity,
-                        max_start_bid_volume=max_start_bid_volume,
-                        min_start_bid_price=min_start_bid_price,
-                        min_start_bid_quantity=min_start_bid_quantity,
-                        min_start_bid_volume=min_start_bid_volume,
-                        low_price=low_price,
-                        open_price=open_price,
-                        start_timestamp_ms=start_timestamp_ms,
-                        start_trade_id=start_trade_id,
-                        total_quantity=total_quantity,
-                        total_trades_count=total_trades_count,
-                        total_volume=total_volume,
+            close_price = None
+            high_price = None
+            low_price = None
+            open_price = None
+            start_trade_id = None
+            end_trade_id = None
+
+            end_timestamp_ms = None
+            start_timestamp_ms = None
+
+            total_quantity = Decimal(0)
+            total_trades_count = 0
+            total_volume = Decimal(0)
+
+        async with (
+            session_read_1.begin(),
+            session_write.begin()
+        ):
+            for data_set_record_2 in data_set_records_2:
+                if last_final_data_set_record_start_timestamp_ms is not None and (
+                    data_set_record_2.start_timestamp_ms
+                    == last_final_data_set_record_start_timestamp_ms
+                ):
+                    # Update
+
+                    await session_write.execute(
+                        update(
+                            final_data_set_record_2_db_schema,
+                        )
+                        .values(
+                            # Attribute fields
+                            buy_quantity=data_set_record_2.buy_quantity,
+                            buy_trades_count=data_set_record_2.buy_trades_count,
+                            buy_volume=data_set_record_2.buy_volume,
+                            close_price=data_set_record_2.close_price,
+                            end_timestamp_ms=data_set_record_2.end_timestamp_ms,
+                            end_trade_id=data_set_record_2.end_trade_id,
+                            high_price=data_set_record_2.high_price,
+                            low_price=data_set_record_2.low_price,
+                            open_price=data_set_record_2.open_price,
+                            start_timestamp_ms=data_set_record_2.start_timestamp_ms,
+                            total_quantity=data_set_record_2.total_quantity,
+                            total_trades_count=data_set_record_2.total_trades_count,
+                            total_volume=data_set_record_2.total_volume,
+                        )
+                        .where(
+                            and_(
+                                final_data_set_record_2_db_schema.symbol_id == symbol_id,
+                                final_data_set_record_2_db_schema.start_trade_id == start_trade_id,
+                            ),
+                        )
                     )
-                )
-
-                session_write.add(
-                    final_data_set_record_data,
-                )
-
-            record_idx += 1
-
-            if record_idx % 1000 == 0:
-                logger.info(
-                    f'Processed {record_idx} records. Committing...',
-                )
-
-                await session_write.commit()
+                else:
+                    session_write.add(
+                        data_set_record_2,
+                    )
 
         await session_write.commit()
 

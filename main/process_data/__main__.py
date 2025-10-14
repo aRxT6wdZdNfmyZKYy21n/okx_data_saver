@@ -2,8 +2,6 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-import polars
-from chrono import Timer
 from polars import DataFrame
 from sqlalchemy import text
 
@@ -13,21 +11,13 @@ from constants.symbol import (
 from enumerations import (
     SymbolId,
 )
-from main.process_data.hybrid_data_processor import g_cpp_data_processor
+from main.process_data.data_processor import g_data_processor_v2
+from main.process_data.data_set_record_fetcher import g_data_set_record_fetcher
 from main.process_data.monitoring import g_error_handler, g_system_monitor
 from main.process_data.redis_service import g_redis_data_service
 from main.process_data.schemas import ProcessingStatus, SymbolMetadata
-from main.save_order_books.schemas import (
-    OKXOrderBookData2,
-)
-from main.save_trades.schemas import (
-    OKXTradeData2,
-)
 from main.show_plot.globals import (
     g_globals,
-)
-from settings import (
-    settings,
 )
 from utils.redis import g_redis_manager
 
@@ -48,7 +38,7 @@ _SYMBOL_NAMES = [
 ]
 
 
-class DataProcessingDaemon:
+class DataProcessingDaemonV2:
     __slots__ = ()
 
     async def start_update_loop(
@@ -83,16 +73,6 @@ class DataProcessingDaemon:
         # Обновляем список доступных символов
         await self.__update_current_available_symbol_name_set()
 
-        """
-        async with asyncio.TaskGroup() as task_group:
-            for symbol_name in _SYMBOL_NAMES:
-                task_group.create_task(
-                    self.__update_symbol(
-                        symbol_name,
-                    )
-                )
-        """
-
         for symbol_name in _SYMBOL_NAMES:
             await self.__update_symbol(
                 symbol_name,
@@ -115,22 +95,22 @@ class DataProcessingDaemon:
         )
 
         try:
-            # Получаем данные о сделках
-            trades_df = await self.__fetch_trades_dataframe(
-                min_trade_id=0,  # TODO: получать из Redis
+            # Получаем агрегированные данные
+            data_set_df = await self.__fetch_data_set_records_dataframe(
+                min_start_trade_id=0,  # TODO: получать из Redis
                 symbol_id=symbol_id,
             )
 
-            if trades_df is not None and trades_df.height > 0:
+            if data_set_df is not None and data_set_df.height > 0:
                 # Обрабатываем все данные символа
                 await self.__process_symbol_data(
                     symbol_id=symbol_id,
                     symbol_name=symbol_name,
-                    trades_df=trades_df,
+                    data_set_df=data_set_df,
                 )
 
                 logger.info(
-                    f'Processed trades data for {symbol_name}: {trades_df.height} records',
+                    f'Processed data set records for {symbol_name}: {data_set_df.height} records',
                 )
 
             # Обновляем статус обработки
@@ -172,19 +152,20 @@ class DataProcessingDaemon:
     async def __process_symbol_data(
         symbol_id: SymbolId,
         symbol_name: str,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
     ) -> None:
         """Полная обработка данных символа."""
-        # Сохраняем основные данные о сделках
-        price_series = trades_df.get_column('price')
+        # Сохраняем основные агрегированные данные
+        price_series = data_set_df.get_column('close_price')
         min_price = float(price_series.min())
         max_price = float(price_series.max())
-        min_trade_id = int(trades_df.get_column('trade_id').min())
-        max_trade_id = int(trades_df.get_column('trade_id').max())
+        min_trade_id = int(data_set_df.get_column('start_trade_id').min())
+        max_trade_id = int(data_set_df.get_column('end_trade_id').max())
 
+        # Сохраняем агрегированные данные в Redis (аналогично trades_data)
         await g_redis_data_service.save_trades_data(
             symbol_id=symbol_id,
-            trades_df=trades_df,
+            trades_df=data_set_df,  # Передаем агрегированные данные
             min_trade_id=min_trade_id,
             max_trade_id=max_trade_id,
             min_price=min_price,
@@ -192,9 +173,9 @@ class DataProcessingDaemon:
         )
 
         # Обрабатываем все производные данные
-        await g_cpp_data_processor.process_trades_data(
+        await g_data_processor_v2.process_data_set_records(
             symbol_id=symbol_id,
-            trades_df=trades_df,
+            data_set_df=data_set_df,
         )
 
         # Обновляем метаданные символа
@@ -217,153 +198,15 @@ class DataProcessingDaemon:
         )
 
     @staticmethod
-    async def __fetch_trades_dataframe(
-        min_trade_id: int,
+    async def __fetch_data_set_records_dataframe(
+        min_start_trade_id: int,
         symbol_id: SymbolId,
     ) -> DataFrame | None:
-        """Получение данных о сделках из базы данных."""
-        with Timer() as timer:
-            trades_dataframe = polars.read_database_uri(
-                engine='connectorx',
-                query=(
-                    'SELECT'
-                    # Primary key fields
-                    ' trade_id'
-                    # Attribute fields
-                    ', is_buy'
-                    ', price'
-                    ', quantity'
-                    ', timestamp_ms'
-                    f' FROM {OKXTradeData2.__tablename__}'
-                    ' WHERE'
-                    f' symbol_id = {symbol_id.name!r}'
-                    f' AND trade_id >= {min_trade_id!r}'
-                    ' ORDER BY'
-                    ' symbol_id ASC'
-                    ', trade_id DESC'
-                    # f' LIMIT {20_000_000!r}'
-                    # f' LIMIT {15_000_000!r}'
-                    # f' LIMIT {10_000_000!r}'
-                    # f' LIMIT {5_000_000!r}'
-                    f' LIMIT {2_000_000!r}'
-                    # f' LIMIT {100_000!r}'
-                    # f' LIMIT {1_000!r}'
-                    ';'
-                ),
-                uri=(
-                    'postgresql'
-                    '://'
-                    f'{settings.POSTGRES_DB_USER_NAME}'
-                    ':'
-                    f'{settings.POSTGRES_DB_PASSWORD.get_secret_value()}'
-                    '@'
-                    f'{settings.POSTGRES_DB_HOST_NAME}'
-                    ':'
-                    f'{settings.POSTGRES_DB_PORT}'
-                    '/'
-                    f'{settings.POSTGRES_DB_NAME}'
-                ),
-            )
-
-        logger.info(f'Fetched trades dataframe by {timer.elapsed:.3f}s')
-
-        trades_dataframe = trades_dataframe.with_columns(
-            polars.col(
-                'timestamp_ms',
-            )
-            .cast(
-                polars.Datetime(
-                    time_unit='ms',
-                    time_zone=UTC,
-                ),
-            )
-            .alias(
-                'datetime',
-            ),
-            polars.col(
-                'price',
-            ).cast(
-                polars.Float64,
-            ),
-            polars.col(
-                'quantity',
-            ).cast(
-                polars.Float64,
-            ),
+        """Получение агрегированных данных из базы данных."""
+        return await g_data_set_record_fetcher.fetch_data_set_records_dataframe(
+            min_start_trade_id=min_start_trade_id,
+            symbol_id=symbol_id,
         )
-
-        trades_dataframe = trades_dataframe.sort(
-            'trade_id',
-        )
-
-        return trades_dataframe
-
-    @staticmethod
-    async def __fetch_order_book_dataframe(
-        max_timestamp_ms: int,
-        min_timestamp_ms: int,
-        symbol_id: SymbolId,
-    ) -> DataFrame | None:
-        """Получение данных о стакане заявок из базы данных."""
-        with Timer() as timer:
-            order_book_dataframe = polars.read_database_uri(
-                query=(
-                    'SELECT'
-                    # Primary key fields
-                    ' timestamp_ms'
-                    # Attribute fields
-                    ', action_id'
-                    ', asks'
-                    ', bids'
-                    f' FROM {OKXOrderBookData2.__tablename__}'
-                    f' WHERE symbol_id = {symbol_id.name!r}'
-                    f' AND timestamp_ms >= {min_timestamp_ms!r}'
-                    f' AND timestamp_ms <= {max_timestamp_ms!r}'
-                    ' ORDER BY'
-                    ' symbol_id ASC'
-                    ', timestamp_ms ASC'
-                    ';'
-                ),
-                engine='connectorx',
-                uri=(
-                    'postgresql'
-                    '://'
-                    f'{settings.POSTGRES_DB_USER_NAME}'
-                    ':'
-                    f'{settings.POSTGRES_DB_PASSWORD.get_secret_value()}'
-                    '@'
-                    f'{settings.POSTGRES_DB_HOST_NAME}'
-                    ':'
-                    f'{settings.POSTGRES_DB_PORT}'
-                    '/'
-                    f'{settings.POSTGRES_DB_NAME}'
-                ),
-            )
-
-        logger.info(
-            f'Fetched order book dataframe by {timer.elapsed:.3f}s',
-        )
-
-        order_book_dataframe = order_book_dataframe.with_columns(
-            polars.col(
-                'timestamp_ms',
-            )
-            .cast(
-                polars.Datetime(
-                    time_unit='ms',
-                    time_zone=UTC,
-                ),
-            )
-            .alias(
-                'datetime',
-            )
-        )
-
-        order_book_dataframe = order_book_dataframe.sort(
-            'datetime',
-        )
-
-        return order_book_dataframe
 
     @staticmethod
     async def __update_current_available_symbol_name_set() -> None:
@@ -378,14 +221,14 @@ class DataProcessingDaemon:
 WITH RECURSIVE symbol_id_cte(symbol_id) AS 
 (
   (
-    SELECT okx_trade_data_2.symbol_id AS symbol_id 
-    FROM okx_trade_data_2 ORDER BY okx_trade_data_2.symbol_id ASC 
+    SELECT okx_data_set_record_data_2.symbol_id AS symbol_id 
+    FROM okx_data_set_record_data_2 ORDER BY okx_data_set_record_data_2.symbol_id ASC 
     LIMIT 1
   )
   UNION ALL
   SELECT (
     SELECT symbol_id
-    FROM okx_trade_data_2
+    FROM okx_data_set_record_data_2
     WHERE symbol_id > cte.symbol_id
     ORDER BY symbol_id ASC
     LIMIT 1
@@ -446,7 +289,7 @@ async def main() -> None:
     await g_redis_manager.connect()
 
     try:
-        data_processing_daemon = DataProcessingDaemon()
+        data_processing_daemon = DataProcessingDaemonV2()
 
         # Start loops
         await asyncio.gather(

@@ -1,5 +1,5 @@
 """
-Модуль для обработки финансовых данных.
+Модуль для обработки финансовых данных из таблицы okx_data_set_record_data_2.
 """
 
 import logging
@@ -25,81 +25,83 @@ from enumerations import (
 from main.process_data.globals import g_globals
 from main.process_data.redis_service import g_redis_data_service
 from main.save_order_books.schemas import OKXOrderBookData2
+from main.save_final_data_set_2.schemas import OKXDataSetRecordData_2
 from settings import settings
 
 logger = logging.getLogger(__name__)
 
 
-class DataProcessor:
-    """Процессор для обработки финансовых данных."""
+class DataProcessorV2:
+    """Процессор для обработки финансовых данных из агрегированных записей."""
 
-    async def process_trades_data(
+    async def process_data_set_records(
         self,
         symbol_id: SymbolId,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
     ) -> None:
-        """Обработка данных о сделках и создание всех производных данных."""
+        """Обработка агрегированных данных и создание всех производных данных."""
         logger.info(
-            f'Processing trades data for {symbol_id.name}: {trades_df.height} records'
+            f'Processing data set records for {symbol_id.name}: {data_set_df.height} records'
         )
 
         # Обработка полос Боллинджера
         await self._process_bollinger_bands(
             symbol_id,
-            trades_df,
+            data_set_df,
         )
 
         # Обработка свечных данных
         await self._process_candles_data(
             symbol_id,
-            trades_df,
+            data_set_df,
         )
 
         # Обработка RSI
         await self._process_rsi_data(
             symbol_id,
-            trades_df,
+            data_set_df,
         )
 
         # Обработка сглаженных данных
         await self._process_smoothed_data(
             symbol_id,
-            trades_df,
+            data_set_df,
         )
 
         # Обработка экстремальных линий
         await self._process_extreme_lines(
             symbol_id,
-            trades_df,
+            data_set_df,
         )
 
         # Обработка объемов стакана
-        await self._process_order_book_volumes(
-            symbol_id,
-            trades_df,
-        )
+        # await self._process_order_book_volumes(
+        #     symbol_id,
+        #     data_set_df,
+        # )
 
         # Обработка данных скорости
         await self._process_velocity_data(
             symbol_id,
+            data_set_df,
         )
 
         logger.info(
-            f'Completed processing trades data for {symbol_id.name}',
+            f'Completed processing data set records for {symbol_id.name}',
         )
 
     async def _process_bollinger_bands(
         self,
         symbol_id: SymbolId,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
     ) -> None:
         """Обработка полос Боллинджера."""
         with Timer() as timer:
-            # Вычисляем полосы Боллинджера
-            bollinger_df = trades_df.with_columns(
+            # Вычисляем полосы Боллинджера на основе цен закрытия
+            bollinger_df = data_set_df.with_columns(
                 polars_talib.bbands(
                     matype=int(talib.MA_Type.SMA),  # noqa
-                    real=polars.col('price'),
+                    real=polars.col('close_price'),
                     timeperiod=20,
                 ).alias('bbands'),
             ).unnest('bbands')
@@ -123,14 +125,14 @@ class DataProcessor:
     async def _process_candles_data(
         self,
         symbol_id: SymbolId,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
     ) -> None:
         """Обработка свечных данных по интервалам."""
         with Timer() as timer:
             for interval_name in PlotConstants.IntervalNames:
                 await self._process_candles_for_interval(
                     symbol_id=symbol_id,
-                    trades_df=trades_df,
+                    data_set_df=data_set_df,
                     interval_name=interval_name,
                 )
 
@@ -139,134 +141,72 @@ class DataProcessor:
     async def _process_candles_for_interval(
         self,
         symbol_id: SymbolId,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
         interval_name: str,
     ) -> None:
         """Обработка свечных данных для конкретного интервала."""
-        candle_raw_data_list: list[dict[str, typing.Any]] = []
-
-        interval_duration = CommonConstants.IntervalDurationByNameMap[interval_name]
-        interval_duration_ms = int(interval_duration.total_seconds() * 1000)
-
-        last_candle_raw_data: dict[str, typing.Any] | None = None
+        # Данные уже агрегированы, поэтому просто преобразуем их в формат свечей
+        candles_df = data_set_df.select([
+            'start_trade_id',
+            'end_trade_id',
+            'open_price',
+            'high_price',
+            'low_price',
+            'close_price',
+            'total_quantity',
+            'total_trades_count',
+            'total_volume',
+            'start_timestamp_ms',
+            'end_timestamp_ms',
+        ]).with_columns([
+            polars.col('start_timestamp_ms')
+            .cast(polars.Datetime(time_unit='ms', time_zone=UTC))
+            .alias('start_datetime'),
+            polars.col('end_timestamp_ms')
+            .cast(polars.Datetime(time_unit='ms', time_zone=UTC))
+            .alias('end_datetime'),
+        ])
 
         # Получаем существующие данные из Redis
         existing_candles = await g_redis_data_service.load_candles_data(
             symbol_id,
             interval_name,
         )
-        min_trade_id = 0
 
         if existing_candles is not None and existing_candles.height > 0:
-            min_trade_id = int(existing_candles.get_column('start_trade_id').max())
-
-        # Обрабатываем только новые данные
-        new_trades = trades_df.filter(polars.col('trade_id') >= min_trade_id)
-
-        for trade_data in new_trades.iter_rows(named=True):
-            trade_id: int = trade_data['trade_id']
-            price: float = trade_data['price']
-            quantity: float = trade_data['quantity']
-            volume = price * quantity
-            datetime_: datetime = trade_data['datetime']
-
-            timestamp_ms = int(datetime_.timestamp() * 1000)
-            candle_start_timestamp_ms = timestamp_ms - (
-                timestamp_ms % interval_duration_ms
-            )
-            candle_end_timestamp_ms = candle_start_timestamp_ms + interval_duration_ms
-
-            if last_candle_raw_data is not None:
-                if (
-                    candle_start_timestamp_ms
-                    == last_candle_raw_data['start_timestamp_ms']
-                ):
-                    # Обновляем существующую свечу
-                    if price > last_candle_raw_data['high_price']:
-                        last_candle_raw_data['high_price'] = price
-                    if price < last_candle_raw_data['low_price']:
-                        last_candle_raw_data['low_price'] = price
-
-                    last_candle_raw_data.update(
-                        {
-                            'trades_count': last_candle_raw_data['trades_count'] + 1,
-                            'end_trade_id': trade_id,
-                            'close_price': price,
-                            'volume': last_candle_raw_data['volume'] + volume,
-                        }
-                    )
-                else:
-                    # Сохраняем предыдущую свечу и начинаем новую
-                    candle_raw_data_list.append(last_candle_raw_data)
-                    last_candle_raw_data = None
-
-            if last_candle_raw_data is None:
-                last_candle_raw_data = {
-                    'close_price': price,
-                    'end_timestamp_ms': candle_end_timestamp_ms,
-                    'end_trade_id': trade_id + 1,
-                    'high_price': price,
-                    'low_price': price,
-                    'open_price': price,
-                    'start_timestamp_ms': candle_start_timestamp_ms,
-                    'start_trade_id': trade_id,
-                    'trades_count': 1,
-                    'volume': volume,
-                }
-
-        if last_candle_raw_data is not None:
-            candle_raw_data_list.append(last_candle_raw_data)
-
-        if candle_raw_data_list:
-            new_candle_dataframe = polars.DataFrame(candle_raw_data_list)
-
-            new_candle_dataframe = new_candle_dataframe.with_columns(
-                polars.col('end_timestamp_ms')
-                .cast(polars.Datetime(time_unit='ms', time_zone=UTC))
-                .alias('end_datetime'),
-                polars.col('start_timestamp_ms')
-                .cast(polars.Datetime(time_unit='ms', time_zone=UTC))
-                .alias('start_datetime'),
-            )
-
             # Объединяем с существующими данными
-            if existing_candles is not None:
-                final_candles = existing_candles.update(
-                    new_candle_dataframe,
-                    on='start_trade_id',
-                )
-
-                final_candles = polars.concat(
-                    [
-                        final_candles,
-                        new_candle_dataframe.filter(
-                            polars.col('start_trade_id') > min_trade_id,
-                        ),
-                    ]
-                )
-            else:
-                final_candles = new_candle_dataframe
-
-            final_candles = final_candles.sort(
-                'start_trade_id',
+            final_candles = existing_candles.update(
+                candles_df,
+                on='start_trade_id',
             )
 
-            # Сохраняем в Redis
-            min_trade_id = int(final_candles.get_column('start_trade_id').min())
-            max_trade_id = int(final_candles.get_column('end_trade_id').max())
+            final_candles = polars.concat([
+                final_candles,
+                candles_df.filter(
+                    polars.col('start_trade_id') > existing_candles.get_column('start_trade_id').max(),
+                ),
+            ])
+        else:
+            final_candles = candles_df
 
-            await g_redis_data_service.save_candles_data(
-                symbol_id=symbol_id,
-                interval=interval_name,
-                candles_df=final_candles,
-                min_trade_id=min_trade_id,
-                max_trade_id=max_trade_id,
-            )
+        final_candles = final_candles.sort('start_trade_id')
+
+        # Сохраняем в Redis
+        min_trade_id = int(final_candles.get_column('start_trade_id').min())
+        max_trade_id = int(final_candles.get_column('end_trade_id').max())
+
+        await g_redis_data_service.save_candles_data(
+            symbol_id=symbol_id,
+            interval=interval_name,
+            candles_df=final_candles,
+            min_trade_id=min_trade_id,
+            max_trade_id=max_trade_id,
+        )
 
     async def _process_rsi_data(
         self,
         symbol_id: SymbolId,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
     ) -> None:
         """Обработка RSI данных."""
         with Timer() as timer:
@@ -299,7 +239,7 @@ class DataProcessor:
     async def _process_smoothed_data(
         self,
         symbol_id: SymbolId,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
     ) -> None:
         """Обработка сглаженных данных."""
         with Timer() as timer:
@@ -310,20 +250,14 @@ class DataProcessor:
 
                 # Получаем номер уровня сглаживания
                 level_num = int(
-                    level.split(
-                        '(',
-                        maxsplit=1,
-                    )[1].split(
-                        ')',
-                        maxsplit=1,
-                    )[0]
+                    level.split('(', maxsplit=1)[1].split(')', maxsplit=1)[0]
                 )
 
                 if level_num == 1:
                     # Для первого уровня обрабатываем линии и сглаженные данные отдельно
                     await self._process_level_1_data(
                         symbol_id=symbol_id,
-                        trades_df=trades_df,
+                        data_set_df=data_set_df,
                         level=level,
                     )
                 else:
@@ -334,13 +268,13 @@ class DataProcessor:
     async def _process_level_1_data(
         self,
         symbol_id: SymbolId,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
         level: str,
     ) -> None:
         """Обработка данных первого уровня сглаживания (линии и сглаженные данные)."""
-        # Вычисляем новые линии
-        new_lines_df = await self._calculate_level_1_lines(
-            trades_df,
+        # Вычисляем новые линии на основе агрегированных данных
+        new_lines_df = await self._calculate_level_1_lines_from_data_set(
+            data_set_df,
         )
 
         if new_lines_df is None or not new_lines_df.height:
@@ -382,91 +316,46 @@ class DataProcessor:
                 max_trade_id=max_trade_id,
             )
 
-    async def _calculate_level_1_lines(
+    async def _calculate_level_1_lines_from_data_set(
         self,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
     ) -> DataFrame | None:
-        """Вычисление линий для первого уровня сглаживания."""
+        """Вычисление линий для первого уровня сглаживания на основе агрегированных данных."""
 
-        # Обрабатываем данные для создания линий
+        # Создаем линии на основе агрегированных данных
+        # Каждая запись в data_set_df представляет собой период с определенными характеристиками
         line_raw_data_list = []
-        line_raw_data: dict | None = None
 
-        for trade_data in trades_df.iter_rows(named=True):
-            is_buy = trade_data['is_buy']
-            trade_id = trade_data['trade_id']
-            price = trade_data['price']
-            quantity = trade_data['quantity']
-            volume = price * quantity
-            datetime_ = trade_data['datetime']
+        for record in data_set_df.iter_rows(named=True):
+            # Определяем направление на основе соотношения покупок и продаж
+            buy_quantity = float(record['buy_quantity'])
+            total_quantity = float(record['total_quantity'])
+            sell_quantity = total_quantity - buy_quantity
 
-            if line_raw_data is None:
-                # Начинаем новую линию
-                line_raw_data = {
-                    'is_buy': is_buy,
-                    'start_datetime': datetime_,
-                    'start_price': price,
-                    'start_trade_id': trade_id,
-                    'quantity': quantity,
-                    'volume': volume,
-                }
-            else:
-                new_is_buy = is_buy
-                old_is_buy = line_raw_data['is_buy']
+            # Определяем преобладающее направление
+            is_buy_dominant = buy_quantity > sell_quantity
 
-                if old_is_buy == new_is_buy:
-                    # Продолжаем текущую линию
-                    line_raw_data.update(
-                        {
-                            'quantity': line_raw_data['quantity'] + quantity,
-                            'volume': line_raw_data['volume'] + volume,
-                        }
-                    )
-                else:
-                    # Завершаем текущую линию и начинаем новую
-                    line_raw_data_list.append(
-                        line_raw_data,
-                    )
+            line_raw_data = {
+                'is_buy': is_buy_dominant,
+                'start_datetime': datetime.fromtimestamp(record['start_timestamp_ms'] / 1000, tz=UTC),
+                'start_price': float(record['open_price']),
+                'start_trade_id': int(record['start_trade_id']),
+                'quantity': total_quantity,
+                'volume': float(record['total_volume']),
+                'end_price': float(record['close_price']),
+                'end_datetime': datetime.fromtimestamp(record['end_timestamp_ms'] / 1000, tz=UTC),
+                'end_trade_id': int(record['end_trade_id']),
+            }
 
-                    line_raw_data = {
-                        'is_buy': is_buy,
-                        'start_datetime': line_raw_data['end_datetime'],
-                        'start_trade_id': line_raw_data['end_trade_id'],
-                        'start_price': line_raw_data['end_price'],
-                        'quantity': quantity,
-                        'volume': volume,
-                    }
-
-            line_raw_data.update(
-                {
-                    'end_price': price,
-                    'end_datetime': datetime_,
-                    'end_trade_id': trade_id,
-                }
-            )
-
-        # Завершаем последнюю линию, если она есть
-        if line_raw_data is not None:
-            end_trade_id: int | None = line_raw_data.get(
-                'end_trade_id',
-            )
-
-            if end_trade_id is not None:
-                line_raw_data_list.append(
-                    line_raw_data,
-                )
+            line_raw_data_list.append(line_raw_data)
 
         if not line_raw_data_list:
             return None
 
         # Создаем DataFrame из линий
-        line_dataframe = polars.DataFrame(
-            line_raw_data_list,
-        )
+        line_dataframe = polars.DataFrame(line_raw_data_list)
 
-        return line_dataframe.sort(
-            'start_trade_id',
-        )
+        return line_dataframe.sort('start_trade_id')
 
     @staticmethod
     async def _calculate_smoothed_from_lines(
@@ -479,59 +368,36 @@ class DataProcessor:
         last_line_data = None
 
         for line_data in line_dataframe.iter_rows(named=True):
-            trades_smoothed_raw_data_list.append(
-                {
-                    'price': line_data['start_price'],
-                    'datetime': line_data['start_datetime'],
-                    'trade_id': line_data['start_trade_id'],
-                }
-            )
+            trades_smoothed_raw_data_list.append({
+                'price': line_data['start_price'],
+                'datetime': line_data['start_datetime'],
+                'trade_id': line_data['start_trade_id'],
+            })
 
             last_line_data = line_data
 
         if last_line_data is not None:
-            trades_smoothed_raw_data_list.append(
-                {
-                    'price': last_line_data['end_price'],
-                    'datetime': last_line_data['end_datetime'],
-                    'trade_id': last_line_data['end_trade_id'],
-                }
-            )
+            trades_smoothed_raw_data_list.append({
+                'price': last_line_data['end_price'],
+                'datetime': last_line_data['end_datetime'],
+                'trade_id': last_line_data['end_trade_id'],
+            })
 
         if not trades_smoothed_raw_data_list:
             return None
 
-        smoothed_dataframe = polars.DataFrame(
-            trades_smoothed_raw_data_list,
-        )
+        smoothed_dataframe = polars.DataFrame(trades_smoothed_raw_data_list)
 
-        return smoothed_dataframe.sort(
-            'trade_id',
-        )
-
-    async def _calculate_level_1_smoothing(
-        self,
-        trades_df: DataFrame,
-        existing_data: DataFrame | None = None,  # noqa  # not used
-    ) -> DataFrame | None:
-        """Вычисление первого уровня сглаживания."""
-        # Получаем линии
-        line_dataframe = await self._calculate_level_1_lines(trades_df)
-
-        if line_dataframe is None:
-            return None
-
-        # Создаем сглаженные данные из линий
-        return await self._calculate_smoothed_from_lines(line_dataframe)
+        return smoothed_dataframe.sort('trade_id')
 
     async def _process_extreme_lines(
         self,
         symbol_id: SymbolId,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
     ) -> None:
         """Обработка экстремальных линий."""
         with Timer() as timer:
-            price_series = trades_df.get_column('price')
+            price_series = data_set_df.get_column('close_price')
             max_price = float(price_series.max())
             min_price = float(price_series.min())
             delta_price = max_price - min_price
@@ -539,7 +405,7 @@ class DataProcessor:
             if not delta_price:
                 return
 
-            trade_id_series = trades_df.get_column('trade_id')
+            trade_id_series = data_set_df.get_column('start_trade_id')
             max_trade_id = int(trade_id_series.max())
             min_trade_id = int(trade_id_series.min())
             delta_trade_id = max_trade_id - min_trade_id
@@ -571,7 +437,6 @@ class DataProcessor:
                 logger.warning(
                     f'No lines data available for {symbol_id.name}, skipping extreme lines'
                 )
-
                 return
 
             logger.info('Filling extreme lines...')
@@ -603,68 +468,49 @@ class DataProcessor:
                     if active_extreme_line_prices_to_delete is None:
                         active_extreme_line_prices_to_delete = []
 
-                    active_extreme_line_prices_to_delete.append(
-                        price,
-                    )
+                    active_extreme_line_prices_to_delete.append(price)
 
                     # Добавляем в завершенные
+                    extreme_line_raw_data.update({
+                        'end_trade_id': start_trade_id,
+                        'price': price,
+                    })
 
-                    extreme_line_raw_data.update(
-                        {
-                            'end_trade_id': start_trade_id,
-                            'price': price,
-                        }
-                    )
-
-                    extreme_line_raw_data_list.append(
-                        extreme_line_raw_data,
-                    )
+                    extreme_line_raw_data_list.append(extreme_line_raw_data)
 
                 if active_extreme_line_prices_to_delete is not None:
                     for price in active_extreme_line_prices_to_delete:
                         # Удаляем из активных
-                        active_extreme_line_raw_data_by_price_map.pop(
-                            price,
-                        )
+                        active_extreme_line_raw_data_by_price_map.pop(price)
 
                     active_extreme_line_prices_to_delete.clear()
                     active_extreme_line_prices_to_delete = None  # noqa
 
                 # Проверяем, что цены не дублируются
-
-                assert end_price not in active_extreme_line_raw_data_by_price_map, (
-                    end_price,
-                )
-
-                assert start_price not in active_extreme_line_raw_data_by_price_map, (
-                    start_price,
-                )
+                assert end_price not in active_extreme_line_raw_data_by_price_map, end_price
+                assert start_price not in active_extreme_line_raw_data_by_price_map, start_price
 
                 # Добавляем новые активные линии
-                active_extreme_line_raw_data_by_price_map.update(
-                    {
-                        end_price: {
-                            'end_trade_id': None,
-                            'start_trade_id': end_trade_id,
-                        },
-                        start_price: {
-                            'end_trade_id': None,
-                            'start_trade_id': start_trade_id,
-                        },
-                    }
-                )
+                active_extreme_line_raw_data_by_price_map.update({
+                    end_price: {
+                        'end_trade_id': None,
+                        'start_trade_id': end_trade_id,
+                    },
+                    start_price: {
+                        'end_trade_id': None,
+                        'start_trade_id': start_trade_id,
+                    },
+                })
 
             # Завершаем оставшиеся активные линии
             for (
                 price,
                 extreme_line_raw_data,
             ) in active_extreme_line_raw_data_by_price_map.items():
-                extreme_line_raw_data.update(
-                    {
-                        'end_trade_id': max_trade_id,
-                        'price': price,
-                    }
-                )
+                extreme_line_raw_data.update({
+                    'end_trade_id': max_trade_id,
+                    'price': price,
+                })
 
                 extreme_line_raw_data_list.append(extreme_line_raw_data)
 
@@ -683,9 +529,7 @@ class DataProcessor:
                 y = min(int((price - min_price) / extreme_lines_scale), height - 1)
 
                 # Заполняем массив значениями от 0 до длины линии
-                extreme_lines_array[start_x:end_x, y] = numpy.arange(
-                    end_x - start_x,
-                )
+                extreme_lines_array[start_x:end_x, y] = numpy.arange(end_x - start_x)
 
             await g_redis_data_service.save_extreme_lines_data(
                 symbol_id=symbol_id,
@@ -702,12 +546,12 @@ class DataProcessor:
     async def _process_order_book_volumes(
         self,
         symbol_id: SymbolId,
-        trades_df: DataFrame,
+        data_set_df: DataFrame,
     ) -> None:
         """Обработка объемов стакана."""
         with Timer() as timer:
             # Получаем данные о стакане заявок
-            price_series = trades_df.get_column('price')
+            price_series = data_set_df.get_column('close_price')
             max_price = float(price_series.max())
             min_price = float(price_series.min())
             delta_price = max_price - min_price
@@ -715,7 +559,7 @@ class DataProcessor:
             if not delta_price:
                 return
 
-            trade_id_series = trades_df.get_column('trade_id')
+            trade_id_series = data_set_df.get_column('start_trade_id')
             max_trade_id = int(trade_id_series.max())
             min_trade_id = int(trade_id_series.min())
             delta_trade_id = max_trade_id - min_trade_id
@@ -725,11 +569,9 @@ class DataProcessor:
 
             logger.info(f'delta_price: {delta_price}, delta_trade_id: {delta_trade_id})')
 
-            datetime_series = trades_df.get_column('datetime')
-            max_datetime: datetime = datetime_series.max()
-            max_timestamp_ms = int(max_datetime.timestamp() * 1000)
-            min_datetime: datetime = datetime_series.min()
-            min_timestamp_ms = int(min_datetime.timestamp() * 1000)
+            timestamp_series = data_set_df.get_column('start_timestamp_ms')
+            max_timestamp_ms = int(timestamp_series.max())
+            min_timestamp_ms = int(timestamp_series.min())
             delta_timestamp_ms = max_timestamp_ms - min_timestamp_ms
 
             if not delta_timestamp_ms:
@@ -753,9 +595,7 @@ class DataProcessor:
                             OKXOrderBookData2.symbol_id.asc(),
                             OKXOrderBookData2.timestamp_ms.desc(),
                         )
-                        .limit(
-                            1,
-                        )
+                        .limit(1)
                     )
 
                     initial_order_book_snapshot_data = result.scalar_one_or_none()
@@ -834,15 +674,21 @@ class DataProcessor:
                     else:
                         order_book_bid_quantity_by_price_map.pop(price, None)
 
-                if datetime_ < min_datetime:
+                if datetime_ < datetime.fromtimestamp(min_timestamp_ms / 1000, tz=UTC):
                     continue
 
                 logger.info(
-                    f'{datetime_} / {max_datetime} ({100.0 * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
+                    f'{datetime_} / {datetime.fromtimestamp(max_timestamp_ms / 1000, tz=UTC)} ({100.0 * (timestamp_ms - min_timestamp_ms) / delta_timestamp_ms:.3f}%)'
                 )
 
-                idx = datetime_series.search_sorted(element=datetime_, side='left')
-                closest_trade_id = trade_id_series[idx]
+                # Находим ближайший trade_id для текущего времени
+                closest_trade_id = min_trade_id
+                for record in data_set_df.iter_rows(named=True):
+                    record_timestamp = record['start_timestamp_ms']
+                    if record_timestamp <= timestamp_ms:
+                        closest_trade_id = record['start_trade_id']
+                    else:
+                        break
 
                 x = min(
                     int((closest_trade_id - min_trade_id) / order_book_volumes_scale),
@@ -935,6 +781,7 @@ class DataProcessor:
     async def _process_velocity_data(
         self,
         symbol_id: SymbolId,
+        data_set_df: DataFrame,
     ) -> None:
         """Обработка данных скорости."""
         with Timer() as timer:
@@ -945,7 +792,7 @@ class DataProcessor:
             )
 
             if candles_df is not None and candles_df.height > 0:
-                velocity_series = candles_df.get_column('trades_count')
+                velocity_series = candles_df.get_column('total_trades_count')
 
                 await g_redis_data_service.save_velocity_series(
                     symbol_id=symbol_id,
@@ -957,4 +804,4 @@ class DataProcessor:
 
 
 # Глобальный экземпляр процессора
-g_data_processor = DataProcessor()
+g_data_processor_v2 = DataProcessorV2()

@@ -48,18 +48,18 @@ class DateTimeByTradeIDAxisItem(pyqtgraph.AxisItem):
             tick_string = f'{trade_id}'
 
             if trades_dataframe is not None:
-                trade_id_series = trades_dataframe.get_column(
-                    'trade_id',
+                start_trade_id_series = trades_dataframe.get_column(
+                    'start_trade_id',
                 )
 
-                idx = trade_id_series.search_sorted(
+                idx = start_trade_id_series.search_sorted(
                     element=trade_id,
                     side='any',
                 )
 
-                if idx < trade_id_series.len() and trade_id_series[idx] == trade_id:
+                if idx < start_trade_id_series.len():
                     datetime_series = trades_dataframe.get_column(
-                        'datetime',
+                        'start_datetime',
                     )
 
                     datetime_: datetime = datetime_series[idx]

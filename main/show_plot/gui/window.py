@@ -784,11 +784,11 @@ class FinPlotChartWindow(QMainWindow):
 
             return
 
-        trade_id_series = trades_smoothed_dataframe.get_column(
-            'trade_id',
+        start_trade_id_series = trades_smoothed_dataframe.get_column(
+            'start_trade_id',
         )
 
-        trade_id_numpy_array = trade_id_series.to_numpy()
+        start_trade_id_numpy_array = start_trade_id_series.to_numpy()
 
         if _IS_NEED_SHOW_BOLLINGER_BANDS:
             bollinger_base_line_series = processor.get_bollinger_base_line_series()
@@ -800,17 +800,17 @@ class FinPlotChartWindow(QMainWindow):
                 assert bollinger_upper_band_series is not None, None
 
                 self.__bollinger_base_line_plot_data_item.setData(
-                    trade_id_numpy_array,
+                    start_trade_id_numpy_array,
                     bollinger_base_line_series.to_numpy(),
                 )
 
                 self.__bollinger_lower_band_plot_data_item.setData(
-                    trade_id_numpy_array,
+                    start_trade_id_numpy_array,
                     bollinger_lower_band_series.to_numpy(),
                 )
 
                 self.__bollinger_upper_band_plot_data_item.setData(
-                    trade_id_numpy_array,
+                    start_trade_id_numpy_array,
                     bollinger_upper_band_series.to_numpy(),
                 )
 
@@ -1024,13 +1024,13 @@ class FinPlotChartWindow(QMainWindow):
             order_book_volumes_asks_image_item.hide()
             order_book_volumes_bids_image_item.hide()
 
-        price_series = trades_smoothed_dataframe.get_column(
-            'price',
+        close_price_series = trades_smoothed_dataframe.get_column(
+            'close_price',
         )
 
         self.__price_plot_data_item.setData(
-            trade_id_numpy_array,
-            price_series.to_numpy(),
+            start_trade_id_numpy_array,
+            close_price_series.to_numpy(),
         )
 
         if _IS_NEED_SHOW_RSI:
@@ -1038,7 +1038,7 @@ class FinPlotChartWindow(QMainWindow):
 
             if rsi_series is not None:
                 self.__rsi_plot_data_item.setData(
-                    trade_id_numpy_array,
+                    start_trade_id_numpy_array,
                     rsi_series.to_numpy(),
                 )
 
