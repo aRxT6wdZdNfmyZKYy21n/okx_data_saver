@@ -226,52 +226,49 @@ async def save_final_data_set_2(
 
             if is_buy is None:
                 is_buy = trade_data.is_buy
-            else:
-                if is_buy != trade_data.is_buy:
-                    # Flush
+            elif is_buy != trade_data.is_buy:
+                # Flush
 
-                    data_set_records_2.append(
-                        OKXDataSetRecordData_2(
-                            # Primary key fields
-                            symbol_id=symbol_id,
-                            start_trade_id=start_trade_id,
-                            # Attribute fields
-                            buy_quantity=buy_quantity,
-                            buy_trades_count=buy_trades_count,
-                            buy_volume=buy_volume,
-                            close_price=close_price,
-                            end_timestamp_ms=end_timestamp_ms,
-                            end_trade_id=end_trade_id,
-                            high_price=high_price,
-                            low_price=low_price,
-                            open_price=open_price,
-                            start_timestamp_ms=start_timestamp_ms,
-                            total_quantity=total_quantity,
-                            total_trades_count=total_trades_count,
-                            total_volume=total_volume,
-                        )
+                data_set_records_2.append(
+                    OKXDataSetRecordData_2(
+                        # Primary key fields
+                        symbol_id=symbol_id,
+                        start_trade_id=start_trade_id,
+                        # Attribute fields
+                        buy_quantity=buy_quantity,
+                        buy_trades_count=buy_trades_count,
+                        buy_volume=buy_volume,
+                        close_price=close_price,
+                        end_timestamp_ms=end_timestamp_ms,
+                        end_trade_id=end_trade_id,
+                        high_price=high_price,
+                        low_price=low_price,
+                        open_price=open_price,
+                        start_timestamp_ms=start_timestamp_ms,
+                        total_quantity=total_quantity,
+                        total_trades_count=total_trades_count,
+                        total_volume=total_volume,
                     )
+                )
 
-                    buy_quantity = Decimal(0)
-                    buy_trades_count = 0
-                    buy_volume = Decimal(0)
-                    is_buy = None
+                buy_quantity = Decimal(0)
+                buy_trades_count = 0
+                buy_volume = Decimal(0)
+                is_buy = trade_data.is_buy
 
-                    close_price = None
-                    high_price = None
-                    low_price = None
-                    open_price = None
-                    start_trade_id = None
-                    end_trade_id = None
+                close_price = None
+                high_price = None
+                low_price = None
+                open_price = None
+                start_trade_id = None
+                end_trade_id = None
 
-                    end_timestamp_ms = None
-                    start_timestamp_ms = None
+                end_timestamp_ms = None
+                start_timestamp_ms = None
 
-                    total_quantity = Decimal(0)
-                    total_trades_count = 0
-                    total_volume = Decimal(0)
-
-                    continue
+                total_quantity = Decimal(0)
+                total_trades_count = 0
+                total_volume = Decimal(0)
 
             trade_id = trade_data.trade_id
 
