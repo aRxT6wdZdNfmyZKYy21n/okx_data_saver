@@ -12,14 +12,10 @@ import logging
 import sys
 import traceback
 
-import numpy
 from sqlalchemy import (
-    and_,
-    func,
     select,
 )
 from sqlalchemy.ext.asyncio import (
-    AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
@@ -46,8 +42,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-_COMMIT_COUNT = 10_000
-_YIELD_PER = 10_000
+_BATCH_SIZE = 10_000
 
 
 async def ensure_table_okx_trade_data_3(engine):
@@ -63,7 +58,7 @@ async def ensure_table_okx_trade_data_3(engine):
 
 
 async def run_migration(database_url: str) -> int:
-    """Выполняет миграцию okx_trade_data_2 -> okx_trade_data_3. Возвращает число перенесённых записей."""
+    """Выполняет миграцию okx_trade_data_2 -> okx_trade_data_3 батчами по _BATCH_SIZE записей."""
     engine = create_async_engine(
         database_url,
         echo=True,
@@ -76,112 +71,87 @@ async def run_migration(database_url: str) -> int:
     await ensure_table_okx_trade_data_3(engine)
 
     total_migrated = 0
-    total_skipped = 0
     total_errors = 0
 
     for symbol_id in SymbolConstants.NameById:
         logger.info('Обрабатываем symbol_id=%s...', symbol_id)
+        last_trade_id = None
+        batch_num = 0
 
-        async with session_factory() as session:
-            total_result = await session.execute(
-                select(func.count())
-                .select_from(OKXTradeData2)
+        while True:
+            batch_num += 1
+            query = (
+                select(OKXTradeData2)
                 .where(OKXTradeData2.symbol_id == symbol_id)
+                .order_by(OKXTradeData2.trade_id)
+                .limit(_BATCH_SIZE)
             )
-            count_2 = total_result.scalar()
-            total_result = await session.execute(
-                select(func.count())
-                .select_from(OKXTradeData3)
-                .where(OKXTradeData3.symbol_id == symbol_id)
-            )
-            count_3 = total_result.scalar()
+            if last_trade_id is not None:
+                query = query.where(OKXTradeData2.trade_id > last_trade_id)
 
-        trade_ids_2 = numpy.empty(shape=(count_2,), dtype=numpy.int64)
-        idx = 0
-        async with session_factory() as session:
-            result = await session.stream(
-                select(OKXTradeData2.trade_id)
-                .where(OKXTradeData2.symbol_id == symbol_id)
-                .execution_options(yield_per=_YIELD_PER)
-            )
-            async for row in result:
-                trade_ids_2[idx] = row.trade_id
-                idx += 1
-        if idx < trade_ids_2.size:
-            trade_ids_2.resize((idx,))
+            async with session_factory() as session:
+                result = await session.execute(query)
+                batch = result.scalars().all()
 
-        trade_ids_3 = numpy.empty(shape=(count_3,), dtype=numpy.int64)
-        idx = 0
-        async with session_factory() as session:
-            result = await session.stream(
-                select(OKXTradeData3.trade_id)
-                .where(OKXTradeData3.symbol_id == symbol_id)
-                .execution_options(yield_per=_YIELD_PER)
-            )
-            async for row in result:
-                trade_ids_3[idx] = row.trade_id
-                idx += 1
-        if idx < trade_ids_3.size:
-            trade_ids_3.resize((idx,))
+            if not batch:
+                break
 
-        to_migrate = numpy.setdiff1d(trade_ids_2, trade_ids_3)
-        logger.info(
-            'symbol_id=%s: в _2 записей=%s, в _3 записей=%s, к переносу=%s',
-            symbol_id,
-            trade_ids_2.size,
-            trade_ids_3.size,
-            to_migrate.size,
-        )
+            batch_trade_ids = [row.trade_id for row in batch]
+            last_trade_id = batch_trade_ids[-1]
 
-        migrated = 0
-        async with session_factory() as session:
-            for trade_id in to_migrate:
-                trade_id = int(trade_id)
+            async with session_factory() as session:
+                existing = await session.execute(
+                    select(OKXTradeData3.trade_id).where(
+                        OKXTradeData3.symbol_id == symbol_id,
+                        OKXTradeData3.trade_id.in_(batch_trade_ids),
+                    )
+                )
+                existing_ids = {row[0] for row in existing.all()}
+
+            to_insert = [row for row in batch if row.trade_id not in existing_ids]
+            if not to_insert:
+                if len(batch) < _BATCH_SIZE:
+                    break
+                continue
+
+            async with session_factory() as session:
                 try:
-                    result = await session.execute(
-                        select(OKXTradeData2).where(
-                            and_(
-                                OKXTradeData2.symbol_id == symbol_id,
-                                OKXTradeData2.trade_id == trade_id,
+                    for row in to_insert:
+                        session.add(
+                            OKXTradeData3(
+                                symbol_id=row.symbol_id,
+                                trade_id=row.trade_id,
+                                is_buy=row.is_buy,
+                                price=row.price,
+                                quantity=row.quantity,
+                                timestamp_ms=row.timestamp_ms,
                             )
                         )
-                    )
-                    row_2 = result.scalar_one_or_none()
-                    if row_2 is None:
-                        total_skipped += 1
-                        continue
-                    session.add(
-                        OKXTradeData3(
-                            symbol_id=row_2.symbol_id,
-                            trade_id=row_2.trade_id,
-                            is_buy=row_2.is_buy,
-                            price=row_2.price,
-                            quantity=row_2.quantity,
-                            timestamp_ms=row_2.timestamp_ms,
-                        )
-                    )
-                    migrated += 1
-                    total_migrated += 1
-                    if migrated % _COMMIT_COUNT == 0:
-                        await session.commit()
-                        logger.info('Зафиксировано %s записей для symbol_id=%s', migrated, symbol_id)
-                except Exception as exception:
-                    total_errors += 1
-                    logger.error(
-                        'Ошибка при переносе trade_id=%s, symbol_id=%s: %s',
-                        trade_id,
+                    await session.commit()
+                    total_migrated += len(to_insert)
+                    logger.info(
+                        'symbol_id=%s, батч %s: перенесено %s из %s записей (всего по символу в этом запуске: см. итог)',
                         symbol_id,
+                        batch_num,
+                        len(to_insert),
+                        len(batch),
+                    )
+                except Exception as exception:
+                    total_errors += len(to_insert)
+                    logger.error(
+                        'Ошибка при записи батча symbol_id=%s, батч %s: %s',
+                        symbol_id,
+                        batch_num,
                         ''.join(traceback.format_exception(exception)),
                     )
-                    continue
-            if migrated % _COMMIT_COUNT != 0 or migrated > 0:
-                await session.commit()
+
+            if len(batch) < _BATCH_SIZE:
+                break
 
     await engine.dispose()
     logger.info(
-        'Миграция завершена. Перенесено: %s, пропущено: %s, ошибок: %s',
+        'Миграция завершена. Перенесено: %s, ошибок: %s',
         total_migrated,
-        total_skipped,
         total_errors,
     )
     return total_migrated
