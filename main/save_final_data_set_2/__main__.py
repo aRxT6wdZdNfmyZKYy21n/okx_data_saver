@@ -108,7 +108,7 @@ async def save_final_data_set_2(
         # Timestamp
 
         end_timestamp_ms: int | None
-        last_final_data_set_record_start_timestamp_ms: int | None
+        last_final_data_set_record_start_trade_id: int | None
 
         # Total
 
@@ -130,13 +130,13 @@ async def save_final_data_set_2(
             high_price = last_final_data_set_record_data.high_price
             low_price = last_final_data_set_record_data.low_price
             open_price = last_final_data_set_record_data.open_price
-            start_trade_id = last_final_data_set_record_data.start_trade_id
+            last_final_data_set_record_start_trade_id = last_final_data_set_record_data.start_trade_id
             end_trade_id = last_final_data_set_record_data.end_trade_id
 
             # Timestamp
 
             end_timestamp_ms = last_final_data_set_record_data.end_timestamp_ms
-            last_final_data_set_record_start_timestamp_ms = last_final_data_set_record_data.start_timestamp_ms
+            start_timestamp_ms = last_final_data_set_record_data.start_timestamp_ms
 
             total_quantity = last_final_data_set_record_data.total_quantity
             total_trades_count = last_final_data_set_record_data.total_trades_count
@@ -151,17 +151,17 @@ async def save_final_data_set_2(
             high_price = None
             low_price = None
             open_price = None
-            start_trade_id = None
             end_trade_id = None
+            last_final_data_set_record_start_trade_id = None
 
             end_timestamp_ms = None
-            last_final_data_set_record_start_timestamp_ms = None
+            start_timestamp_ms = None
 
             total_quantity = Decimal(0)
             total_trades_count = 0
             total_volume = Decimal(0)
 
-        start_timestamp_ms = last_final_data_set_record_start_timestamp_ms
+        start_trade_id = last_final_data_set_record_start_trade_id
 
         logger.info(
             'start_timestamp_ms'
@@ -176,10 +176,10 @@ async def save_final_data_set_2(
         )
 
         async with session_read_1.begin():
-            if start_timestamp_ms is not None:
+            if start_trade_id is not None:
                 where_and_expression_1 = and_(
                     trade_data_db_schema.symbol_id == symbol_id,
-                    trade_data_db_schema.timestamp_ms >= start_timestamp_ms,
+                    trade_data_db_schema.trade_id >= start_trade_id,
                 )
             else:
                 where_and_expression_1 = and_(
@@ -195,7 +195,7 @@ async def save_final_data_set_2(
                     trade_data_db_schema.symbol_id.asc(),
                     trade_data_db_schema.trade_id.asc(),
                 ).limit(
-                    10000,  # TODO: move to constants
+                    100000,  # TODO: move to constants
                 )
             )
 
@@ -329,29 +329,30 @@ async def save_final_data_set_2(
             assert total_quantity, None
             assert total_volume, None
 
-            # Flush
+            # # Flush
+            # Don't flush
 
-            data_set_records_2.append(
-                OKXDataSetRecordData_2(
-                    # Primary key fields
-                    symbol_id=symbol_id,
-                    start_trade_id=start_trade_id,
-                    # Attribute fields
-                    buy_quantity=buy_quantity,
-                    buy_trades_count=buy_trades_count,
-                    buy_volume=buy_volume,
-                    close_price=close_price,
-                    end_timestamp_ms=end_timestamp_ms,
-                    end_trade_id=end_trade_id,
-                    high_price=high_price,
-                    low_price=low_price,
-                    open_price=open_price,
-                    start_timestamp_ms=start_timestamp_ms,
-                    total_quantity=total_quantity,
-                    total_trades_count=total_trades_count,
-                    total_volume=total_volume,
-                )
-            )
+            # data_set_records_2.append(
+            #     OKXDataSetRecordData_2(
+            #         # Primary key fields
+            #         symbol_id=symbol_id,
+            #         start_trade_id=start_trade_id,
+            #         # Attribute fields
+            #         buy_quantity=buy_quantity,
+            #         buy_trades_count=buy_trades_count,
+            #         buy_volume=buy_volume,
+            #         close_price=close_price,
+            #         end_timestamp_ms=end_timestamp_ms,
+            #         end_trade_id=end_trade_id,
+            #         high_price=high_price,
+            #         low_price=low_price,
+            #         open_price=open_price,
+            #         start_timestamp_ms=start_timestamp_ms,
+            #         total_quantity=total_quantity,
+            #         total_trades_count=total_trades_count,
+            #         total_volume=total_volume,
+            #     )
+            # )
 
             buy_quantity = Decimal(0)
             buy_trades_count = 0
@@ -377,9 +378,9 @@ async def save_final_data_set_2(
             session_write.begin()
         ):
             for data_set_record_2 in data_set_records_2:
-                if last_final_data_set_record_start_timestamp_ms is not None and (
-                    data_set_record_2.start_timestamp_ms
-                    == last_final_data_set_record_start_timestamp_ms
+                if last_final_data_set_record_start_trade_id is not None and (
+                    data_set_record_2.start_trade_id
+                    == last_final_data_set_record_start_trade_id
                 ):
                     # Update
 
