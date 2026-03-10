@@ -176,7 +176,11 @@
     const count = to - from;
     if (count <= 0) return;
 
-    const barWidth = w / count;
+    const rangeSpan = visibleRange.to - visibleRange.from;
+    if (rangeSpan <= 0) return;
+    const barWidth = w / rangeSpan;
+    const totalBarsWidth = count * barWidth;
+
     let maxLog = 0;
     for (let i = from; i < to; i++) {
       const v = volumeDataByCandleIndex[i].total_volume_log2;
@@ -187,20 +191,21 @@
     ctx.clearRect(0, 0, w, h);
     for (let i = from; i < to; i++) {
       const b = volumeDataByCandleIndex[i];
-      const x = (i - from) * barWidth;
+      const x = (i - visibleRange.from) * barWidth;
       const totalH = ((b.total_volume_log2 != null && isFinite(b.total_volume_log2)) ? b.total_volume_log2 : 0) / maxLog * (h - 4);
       const buyPct = b.buy_volume_percent != null ? Math.max(0, Math.min(1, b.buy_volume_percent)) : 0;
       const sellPct = b.sell_volume_percent != null ? Math.max(0, Math.min(1, b.sell_volume_percent)) : 0;
       const buyH = totalH * buyPct;
       const sellH = totalH * sellPct;
+      const barW = Math.max(1, barWidth - 1);
 
       if (buyH > 0) {
         ctx.fillStyle = '#26a69a';
-        ctx.fillRect(x, h - buyH, Math.max(1, barWidth - 1), buyH);
+        ctx.fillRect(x, h - buyH, barW, buyH);
       }
       if (sellH > 0) {
         ctx.fillStyle = '#ef5350';
-        ctx.fillRect(x, h - buyH - sellH, Math.max(1, barWidth - 1), sellH);
+        ctx.fillRect(x, h - buyH - sellH, barW, sellH);
       }
     }
   }
