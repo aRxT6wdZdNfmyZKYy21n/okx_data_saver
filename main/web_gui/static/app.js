@@ -101,18 +101,23 @@
 
   function ensureChart() {
     if (chart) return;
+    const w = Math.max(chartDiv.clientWidth || 800, 1);
+    const h = Math.max(chartDiv.clientHeight || 400, 300);
     chart = LightweightCharts.createChart(chartDiv, {
       layout: { background: { type: 'solid', color: '#131722' }, textColor: '#d1d4dc' },
       grid: { vertLines: { color: '#2a2e39' }, horzLines: { color: '#2a2e39' } },
-      width: chartDiv.clientWidth,
-      height: chartDiv.clientHeight,
+      width: w,
+      height: h,
       timeScale: { timeVisible: true, secondsVisible: false },
       rightPriceScale: { borderColor: '#2a2e39' },
     });
     candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+      priceScaleId: 'right',
       upColor: '#26a69a',
       downColor: '#ef5350',
       borderVisible: false,
+      wickUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
     });
     chart.timeScale().fitContent();
 
@@ -194,6 +199,10 @@
         ensureChart();
         candleSeries.setData(candleData);
         chart.timeScale().fitContent();
+
+        const w = Math.max(chartDiv.clientWidth || 800, 1);
+        const h = Math.max(chartDiv.clientHeight || 400, 300);
+        chart.applyOptions({ width: w, height: h });
 
         requestAnimationFrame(() => {
           const range = chart.timeScale().getVisibleLogicalRange();
