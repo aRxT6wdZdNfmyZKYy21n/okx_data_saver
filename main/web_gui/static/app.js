@@ -79,7 +79,7 @@
 
   function barsToCandleData(bars) {
     const invalid = [];
-    const result = bars
+    const raw = bars
       .map((b, index) => {
         const time = b.start_timestamp_ms != null ? Math.floor(b.start_timestamp_ms / 1000) : null;
         const open = b.open_price != null ? Number(b.open_price) : null;
@@ -95,6 +95,19 @@
       .filter(Boolean);
     if (invalid.length > 0) {
       console.warn('[barsToCandleData] Пропущено некорректных свечей:', invalid.length, invalid);
+    }
+    raw.sort((a, b) => a.time - b.time);
+    const result = [];
+    for (let i = 0; i < raw.length; i++) {
+      const cur = raw[i];
+      if (result.length > 0 && result[result.length - 1].time === cur.time) {
+        const last = result[result.length - 1];
+        last.high = Math.max(last.high, cur.high);
+        last.low = Math.min(last.low, cur.low);
+        last.close = cur.close;
+      } else {
+        result.push({ time: cur.time, open: cur.open, high: cur.high, low: cur.low, close: cur.close });
+      }
     }
     return result;
   }
