@@ -165,7 +165,7 @@
   }
 
   function drawVolumeBars(visibleRange) {
-    if (!visibleRange || volumeDataByCandleIndex.length === 0) return;
+    if (!visibleRange || volumeDataByCandleIndex.length === 0 || !chart) return;
     const ctx = volumeCanvas.getContext('2d');
     const w = volumeCanvas.width;
     const h = volumeCanvas.height;
@@ -173,14 +173,9 @@
 
     const from = Math.max(0, Math.floor(visibleRange.from));
     const to = Math.min(volumeDataByCandleIndex.length, Math.ceil(visibleRange.to));
-    const count = to - from;
-    if (count <= 0) return;
+    if (from >= to) return;
 
-    const rangeSpan = visibleRange.to - visibleRange.from;
-    if (rangeSpan <= 0) return;
-    const barWidth = w / rangeSpan;
-    const totalBarsWidth = count * barWidth;
-
+    const ts = chart.timeScale();
     let maxLog = 0;
     for (let i = from; i < to; i++) {
       const v = volumeDataByCandleIndex[i].total_volume_log2;
@@ -191,13 +186,13 @@
     ctx.clearRect(0, 0, w, h);
     for (let i = from; i < to; i++) {
       const b = volumeDataByCandleIndex[i];
-      const x = (i - visibleRange.from) * barWidth;
+      const x = Math.round(ts.logicalToCoordinate(i));
+      const barW = Math.max(1, Math.round(ts.logicalToCoordinate(i + 1)) - x);
       const totalH = ((b.total_volume_log2 != null && isFinite(b.total_volume_log2)) ? b.total_volume_log2 : 0) / maxLog * (h - 4);
       const buyPct = b.buy_volume_percent != null ? Math.max(0, Math.min(1, b.buy_volume_percent)) : 0;
       const sellPct = b.sell_volume_percent != null ? Math.max(0, Math.min(1, b.sell_volume_percent)) : 0;
       const buyH = totalH * buyPct;
       const sellH = totalH * sellPct;
-      const barW = Math.max(1, barWidth - 1);
 
       if (buyH > 0) {
         ctx.fillStyle = '#26a69a';
