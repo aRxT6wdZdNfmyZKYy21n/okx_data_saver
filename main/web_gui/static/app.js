@@ -45,43 +45,58 @@
   }
 
   function initDropdowns() {
-    API.symbols().then(symbols => {
-      symbolSelect.innerHTML = '';
-      symbols.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.id;
-        opt.textContent = s.name;
-        symbolSelect.appendChild(opt);
-      });
-    }).catch(e => setStatus('Ошибка загрузки символов: ' + e.message, true));
-
-    API.scales().then(scales => {
-      API.dowLevels().then(dowLevels => {
-        scaleSelect.innerHTML = '';
-        scales.forEach(s => {
+    return Promise.all([
+      API.symbols().then(symbols => {
+        symbolSelect.innerHTML = '';
+        symbols.forEach(s => {
           const opt = document.createElement('option');
-          opt.value = s;
-          opt.textContent = s;
-          scaleSelect.appendChild(opt);
+          opt.value = s.id;
+          opt.textContent = s.name;
+          symbolSelect.appendChild(opt);
         });
-        dowLevels.forEach(l => {
-          const opt = document.createElement('option');
-          opt.value = l;
-          opt.textContent = l;
-          scaleSelect.appendChild(opt);
+      }),
+      API.scales().then(scales => {
+        return API.dowLevels().then(dowLevels => {
+          scaleSelect.innerHTML = '';
+          scales.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = s;
+            scaleSelect.appendChild(opt);
+          });
+          dowLevels.forEach(l => {
+            const opt = document.createElement('option');
+            opt.value = l;
+            opt.textContent = l;
+            scaleSelect.appendChild(opt);
+          });
         });
-      });
-    }).catch(e => setStatus('Ошибка загрузки масштабов: ' + e.message, true));
+      }),
+    ]).catch(e => {
+      setStatus('Ошибка загрузки списков: ' + e.message, true);
+    });
   }
 
   function barsToCandleData(bars) {
-    return bars.map(b => ({
-      time: Math.floor(b.start_timestamp_ms / 1000),
-      open: b.open_price,
-      high: b.high_price,
-      low: b.low_price,
-      close: b.close_price,
-    }));
+    const invalid = [];
+    const result = bars
+      .map((b, index) => {
+        const time = b.start_timestamp_ms != null ? Math.floor(b.start_timestamp_ms / 1000) : null;
+        const open = b.open_price != null ? Number(b.open_price) : null;
+        const high = b.high_price != null ? Number(b.high_price) : null;
+        const low = b.low_price != null ? Number(b.low_price) : null;
+        const close = b.close_price != null ? Number(b.close_price) : null;
+        if (time == null || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+          invalid.push({ index, start_trade_id: b.start_trade_id, start_timestamp_ms: b.start_timestamp_ms, open_price: b.open_price, high_price: b.high_price, low_price: b.low_price, close_price: b.close_price });
+          return null;
+        }
+        return { time, open, high, low, close };
+      })
+      .filter(Boolean);
+    if (invalid.length > 0) {
+      console.warn('[barsToCandleData] Пропущено некорректных свечей:', invalid.length, invalid);
+    }
+    return result;
   }
 
   function ensureChart() {
@@ -150,6 +165,7 @@
 
   function loadBars() {
     const scale = scaleSelect.value;
+    if (!scale) return;
     if (isDowLevel(scale)) {
       dowStub.classList.remove('hidden');
       volumePanel.classList.add('hidden');
@@ -163,6 +179,7 @@
     volumePanel.classList.remove('hidden');
 
     const symbol = symbolSelect.value;
+    if (!symbol) return;
     const limit = limitInput.value ? parseInt(limitInput.value, 10) : config.defaultLimit;
     setStatus('Загрузка…');
 
@@ -171,8 +188,10 @@
         barsData = data.bars || [];
         setStatus(`Загружено ${data.count} баров`);
 
-        ensureChart();
         const candleData = barsToCandleData(barsData);
+        if (candleData.length === 0) return;
+
+        ensureChart();
         candleSeries.setData(candleData);
         chart.timeScale().fitContent();
 
@@ -213,8 +232,7 @@
     try {
       config = await API.config();
       if (config.defaultLimit) limitInput.placeholder = config.defaultLimit;
-      initDropdowns();
-      ensureChart();
+      await initDropdowns();
       chartDiv.style.height = '100%';
       volumeCanvas.width = volumePanel.clientWidth;
       volumeCanvas.height = volumePanel.clientHeight;
