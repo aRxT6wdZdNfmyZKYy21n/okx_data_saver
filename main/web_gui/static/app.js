@@ -7,13 +7,13 @@
       if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
-    async config() { return this.get('/api/config'); },
-    async symbols() { return this.get('/api/symbols'); },
-    async scales() { return this.get('/api/scales'); },
-    async dowLevels() { return this.get('/api/dow_levels'); },
+    async config() { return this.get('./api/config'); },
+    async symbols() { return this.get('./api/symbols'); },
+    async scales() { return this.get('./api/scales'); },
+    async dowLevels() { return this.get('./api/dow_levels'); },
     async bars(params) {
       const q = new URLSearchParams(params).toString();
-      return this.get('/api/bars?' + q);
+      return this.get('./api/bars?' + q);
     },
   };
 
