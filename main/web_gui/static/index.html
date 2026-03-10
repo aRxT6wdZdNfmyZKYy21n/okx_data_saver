@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OKX Data Set — Сделки</title>
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div class="toolbar-group">
+      <label for="symbol">Символ</label>
+      <select id="symbol"></select>
+    </div>
+    <div class="toolbar-group">
+      <label for="scale">Масштаб / Уровень</label>
+      <select id="scale"></select>
+    </div>
+    <div class="toolbar-group">
+      <label for="limit">Лимит баров</label>
+      <input type="number" id="limit" min="1000" step="10000" placeholder="по умолчанию">
+    </div>
+    <div class="toolbar-group">
+      <button type="button" id="load">Загрузить</button>
+      <label class="checkbox-label"><input type="checkbox" id="autoRefresh" checked> Автообновление</label>
+    </div>
+    <div class="toolbar-group status" id="status"></div>
+  </header>
+
+  <main class="chart-container">
+    <div id="chart"></div>
+    <div id="volumePanel" class="volume-panel">
+      <canvas id="volumeCanvas"></canvas>
+    </div>
+  </main>
+
+  <div id="dowStub" class="dow-stub hidden">
+    Уровни теории Доу — в разработке. Выберите масштаб (x1…x2048).
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

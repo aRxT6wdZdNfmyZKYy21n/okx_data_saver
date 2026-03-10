@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: SecretStr | None = None
     REDIS_DB: int = 0
 
+    # Web GUI (okx_data_set_record_data_2 viewer)
+    WEB_GUI_RECORDS_LIMIT: int = 1_000_000
+    WEB_GUI_REFRESH_INTERVAL_SEC: int = 30
+
     model_config = SettingsConfigDict(
         env_file='.env',
         extra='forbid',
