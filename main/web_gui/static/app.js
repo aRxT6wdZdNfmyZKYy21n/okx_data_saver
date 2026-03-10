@@ -94,7 +94,7 @@
       timeScale: { timeVisible: true, secondsVisible: false },
       rightPriceScale: { borderColor: '#2a2e39' },
     });
-    candleSeries = chart.addCandlestickSeries({
+    candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
       upColor: '#26a69a',
       downColor: '#ef5350',
       borderVisible: false,
