@@ -21,6 +21,8 @@
   let chart = null;
   let candleSeries = null;
   let barsData = [];
+  /** Объёмы по индексу свечи (1:1 с candleData после сортировки и слияния по time) */
+  let volumeDataByCandleIndex = [];
   let refreshTimer = null;
   const scaleSelect = document.getElementById('scale');
   const symbolSelect = document.getElementById('symbol');
@@ -77,7 +79,11 @@
     });
   }
 
-  function barsToCandleData(bars) {
+  /**
+   * Строит данные свечей и объёмов в одном порядке (строго по времени, дубли по time склеены).
+   * Возвращает { candleData, volumeData } — volumeData[i] соответствует candleData[i].
+   */
+  function barsToCandleAndVolumeData(bars) {
     const invalid = [];
     const raw = bars
       .map((b, index) => {
@@ -86,30 +92,48 @@
         const high = b.high_price != null ? Number(b.high_price) : null;
         const low = b.low_price != null ? Number(b.low_price) : null;
         const close = b.close_price != null ? Number(b.close_price) : null;
+        const totalVolume = b.total_volume != null ? Number(b.total_volume) : 0;
+        const buyPct = b.buy_volume_percent != null ? Math.max(0, Math.min(1, Number(b.buy_volume_percent))) : 0;
         if (time == null || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
           invalid.push({ index, start_trade_id: b.start_trade_id, start_timestamp_ms: b.start_timestamp_ms, open_price: b.open_price, high_price: b.high_price, low_price: b.low_price, close_price: b.close_price });
           return null;
         }
-        return { time, open, high, low, close };
+        return { time, open, high, low, close, totalVolume, buyPct };
       })
       .filter(Boolean);
     if (invalid.length > 0) {
-      console.warn('[barsToCandleData] Пропущено некорректных свечей:', invalid.length, invalid);
+      console.warn('[barsToCandleAndVolumeData] Пропущено некорректных свечей:', invalid.length, invalid);
     }
     raw.sort((a, b) => a.time - b.time);
-    const result = [];
+    const candleData = [];
+    const volumeData = [];
     for (let i = 0; i < raw.length; i++) {
       const cur = raw[i];
-      if (result.length > 0 && result[result.length - 1].time === cur.time) {
-        const last = result[result.length - 1];
-        last.high = Math.max(last.high, cur.high);
-        last.low = Math.min(last.low, cur.low);
-        last.close = cur.close;
+      if (candleData.length > 0 && candleData[candleData.length - 1].time === cur.time) {
+        const lastC = candleData[candleData.length - 1];
+        lastC.high = Math.max(lastC.high, cur.high);
+        lastC.low = Math.min(lastC.low, cur.low);
+        lastC.close = cur.close;
+        const lastV = volumeData[volumeData.length - 1];
+        const buySum = lastV.buyVolumeSum + cur.buyPct * cur.totalVolume;
+        const totalSum = lastV.totalVolumeSum + cur.totalVolume;
+        lastV.totalVolumeSum = totalSum;
+        lastV.buyVolumeSum = buySum;
       } else {
-        result.push({ time: cur.time, open: cur.open, high: cur.high, low: cur.low, close: cur.close });
+        candleData.push({ time: cur.time, open: cur.open, high: cur.high, low: cur.low, close: cur.close });
+        volumeData.push({ totalVolumeSum: cur.totalVolume, buyVolumeSum: cur.buyPct * cur.totalVolume });
       }
     }
-    return result;
+    const volumeDataNormalized = volumeData.map(v => {
+      const total = v.totalVolumeSum;
+      const buyPct = total > 0 ? v.buyVolumeSum / total : 0;
+      return {
+        buy_volume_percent: buyPct,
+        sell_volume_percent: 1 - buyPct,
+        total_volume_log2: total > 0 ? Math.log2(total) : 0,
+      };
+    });
+    return { candleData, volumeData: volumeDataNormalized };
   }
 
   function ensureChart() {
@@ -135,34 +159,34 @@
     chart.timeScale().fitContent();
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-      if (!range || barsData.length === 0 || volumePanel.classList.contains('hidden')) return;
+      if (!range || volumeDataByCandleIndex.length === 0 || volumePanel.classList.contains('hidden')) return;
       drawVolumeBars(range);
     });
   }
 
   function drawVolumeBars(visibleRange) {
-    if (!visibleRange || barsData.length === 0) return;
+    if (!visibleRange || volumeDataByCandleIndex.length === 0) return;
     const ctx = volumeCanvas.getContext('2d');
     const w = volumeCanvas.width;
     const h = volumeCanvas.height;
     if (!w || !h) return;
 
     const from = Math.max(0, Math.floor(visibleRange.from));
-    const to = Math.min(barsData.length, Math.ceil(visibleRange.to));
+    const to = Math.min(volumeDataByCandleIndex.length, Math.ceil(visibleRange.to));
     const count = to - from;
     if (count <= 0) return;
 
     const barWidth = w / count;
     let maxLog = 0;
     for (let i = from; i < to; i++) {
-      const v = barsData[i].total_volume_log2;
+      const v = volumeDataByCandleIndex[i].total_volume_log2;
       if (v != null && isFinite(v)) maxLog = Math.max(maxLog, v);
     }
     if (maxLog <= 0) maxLog = 1;
 
     ctx.clearRect(0, 0, w, h);
     for (let i = from; i < to; i++) {
-      const b = barsData[i];
+      const b = volumeDataByCandleIndex[i];
       const x = (i - from) * barWidth;
       const totalH = ((b.total_volume_log2 != null && isFinite(b.total_volume_log2)) ? b.total_volume_log2 : 0) / maxLog * (h - 4);
       const buyPct = b.buy_volume_percent != null ? Math.max(0, Math.min(1, b.buy_volume_percent)) : 0;
@@ -206,8 +230,10 @@
         barsData = data.bars || [];
         setStatus(`Загружено ${data.count} баров`);
 
-        const candleData = barsToCandleData(barsData);
+        const { candleData, volumeData } = barsToCandleAndVolumeData(barsData);
         if (candleData.length === 0) return;
+
+        volumeDataByCandleIndex = volumeData;
 
         ensureChart();
         candleSeries.setData(candleData);
