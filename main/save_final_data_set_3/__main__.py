@@ -104,7 +104,6 @@ async def save_final_data_set_3(
         buy_quantity: Decimal
         buy_trades_count: int
         buy_volume: Decimal
-        is_buy: bool | None
 
         # Prices
 
@@ -114,6 +113,8 @@ async def save_final_data_set_3(
         open_price: Decimal | None
         start_trade_id: int | None
         end_trade_id: int | None
+
+        direction: TradingDirection | None
 
         # Timestamp
 
@@ -327,7 +328,7 @@ async def save_final_data_set_3(
             total_volume += record_data.total_volume
 
         if total_trades_count:
-            assert direction is not None, None
+            # assert direction is not None, None
             assert open_price is not None, None
             assert close_price is not None, None
             assert high_price is not None, None
@@ -370,7 +371,6 @@ async def save_final_data_set_3(
             buy_quantity = Decimal(0)
             buy_trades_count = 0
             buy_volume = Decimal(0)
-            is_buy = None
 
             close_price = None
             high_price = None
@@ -378,6 +378,8 @@ async def save_final_data_set_3(
             open_price = None
             start_trade_id = None
             end_trade_id = None
+
+            direction = None
 
             end_timestamp_ms = None
             start_timestamp_ms = None
