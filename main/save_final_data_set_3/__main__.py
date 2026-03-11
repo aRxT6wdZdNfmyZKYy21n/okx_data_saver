@@ -253,8 +253,9 @@ async def save_final_data_set_3(
                 new_direction = TradingDirection.Cross
 
             if record_data.open_price == record_data.close_price:
-                pass  # Update
-            elif direction is None:
+                continue
+
+            if direction is None:
                 direction = new_direction
             elif new_direction != direction:
                 # Flush
