@@ -147,7 +147,7 @@
       return {
         buy_volume_percent: buyPct,
         sell_volume_percent: 1 - buyPct,
-        total_volume_log2: total > 0 ? Math.log2(total) : 0,
+        total_volume: total,
       };
     });
     return { candleData, volumeData: volumeDataNormalized };
@@ -193,22 +193,22 @@
     if (from >= to) return;
 
     const ts = chart.timeScale();
-    let maxLog = 0;
+    let maxVolume = 0;
     for (let i = from; i < to; i++) {
-      const v = volumeDataByCandleIndex[i].total_volume_log2;
+      const v = volumeDataByCandleIndex[i].total_volume;
       if (v == null || !Number.isFinite(v) || v < 0) {
-        throw new Error(`volumeData[${i}]: ожидается конечный total_volume_log2 >= 0, получено ${v}`);
+        throw new Error(`volumeData[${i}]: ожидается конечный total_volume >= 0, получено ${v}`);
       }
-      maxLog = Math.max(maxLog, v);
+      maxVolume = Math.max(maxVolume, v);
     }
-    if (maxLog <= 0) maxLog = 1;
+    if (maxVolume <= 0) maxVolume = 1;
 
     ctx.clearRect(0, 0, w, h);
     for (let i = from; i < to; i++) {
       const b = volumeDataByCandleIndex[i];
       const x = Math.round(ts.logicalToCoordinate(i));
       const barW = Math.max(1, Math.round(ts.logicalToCoordinate(i + 1)) - x);
-      const totalH = b.total_volume_log2 / maxLog * (h - 4);
+      const totalH = (b.total_volume / maxVolume) * (h - 4);
       if (b.buy_volume_percent == null || !Number.isFinite(b.buy_volume_percent) || b.buy_volume_percent < 0 || b.buy_volume_percent > 1) {
         throw new Error(`volumeData[${i}]: ожидается buy_volume_percent в [0,1], получено ${b.buy_volume_percent}`);
       }
