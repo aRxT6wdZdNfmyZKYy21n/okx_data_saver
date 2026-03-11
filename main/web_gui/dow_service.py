@@ -115,6 +115,8 @@ def get_dow_bars_for_level(
     bars = []
     for i in range(n):
         total = total_list[i] if i < len(total_list) else 0.0
+        if total == 0:
+            continue  # исключаем паддинг нулями
         buy = buy_list[i] if i < len(buy_list) else 0.0
         buy_pct = (buy / total) if total > 0 else 0.0
         sell_pct = 1.0 - buy_pct
