@@ -19,7 +19,7 @@ from settings import settings
 logger = logging.getLogger(__name__)
 
 
-DOW_LEVELS_COUNT = 5
+DOW_LEVELS_COUNT = 10
 LOG_EVERY_N_ROWS = 1000
 
 

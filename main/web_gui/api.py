@@ -35,7 +35,7 @@ def list_scales() -> list[str]:
 
 @app.get('/api/dow_levels')
 def list_dow_levels() -> list[str]:
-    """Уровни теории Доу (1..5)."""
+    """Уровни теории Доу (1..10)."""
     return list(DOW_LEVEL_NAMES)
 
 
@@ -100,7 +100,7 @@ def _serialize_bar_row(r: dict) -> dict:
 def get_dow(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
     limit: int | None = Query(None, ge=1),
-    level: int = Query(..., ge=1, le=5, description='Уровень теории Доу 1..5'),
+    level: int = Query(..., ge=1, le=10, description='Уровень теории Доу 1..10'),
 ) -> dict:
     """
     Бары по теории Доу для выбранного уровня: OHLCV из тензоров после прогона баров через калькулятор.
