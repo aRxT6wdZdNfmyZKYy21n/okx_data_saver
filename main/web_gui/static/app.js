@@ -35,8 +35,8 @@
   const autoRefreshCheck = document.getElementById('autoRefresh');
   const statusEl = document.getElementById('status');
   const chartDiv = document.getElementById('chart');
-  const cheapnessCanvas = document.getElementById('cheapnessCanvas');
-  const cheapnessPanel = document.getElementById('cheapnessPanel');
+  const concentrationCanvas = document.getElementById('concentrationCanvas');
+  const concentrationPanel = document.getElementById('concentrationPanel');
   const volumeCanvas = document.getElementById('volumeCanvas');
   const volumePanel = document.getElementById('volumePanel');
   const dowStub = document.getElementById('dowStub');
@@ -150,12 +150,12 @@
       const close = candleData[i].close;
       const volumeDelta = 2 * v.buyVolumeSum - total;
       const closePriceDeltaPercent = open !== 0 ? (close - open) / open : 0;
-      const cheapness = volumeDelta === 0 ? 0 : closePriceDeltaPercent / volumeDelta;
+      const concentration = closePriceDeltaPercent * volumeDelta;
       return {
         buy_volume_percent: buyPct,
         sell_volume_percent: 1 - buyPct,
         total_volume: total,
-        cheapness,
+        concentration,
       };
     });
     return { candleData, volumeData: volumeDataNormalized };
@@ -186,15 +186,15 @@
     chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
       if (!range || volumeDataByCandleIndex.length === 0) return;
       if (!volumePanel.classList.contains('hidden')) drawVolumeBars(range);
-      if (!cheapnessPanel.classList.contains('hidden')) drawCheapnessBars(range);
+      if (!concentrationPanel.classList.contains('hidden')) drawConcentrationBars(range);
     });
   }
 
-  function drawCheapnessBars(visibleRange) {
+  function drawConcentrationBars(visibleRange) {
     if (!visibleRange || volumeDataByCandleIndex.length === 0 || !chart) return;
-    const ctx = cheapnessCanvas.getContext('2d');
-    const w = cheapnessCanvas.width;
-    const h = cheapnessCanvas.height;
+    const ctx = concentrationCanvas.getContext('2d');
+    const w = concentrationCanvas.width;
+    const h = concentrationCanvas.height;
     if (!w || !h) return;
 
     const from = Math.max(0, Math.floor(visibleRange.from));
@@ -204,7 +204,7 @@
     const ts = chart.timeScale();
     let maxAbs = 0;
     for (let i = from; i < to; i++) {
-      const c = volumeDataByCandleIndex[i].cheapness;
+      const c = volumeDataByCandleIndex[i].concentration;
       if (c != null && Number.isFinite(c)) maxAbs = Math.max(maxAbs, Math.abs(c));
     }
     if (maxAbs <= 0) maxAbs = 1;
@@ -221,14 +221,14 @@
 
     for (let i = from; i < to; i++) {
       const b = volumeDataByCandleIndex[i];
-      const cheapness = b.cheapness != null ? b.cheapness : 0;
-      if (!Number.isFinite(cheapness)) continue;
+      const concentration = b.concentration != null ? b.concentration : 0;
+      if (!Number.isFinite(concentration)) continue;
       const x = Math.round(ts.logicalToCoordinate(i));
       const barW = Math.max(1, Math.round(ts.logicalToCoordinate(i + 1)) - x);
-      const norm = cheapness / maxAbs;
+      const norm = concentration / maxAbs;
       const barH = Math.abs(norm) * halfH;
       if (barH < 0.5) continue;
-      if (cheapness >= 0) {
+      if (concentration >= 0) {
         ctx.fillStyle = '#26a69a';
         ctx.fillRect(x, centerY - barH, barW, barH);
       } else {
@@ -300,18 +300,18 @@
     candleSeries.setData(candleData);
     chart.timeScale().fitContent();
 
-    cheapnessPanel.classList.remove('hidden');
+    concentrationPanel.classList.remove('hidden');
     const w = Math.max(chartDiv.clientWidth || 800, 1);
     const h = Math.max(chartDiv.clientHeight || 400, 300);
     chart.applyOptions({ width: w, height: chartDiv.clientHeight });
-    cheapnessCanvas.width = cheapnessPanel.clientWidth;
-    cheapnessCanvas.height = cheapnessPanel.clientHeight;
+    concentrationCanvas.width = concentrationPanel.clientWidth;
+    concentrationCanvas.height = concentrationPanel.clientHeight;
 
     requestAnimationFrame(() => {
       const range = chart.timeScale().getVisibleLogicalRange();
       if (range) {
         drawVolumeBars(range);
-        drawCheapnessBars(range);
+        drawConcentrationBars(range);
       }
     });
   }
@@ -322,7 +322,7 @@
 
     dowStub.classList.add('hidden');
     volumePanel.classList.remove('hidden');
-    cheapnessPanel.classList.remove('hidden');
+    concentrationPanel.classList.remove('hidden');
 
     const symbol = symbolSelect.value;
     if (!symbol) return;
@@ -350,7 +350,7 @@
   scaleSelect.addEventListener('change', () => {
     dowStub.classList.add('hidden');
     volumePanel.classList.remove('hidden');
-    cheapnessPanel.classList.remove('hidden');
+    concentrationPanel.classList.remove('hidden');
     loadBars();
   });
   autoRefreshCheck.addEventListener('change', startAutoRefresh);
@@ -367,12 +367,12 @@
         if (chart) chart.applyOptions({ width: chartDiv.clientWidth, height: chartDiv.clientHeight });
         volumeCanvas.width = volumePanel.clientWidth;
         volumeCanvas.height = volumePanel.clientHeight;
-        cheapnessCanvas.width = cheapnessPanel.clientWidth;
-        cheapnessCanvas.height = cheapnessPanel.clientHeight;
+        concentrationCanvas.width = concentrationPanel.clientWidth;
+        concentrationCanvas.height = concentrationPanel.clientHeight;
         const range = chart && chart.timeScale().getVisibleLogicalRange();
         if (range) {
           drawVolumeBars(range);
-          drawCheapnessBars(range);
+          drawConcentrationBars(range);
         }
       });
       loadBars();

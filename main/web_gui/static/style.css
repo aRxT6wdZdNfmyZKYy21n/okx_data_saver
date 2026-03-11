@@ -101,18 +101,18 @@ body {
   width: 100%;
 }
 
-.cheapness-panel {
+.concentration-panel {
   height: 80px;
   background: var(--surface);
   border-top: 1px solid var(--border);
   position: relative;
 }
 
-.cheapness-panel.hidden {
+.concentration-panel.hidden {
   display: none;
 }
 
-#cheapnessCanvas {
+#concentrationCanvas {
   display: block;
   width: 100%;
   height: 100%;
