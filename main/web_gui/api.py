@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from enumerations import SymbolId
 from main.web_gui.constants import DOW_LEVEL_NAMES, SCALE_NAMES
 from main.web_gui.data_service import get_bars_for_api
+from main.web_gui.dow_service import get_dow_bars_for_api
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def list_scales() -> list[str]:
 
 @app.get('/api/dow_levels')
 def list_dow_levels() -> list[str]:
-    """Уровни теории Доу (заглушки)."""
+    """Уровни теории Доу (1..5)."""
     return list(DOW_LEVEL_NAMES)
 
 
@@ -81,17 +82,39 @@ def get_bars(
     available = [c for c in cols if c in df.columns]
     rows = df.select(available).to_dicts()
 
-    # float/nan -> JSON-serializable
-    def _row(r: dict) -> dict:
-        out = {}
-        for k, v in r.items():
-            if v is None or (isinstance(v, float) and math.isnan(v)):
-                out[k] = None
-            else:
-                out[k] = v
-        return out
+    bars = [_serialize_bar_row(r) for r in rows]
+    return {'bars': bars, 'count': len(bars)}
 
-    bars = [_row(r) for r in rows]
+
+def _serialize_bar_row(r: dict) -> dict:
+    out = {}
+    for k, v in r.items():
+        if v is None or (isinstance(v, float) and math.isnan(v)):
+            out[k] = None
+        else:
+            out[k] = v
+    return out
+
+
+@app.get('/api/dow')
+def get_dow(
+    symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
+    limit: int | None = Query(None, ge=1),
+    level: int = Query(..., ge=1, le=5, description='Уровень теории Доу 1..5'),
+) -> dict:
+    """
+    Бары по теории Доу для выбранного уровня: OHLCV из тензоров после прогона баров через калькулятор.
+    """
+    try:
+        symbol = SymbolId[symbol_id]
+    except KeyError:
+        raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
+
+    effective_limit = min(limit or settings.WEB_GUI_RECORDS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
+    dow_bars = get_dow_bars_for_api(symbol_id=symbol, limit=effective_limit, level=level)
+    if dow_bars is None:
+        raise HTTPException(503, detail='Dow theory aggregator not available or failed')
+    bars = [_serialize_bar_row(r) for r in dow_bars]
     return {'bars': bars, 'count': len(bars)}
 
 

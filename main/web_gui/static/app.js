@@ -15,6 +15,10 @@
       const q = new URLSearchParams(params).toString();
       return this.get('./api/bars?' + q);
     },
+    async dow(params) {
+      const q = new URLSearchParams(params).toString();
+      return this.get('./api/dow?' + q);
+    },
   };
 
   let config = { defaultLimit: 100000, refreshIntervalSec: 30 };
@@ -44,6 +48,11 @@
 
   function isDowLevel(value) {
     return typeof value === 'string' && /^Уровень \d+$/.test(value);
+  }
+
+  function parseDowLevel(value) {
+    const m = value && value.match(/^Уровень (\d+)$/);
+    return m ? parseInt(m[1], 10) : 0;
   }
 
   function initDropdowns() {
@@ -205,18 +214,32 @@
     }
   }
 
+  function applyBarsToChart(data) {
+    barsData = data.bars || [];
+    setStatus(`Загружено ${data.count} баров`);
+
+    const { candleData, volumeData } = barsToCandleAndVolumeData(barsData);
+    if (candleData.length === 0) return;
+
+    volumeDataByCandleIndex = volumeData;
+    ensureChart();
+    candleSeries.setData(candleData);
+    chart.timeScale().fitContent();
+
+    const w = Math.max(chartDiv.clientWidth || 800, 1);
+    const h = Math.max(chartDiv.clientHeight || 400, 300);
+    chart.applyOptions({ width: w, height: h });
+
+    requestAnimationFrame(() => {
+      const range = chart.timeScale().getVisibleLogicalRange();
+      if (range) drawVolumeBars(range);
+    });
+  }
+
   function loadBars() {
     const scale = scaleSelect.value;
     if (!scale) return;
-    if (isDowLevel(scale)) {
-      dowStub.classList.remove('hidden');
-      volumePanel.classList.add('hidden');
-      if (chart) chart.remove();
-      chart = null;
-      candleSeries = null;
-      setStatus('Выбран уровень теории Доу (в разработке)');
-      return;
-    }
+
     dowStub.classList.add('hidden');
     volumePanel.classList.remove('hidden');
 
@@ -225,29 +248,12 @@
     const limit = limitInput.value ? parseInt(limitInput.value, 10) : config.defaultLimit;
     setStatus('Загрузка…');
 
-    API.bars({ symbol_id: symbol, limit, scale })
-      .then(data => {
-        barsData = data.bars || [];
-        setStatus(`Загружено ${data.count} баров`);
+    const promise = isDowLevel(scale)
+      ? API.dow({ symbol_id: symbol, limit, level: parseDowLevel(scale) })
+      : API.bars({ symbol_id: symbol, limit, scale });
 
-        const { candleData, volumeData } = barsToCandleAndVolumeData(barsData);
-        if (candleData.length === 0) return;
-
-        volumeDataByCandleIndex = volumeData;
-
-        ensureChart();
-        candleSeries.setData(candleData);
-        chart.timeScale().fitContent();
-
-        const w = Math.max(chartDiv.clientWidth || 800, 1);
-        const h = Math.max(chartDiv.clientHeight || 400, 300);
-        chart.applyOptions({ width: w, height: h });
-
-        requestAnimationFrame(() => {
-          const range = chart.timeScale().getVisibleLogicalRange();
-          if (range) drawVolumeBars(range);
-        });
-      })
+    promise
+      .then(data => applyBarsToChart(data))
       .catch(e => {
         setStatus('Ошибка: ' + e.message, true);
       });
@@ -256,23 +262,14 @@
   function startAutoRefresh() {
     if (refreshTimer) clearInterval(refreshTimer);
     if (!autoRefreshCheck.checked) return;
-    refreshTimer = setInterval(() => {
-      if (isDowLevel(scaleSelect.value)) return;
-      loadBars();
-    }, config.refreshIntervalSec * 1000);
+    refreshTimer = setInterval(loadBars, config.refreshIntervalSec * 1000);
   }
 
   loadBtn.addEventListener('click', loadBars);
   scaleSelect.addEventListener('change', () => {
-    if (isDowLevel(scaleSelect.value)) {
-      dowStub.classList.remove('hidden');
-      volumePanel.classList.add('hidden');
-      if (chart) { chart.remove(); chart = null; candleSeries = null; }
-    } else {
-      dowStub.classList.add('hidden');
-      volumePanel.classList.remove('hidden');
-      loadBars();
-    }
+    dowStub.classList.add('hidden');
+    volumePanel.classList.remove('hidden');
+    loadBars();
   });
   autoRefreshCheck.addEventListener('change', startAutoRefresh);
 
