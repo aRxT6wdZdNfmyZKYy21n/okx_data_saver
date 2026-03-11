@@ -7,13 +7,23 @@
 """
 
 import argparse
+import logging
+import sys
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='OKX Data Set Web GUI')
     parser.add_argument('--host', default='127.0.0.1', help='Host to bind')
     parser.add_argument('--port', type=int, default=8000, help='Port to bind')
     parser.add_argument('--reload', action='store_true', help='Enable reload for development')
+    parser.add_argument('-v', '--verbose', action='store_true', help='INFO logging (e.g. Processed row #...)')
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO if args.verbose else logging.WARNING,
+        format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
+        stream=sys.stdout,
+    )
 
     from main.web_gui import api  # noqa: F401 — монтирование static при импорте
 
