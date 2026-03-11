@@ -285,7 +285,7 @@ async def save_final_data_set_3(
                 start_trade_id = None
                 end_trade_id = None
 
-                direction = None
+                direction = new_direction
 
                 end_timestamp_ms = None
                 start_timestamp_ms = None
