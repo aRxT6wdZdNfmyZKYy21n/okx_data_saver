@@ -7,7 +7,7 @@ import logging
 import polars
 
 from enumerations import SymbolId
-from main.save_final_data_set_2.schemas import OKXDataSetRecordData_2
+from main.save_final_data_set_3.schemas import OKXDataSetRecordData_3
 from main.web_gui.aggregation import aggregate_bars
 from main.web_gui.constants import scale_to_multiplier
 from settings import settings
@@ -51,7 +51,7 @@ def fetch_last_bars(
         total_trades_count, buy_trades_count
     FROM (
         SELECT *
-        FROM {OKXDataSetRecordData_2.__tablename__}
+        FROM {OKXDataSetRecordData_3.__tablename__}
         WHERE symbol_id = '{symbol_id.name}'
         ORDER BY start_trade_id DESC
         LIMIT {total}
