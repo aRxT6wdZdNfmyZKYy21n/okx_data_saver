@@ -35,6 +35,8 @@
   const autoRefreshCheck = document.getElementById('autoRefresh');
   const statusEl = document.getElementById('status');
   const chartDiv = document.getElementById('chart');
+  const cheapnessCanvas = document.getElementById('cheapnessCanvas');
+  const cheapnessPanel = document.getElementById('cheapnessPanel');
   const volumeCanvas = document.getElementById('volumeCanvas');
   const volumePanel = document.getElementById('volumePanel');
   const dowStub = document.getElementById('dowStub');
@@ -141,13 +143,19 @@
         volumeData.push({ totalVolumeSum: cur.totalVolume, buyVolumeSum: cur.buyPct * cur.totalVolume });
       }
     }
-    const volumeDataNormalized = volumeData.map(v => {
+    const volumeDataNormalized = volumeData.map((v, i) => {
       const total = v.totalVolumeSum;
       const buyPct = total > 0 ? v.buyVolumeSum / total : 0;
+      const open = candleData[i].open;
+      const close = candleData[i].close;
+      const volumeDelta = 2 * v.buyVolumeSum - total;
+      const closePriceDeltaPercent = open !== 0 ? (close - open) / open : 0;
+      const cheapness = volumeDelta === 0 ? 0 : closePriceDeltaPercent / volumeDelta;
       return {
         buy_volume_percent: buyPct,
         sell_volume_percent: 1 - buyPct,
         total_volume: total,
+        cheapness,
       };
     });
     return { candleData, volumeData: volumeDataNormalized };
@@ -176,9 +184,58 @@
     chart.timeScale().fitContent();
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-      if (!range || volumeDataByCandleIndex.length === 0 || volumePanel.classList.contains('hidden')) return;
-      drawVolumeBars(range);
+      if (!range || volumeDataByCandleIndex.length === 0) return;
+      if (!volumePanel.classList.contains('hidden')) drawVolumeBars(range);
+      if (!cheapnessPanel.classList.contains('hidden')) drawCheapnessBars(range);
     });
+  }
+
+  function drawCheapnessBars(visibleRange) {
+    if (!visibleRange || volumeDataByCandleIndex.length === 0 || !chart) return;
+    const ctx = cheapnessCanvas.getContext('2d');
+    const w = cheapnessCanvas.width;
+    const h = cheapnessCanvas.height;
+    if (!w || !h) return;
+
+    const from = Math.max(0, Math.floor(visibleRange.from));
+    const to = Math.min(volumeDataByCandleIndex.length, Math.ceil(visibleRange.to));
+    if (from >= to) return;
+
+    const ts = chart.timeScale();
+    let maxAbs = 0;
+    for (let i = from; i < to; i++) {
+      const c = volumeDataByCandleIndex[i].cheapness;
+      if (c != null && Number.isFinite(c)) maxAbs = Math.max(maxAbs, Math.abs(c));
+    }
+    if (maxAbs <= 0) maxAbs = 1;
+
+    const centerY = h / 2;
+    const halfH = (h - 4) / 2;
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = '#2a2e39';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(w, centerY);
+    ctx.stroke();
+
+    for (let i = from; i < to; i++) {
+      const b = volumeDataByCandleIndex[i];
+      const cheapness = b.cheapness != null ? b.cheapness : 0;
+      if (!Number.isFinite(cheapness)) continue;
+      const x = Math.round(ts.logicalToCoordinate(i));
+      const barW = Math.max(1, Math.round(ts.logicalToCoordinate(i + 1)) - x);
+      const norm = cheapness / maxAbs;
+      const barH = Math.abs(norm) * halfH;
+      if (barH < 0.5) continue;
+      if (cheapness >= 0) {
+        ctx.fillStyle = '#26a69a';
+        ctx.fillRect(x, centerY - barH, barW, barH);
+      } else {
+        ctx.fillStyle = '#ef5350';
+        ctx.fillRect(x, centerY, barW, barH);
+      }
+    }
   }
 
   function drawVolumeBars(visibleRange) {
@@ -243,13 +300,19 @@
     candleSeries.setData(candleData);
     chart.timeScale().fitContent();
 
+    cheapnessPanel.classList.remove('hidden');
     const w = Math.max(chartDiv.clientWidth || 800, 1);
     const h = Math.max(chartDiv.clientHeight || 400, 300);
-    chart.applyOptions({ width: w, height: h });
+    chart.applyOptions({ width: w, height: chartDiv.clientHeight });
+    cheapnessCanvas.width = cheapnessPanel.clientWidth;
+    cheapnessCanvas.height = cheapnessPanel.clientHeight;
 
     requestAnimationFrame(() => {
       const range = chart.timeScale().getVisibleLogicalRange();
-      if (range) drawVolumeBars(range);
+      if (range) {
+        drawVolumeBars(range);
+        drawCheapnessBars(range);
+      }
     });
   }
 
@@ -259,6 +322,7 @@
 
     dowStub.classList.add('hidden');
     volumePanel.classList.remove('hidden');
+    cheapnessPanel.classList.remove('hidden');
 
     const symbol = symbolSelect.value;
     if (!symbol) return;
@@ -286,6 +350,7 @@
   scaleSelect.addEventListener('change', () => {
     dowStub.classList.add('hidden');
     volumePanel.classList.remove('hidden');
+    cheapnessPanel.classList.remove('hidden');
     loadBars();
   });
   autoRefreshCheck.addEventListener('change', startAutoRefresh);
@@ -302,8 +367,13 @@
         if (chart) chart.applyOptions({ width: chartDiv.clientWidth, height: chartDiv.clientHeight });
         volumeCanvas.width = volumePanel.clientWidth;
         volumeCanvas.height = volumePanel.clientHeight;
+        cheapnessCanvas.width = cheapnessPanel.clientWidth;
+        cheapnessCanvas.height = cheapnessPanel.clientHeight;
         const range = chart && chart.timeScale().getVisibleLogicalRange();
-        if (range) drawVolumeBars(range);
+        if (range) {
+          drawVolumeBars(range);
+          drawCheapnessBars(range);
+        }
       });
       loadBars();
       startAutoRefresh();

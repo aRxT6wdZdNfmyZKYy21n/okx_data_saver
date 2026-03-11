@@ -101,6 +101,23 @@ body {
   width: 100%;
 }
 
+.cheapness-panel {
+  height: 80px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+
+.cheapness-panel.hidden {
+  display: none;
+}
+
+#cheapnessCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .volume-panel {
   height: 120px;
   background: var(--surface);
