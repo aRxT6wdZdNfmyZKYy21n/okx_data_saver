@@ -45,6 +45,22 @@ def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None
     return [serialize_bar_row(r) for r in bars]
 
 
+def _run_worker(
+    result_queue: multiprocessing.Queue,
+    fn: Callable[..., list[dict] | None],
+    *args,
+) -> None:
+    """
+    Точка входа в дочерний процесс (должна быть на уровне модуля, чтобы pickle при spawn).
+    """
+    try:
+        result = fn(*args)
+        result_queue.put(('ok', result))
+    except Exception as e:
+        logger.exception('Worker failed')
+        result_queue.put(('error', str(e)))
+
+
 def run_in_spawned_process(fn: Callable[..., list[dict] | None], *args) -> list[dict] | None:
     """
     Запускает fn(*args) в отдельном процессе (spawn). Возвращает результат из дочернего процесса.
@@ -52,16 +68,7 @@ def run_in_spawned_process(fn: Callable[..., list[dict] | None], *args) -> list[
     """
     ctx = multiprocessing.get_context('spawn')
     result_queue = ctx.Queue()
-
-    def wrapper() -> None:
-        try:
-            result = fn(*args)
-            result_queue.put(('ok', result))
-        except Exception as e:
-            logger.exception('Worker failed')
-            result_queue.put(('error', str(e)))
-
-    p = ctx.Process(target=wrapper)
+    p = ctx.Process(target=_run_worker, args=(result_queue, fn) + args)
     p.start()
     p.join()
     kind, payload = result_queue.get()
