@@ -48,9 +48,10 @@ def _bar_row_to_dow_row(bar: dict) -> dict[str, float | int]:
 def run_dow_pipeline(
     symbol_id: SymbolId,
     limit: int,
-) -> dict[str, dict[str, torch.Tensor]] | None:
+    level: int,
+) -> dict[str, torch.Tensor] | None:
     """
-    Загружает последние limit баров, прогоняет через калькулятор Доу (5 уровней),
+    Загружает последние limit баров, прогоняет через калькулятор Доу с max_trend_levels=level,
     возвращает get_final_tensors(). Логирует каждую 1000-ю обработанную строку.
     """
     df = fetch_last_bars(symbol_id=symbol_id, limit=limit, offset=0)
@@ -58,7 +59,7 @@ def run_dow_pipeline(
         return None
 
     seq_len = settings.WEB_GUI_DOW_SEQUENCE_LENGTH
-    state = IncrementalTrendState(max_trend_levels=DOW_LEVELS_COUNT, sequence_length=seq_len)
+    state = IncrementalTrendState(max_trend_levels=level, sequence_length=seq_len)
 
     rows = df.to_dicts()
     for i, row in enumerate(rows):
@@ -80,30 +81,29 @@ def _tensor_to_list(t: torch.Tensor) -> list[float]:
 
 
 def get_dow_bars_for_level(
-    final_tensors: dict[str, dict[str, torch.Tensor]],
-    level: int,
+    final_tensors: dict[str, torch.Tensor],
     base_timestamp_ms: int,
 ) -> list[dict] | None:
     """
-    Извлекает из final_tensors бары для уровня level (1..5) в формате API:
-    start_timestamp_ms, open_price, high_price, low_price, close_price,
+    Извлекает из final_tensors (плоская структура с ключами open_price, close_price, ...)
+    бары в формате API: start_timestamp_ms, open_price, high_price, low_price, close_price,
     total_volume, buy_volume_percent, sell_volume_percent, total_volume_log2.
+    Параметр level не меняет набор ключей (C++ возвращает один набор по выбранному уровню или общий).
     """
-    level_name = f'trend_level_{level}'
-    if level_name not in final_tensors:
+    if 'open_price' not in final_tensors:
         return None
+    level_data = final_tensors
 
-    level_data = final_tensors[level_name]
     open_p = level_data['open_price']
     if open_p.numel() == 0:
         return []
 
     n = open_p.numel()
-    high_p = level_data['high_price'] if 'high_price' in level_data else None
-    low_p = level_data['low_price'] if 'low_price' in level_data else None
-    close_p = level_data['close_price'] if 'close_price' in level_data else None
-    total_vol = level_data['total_volume'] if 'total_volume' in level_data else None
-    buy_vol = level_data['buy_volume'] if 'buy_volume' in level_data else None
+    high_p = level_data.get('high_price')
+    low_p = level_data.get('low_price')
+    close_p = level_data.get('close_price')
+    total_vol = level_data.get('total_volume')
+    buy_vol = level_data.get('buy_volume')
 
     open_list = _tensor_to_list(open_p)
     high_list = _tensor_to_list(high_p) if high_p is not None else open_list
@@ -147,11 +147,11 @@ def get_dow_bars_for_api(
     if level < 1 or level > DOW_LEVELS_COUNT:
         return None
 
-    final_tensors = run_dow_pipeline(symbol_id=symbol_id, limit=limit)
+    final_tensors = run_dow_pipeline(symbol_id=symbol_id, limit=limit, level=level)
     if final_tensors is None:
         return None
 
     df = fetch_last_bars(symbol_id=symbol_id, limit=1, offset=0)
     base_ts = int(df['start_timestamp_ms'][0]) if df is not None and df.height > 0 else 0
 
-    return get_dow_bars_for_level(final_tensors, level=level, base_timestamp_ms=base_ts)
+    return get_dow_bars_for_level(final_tensors, base_timestamp_ms=base_ts)
