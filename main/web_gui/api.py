@@ -3,7 +3,6 @@ REST API веб-GUI: символы, бары с пагинацией и мас�
 """
 
 import logging
-import math
 import os
 
 from fastapi import FastAPI, HTTPException, Query
@@ -12,8 +11,11 @@ from fastapi.staticfiles import StaticFiles
 
 from enumerations import SymbolId
 from main.web_gui.constants import DOW_LEVEL_NAMES, SCALE_NAMES
-from main.web_gui.data_service import get_bars_for_api
-from main.web_gui.dow_service import get_dow_bars_for_api
+from main.web_gui.request_workers import (
+    _worker_bars,
+    _worker_dow,
+    run_in_spawned_process,
+)
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -68,32 +70,12 @@ def get_bars(
         raise HTTPException(422, detail=f'Unknown scale: {scale}')
 
     effective_limit = min(limit or settings.WEB_GUI_RECORDS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
-    df = get_bars_for_api(symbol_id=symbol, limit=effective_limit, offset=offset, scale=scale)
-    if df is None:
+    bars = run_in_spawned_process(
+        _worker_bars, symbol_id, effective_limit, offset, scale,
+    )
+    if bars is None:
         return {'bars': [], 'count': 0}
-
-    # Сериализация: только нужные поля для графика и объёмов
-    cols = [
-        'start_trade_id', 'end_trade_id',
-        'start_timestamp_ms', 'end_timestamp_ms',
-        'open_price', 'high_price', 'low_price', 'close_price',
-        'total_volume', 'buy_volume_percent', 'sell_volume_percent', 'total_volume_log2',
-    ]
-    available = [c for c in cols if c in df.columns]
-    rows = df.select(available).to_dicts()
-
-    bars = [_serialize_bar_row(r) for r in rows]
     return {'bars': bars, 'count': len(bars)}
-
-
-def _serialize_bar_row(r: dict) -> dict:
-    out = {}
-    for k, v in r.items():
-        if v is None or (isinstance(v, float) and math.isnan(v)):
-            out[k] = None
-        else:
-            out[k] = v
-    return out
 
 
 @app.get('/api/dow')
@@ -111,10 +93,9 @@ def get_dow(
         raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
 
     effective_limit = min(limit or settings.WEB_GUI_RECORDS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
-    dow_bars = get_dow_bars_for_api(symbol_id=symbol, limit=effective_limit, level=level)
-    if dow_bars is None:
+    bars = run_in_spawned_process(_worker_dow, symbol_id, effective_limit, level)
+    if bars is None:
         raise HTTPException(503, detail='Dow theory aggregator not available or failed')
-    bars = [_serialize_bar_row(r) for r in dow_bars]
     return {'bars': bars, 'count': len(bars)}
 
 

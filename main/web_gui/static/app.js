@@ -91,28 +91,36 @@
   /**
    * Строит данные свечей и объёмов в одном порядке (строго по времени, дубли по time склеены).
    * Возвращает { candleData, volumeData } — volumeData[i] соответствует candleData[i].
+   * При встрече non-finite или некорректных значений — выбрасывает ошибку.
    */
   function barsToCandleAndVolumeData(bars) {
-    const invalid = [];
-    const raw = bars
-      .map((b, index) => {
-        const time = b.start_timestamp_ms != null ? Math.floor(b.start_timestamp_ms / 1000) : null;
-        const open = b.open_price != null ? Number(b.open_price) : null;
-        const high = b.high_price != null ? Number(b.high_price) : null;
-        const low = b.low_price != null ? Number(b.low_price) : null;
-        const close = b.close_price != null ? Number(b.close_price) : null;
-        const totalVolume = b.total_volume != null ? Number(b.total_volume) : 0;
-        const buyPct = b.buy_volume_percent != null ? Math.max(0, Math.min(1, Number(b.buy_volume_percent))) : 0;
-        if (time == null || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
-          invalid.push({ index, start_trade_id: b.start_trade_id, start_timestamp_ms: b.start_timestamp_ms, open_price: b.open_price, high_price: b.high_price, low_price: b.low_price, close_price: b.close_price });
-          return null;
-        }
-        return { time, open, high, low, close, totalVolume, buyPct };
-      })
-      .filter(Boolean);
-    if (invalid.length > 0) {
-      console.warn('[barsToCandleAndVolumeData] Пропущено некорректных свечей:', invalid.length, invalid);
-    }
+    const raw = bars.map((b, index) => {
+      const time = b.start_timestamp_ms != null ? Math.floor(b.start_timestamp_ms / 1000) : null;
+      const open = b.open_price != null ? Number(b.open_price) : null;
+      const high = b.high_price != null ? Number(b.high_price) : null;
+      const low = b.low_price != null ? Number(b.low_price) : null;
+      const close = b.close_price != null ? Number(b.close_price) : null;
+      const totalVolume = b.total_volume != null ? Number(b.total_volume) : null;
+      const buyPctRaw = b.buy_volume_percent != null ? Number(b.buy_volume_percent) : null;
+      if (time == null || !Number.isFinite(time)) {
+        throw new Error(`Бар #${index}: неверный time (start_timestamp_ms=${b.start_timestamp_ms})`);
+      }
+      if (open == null || !Number.isFinite(open) || high == null || !Number.isFinite(high) ||
+          low == null || !Number.isFinite(low) || close == null || !Number.isFinite(close)) {
+        throw new Error(
+          `Бар #${index} (start_trade_id=${b.start_trade_id}): ожидаются конечные open/high/low/close, ` +
+          `получено open=${b.open_price} high=${b.high_price} low=${b.low_price} close=${b.close_price}`
+        );
+      }
+      if (totalVolume == null || !Number.isFinite(totalVolume) || totalVolume < 0) {
+        throw new Error(`Бар #${index} (start_trade_id=${b.start_trade_id}): неверный total_volume=${b.total_volume}`);
+      }
+      if (buyPctRaw != null && (!Number.isFinite(buyPctRaw) || buyPctRaw < 0 || buyPctRaw > 1)) {
+        throw new Error(`Бар #${index} (start_trade_id=${b.start_trade_id}): неверный buy_volume_percent=${b.buy_volume_percent}`);
+      }
+      const buyPct = buyPctRaw != null ? buyPctRaw : 0;
+      return { time, open, high, low, close, totalVolume, buyPct };
+    });
     raw.sort((a, b) => a.time - b.time);
     const candleData = [];
     const volumeData = [];
@@ -188,7 +196,10 @@
     let maxLog = 0;
     for (let i = from; i < to; i++) {
       const v = volumeDataByCandleIndex[i].total_volume_log2;
-      if (v != null && isFinite(v)) maxLog = Math.max(maxLog, v);
+      if (v == null || !Number.isFinite(v) || v < 0) {
+        throw new Error(`volumeData[${i}]: ожидается конечный total_volume_log2 >= 0, получено ${v}`);
+      }
+      maxLog = Math.max(maxLog, v);
     }
     if (maxLog <= 0) maxLog = 1;
 
@@ -197,9 +208,15 @@
       const b = volumeDataByCandleIndex[i];
       const x = Math.round(ts.logicalToCoordinate(i));
       const barW = Math.max(1, Math.round(ts.logicalToCoordinate(i + 1)) - x);
-      const totalH = ((b.total_volume_log2 != null && isFinite(b.total_volume_log2)) ? b.total_volume_log2 : 0) / maxLog * (h - 4);
-      const buyPct = b.buy_volume_percent != null ? Math.max(0, Math.min(1, b.buy_volume_percent)) : 0;
-      const sellPct = b.sell_volume_percent != null ? Math.max(0, Math.min(1, b.sell_volume_percent)) : 0;
+      const totalH = b.total_volume_log2 / maxLog * (h - 4);
+      if (b.buy_volume_percent == null || !Number.isFinite(b.buy_volume_percent) || b.buy_volume_percent < 0 || b.buy_volume_percent > 1) {
+        throw new Error(`volumeData[${i}]: ожидается buy_volume_percent в [0,1], получено ${b.buy_volume_percent}`);
+      }
+      if (b.sell_volume_percent == null || !Number.isFinite(b.sell_volume_percent) || b.sell_volume_percent < 0 || b.sell_volume_percent > 1) {
+        throw new Error(`volumeData[${i}]: ожидается sell_volume_percent в [0,1], получено ${b.sell_volume_percent}`);
+      }
+      const buyPct = b.buy_volume_percent;
+      const sellPct = b.sell_volume_percent;
       const buyH = totalH * buyPct;
       const sellH = totalH * sellPct;
 
