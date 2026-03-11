@@ -240,12 +240,19 @@ async def save_final_data_set_3(
                     f'Processed {record_idx} records. Committing...',
                 )
 
-            new_direction = get_direction(
-                record_data.open_price,
-                record_data.close_price,
-            )
+            sell_volume = record_data.total_volume - record_data.buy_volume
+            delta_volume = buy_volume - sell_volume
 
-            if new_direction is TradingDirection.Cross:
+            new_direction: TradingDirection
+
+            if delta_volume > 0:
+                new_direction = TradingDirection.Bull
+            elif delta_volume < 0:
+                new_direction = TradingDirection.Bear
+            else:
+                new_direction = TradingDirection.Cross
+
+            if record_data.open_price == record_data.close_price:
                 pass  # Update
             elif direction is None:
                 direction = new_direction
