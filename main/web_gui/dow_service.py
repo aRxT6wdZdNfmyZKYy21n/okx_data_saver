@@ -82,7 +82,6 @@ def _tensor_to_list(t: torch.Tensor) -> list[float]:
 
 def get_dow_bars_for_level(
     final_tensors: dict[str, torch.Tensor],
-    base_timestamp_ms: int,
 ) -> list[dict] | None:
     """
     Извлекает из final_tensors (плоская структура с ключами open_price, close_price, ...)
@@ -99,35 +98,38 @@ def get_dow_bars_for_level(
         return []
 
     n = open_p.numel()
-    high_p = level_data.get('high_price')
-    low_p = level_data.get('low_price')
-    close_p = level_data.get('close_price')
-    total_vol = level_data.get('total_volume')
-    buy_vol = level_data.get('buy_volume')
+    start_timestamp_ms_tensor = level_data['start_timestamp_ms']
+    high_p = level_data['high_price']
+    low_p = level_data['low_price']
+    close_p = level_data['close_price']
+    total_vol = level_data['total_volume']
+    buy_vol = level_data['buy_volume']
 
+    start_timestamp_ms_list = _tensor_to_list(start_timestamp_ms_tensor)
     open_list = _tensor_to_list(open_p)
-    high_list = _tensor_to_list(high_p) if high_p is not None else open_list
-    low_list = _tensor_to_list(low_p) if low_p is not None else open_list
-    close_list = _tensor_to_list(close_p) if close_p is not None else open_list
-    total_list = _tensor_to_list(total_vol) if total_vol is not None else [0.0] * n
-    buy_list = _tensor_to_list(buy_vol) if buy_vol is not None else [0.0] * n
+    high_list = _tensor_to_list(high_p)
+    low_list = _tensor_to_list(low_p)
+    close_list = _tensor_to_list(close_p)
+    total_list = _tensor_to_list(total_vol)
+    buy_list = _tensor_to_list(buy_vol)
 
     bars = []
     for i in range(n):
-        total = total_list[i] if i < len(total_list) else 0.0
+        total = total_list[i]
         if total == 0:
             continue  # исключаем паддинг нулями
-        buy = buy_list[i] if i < len(buy_list) else 0.0
-        buy_pct = (buy / total) if total > 0 else 0.0
+
+        buy = buy_list[i]
+        buy_pct = (buy / total)
         sell_pct = 1.0 - buy_pct
-        total_log2 = math.log2(total) if total > 0 else 0.0
+        total_log2 = math.log2(total)
 
         bars.append({
-            'start_timestamp_ms': base_timestamp_ms + i * 60_000,
-            'open_price': open_list[i] if i < len(open_list) else None,
-            'high_price': high_list[i] if i < len(high_list) else None,
-            'low_price': low_list[i] if i < len(low_list) else None,
-            'close_price': close_list[i] if i < len(close_list) else None,
+            'start_timestamp_ms': start_timestamp_ms_list,
+            'open_price': open_list[i],
+            'high_price': high_list[i],
+            'low_price': low_list[i],
+            'close_price': close_list[i],
             'total_volume': total,
             'buy_volume_percent': buy_pct,
             'sell_volume_percent': sell_pct,
@@ -153,7 +155,6 @@ def get_dow_bars_for_api(
     if final_tensors is None:
         return None
 
-    df = fetch_last_bars(symbol_id=symbol_id, limit=1, offset=0)
-    base_ts = int(df['start_timestamp_ms'][0]) if df is not None and df.height > 0 else 0
-
-    return get_dow_bars_for_level(final_tensors, base_timestamp_ms=base_ts)
+    return get_dow_bars_for_level(
+        final_tensors,
+    )
