@@ -241,7 +241,7 @@ async def save_final_data_set_3(
                 )
 
             sell_volume = record_data.total_volume - record_data.buy_volume
-            delta_volume = buy_volume - sell_volume
+            delta_volume = record_data.buy_volume - sell_volume
 
             new_direction: TradingDirection
 
