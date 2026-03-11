@@ -99,7 +99,7 @@ def get_dow_bars_for_level(
         return []
 
     n = open_p.numel()
-    start_timestamp_ms_tensor = level_data['start_timestamp_ms']
+    # start_timestamp_ms_tensor = level_data['start_timestamp_ms']  # TODO
     high_p = level_data['high_price']
     low_p = level_data['low_price']
     close_p = level_data['close_price']
