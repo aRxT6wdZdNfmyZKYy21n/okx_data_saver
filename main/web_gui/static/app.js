@@ -143,19 +143,15 @@
         volumeData.push({ totalVolumeSum: cur.totalVolume, buyVolumeSum: cur.buyPct * cur.totalVolume });
       }
     }
-    const volumeDataNormalized = volumeData.map((v, i) => {
+    const volumeDataNormalized = volumeData.map((v) => {
       const total = v.totalVolumeSum;
       const buyPct = total > 0 ? v.buyVolumeSum / total : 0;
-      const open = candleData[i].open;
-      const close = candleData[i].close;
-      const volumeDelta = 2 * v.buyVolumeSum - total;
-      const closePriceDeltaPercent = open !== 0 ? (close - open) / open : 0;
-      const concentration = closePriceDeltaPercent * volumeDelta;
+      const volume_delta = 2 * v.buyVolumeSum - total;
       return {
         buy_volume_percent: buyPct,
         sell_volume_percent: 1 - buyPct,
         total_volume: total,
-        concentration,
+        volume_delta,
       };
     });
     return { candleData, volumeData: volumeDataNormalized };
@@ -204,7 +200,7 @@
     const ts = chart.timeScale();
     let maxAbs = 0;
     for (let i = from; i < to; i++) {
-      const c = volumeDataByCandleIndex[i].concentration;
+      const c = volumeDataByCandleIndex[i].volume_delta;
       if (c != null && Number.isFinite(c)) maxAbs = Math.max(maxAbs, Math.abs(c));
     }
     if (maxAbs <= 0) maxAbs = 1;
@@ -221,14 +217,14 @@
 
     for (let i = from; i < to; i++) {
       const b = volumeDataByCandleIndex[i];
-      const concentration = b.concentration != null ? b.concentration : 0;
-      if (!Number.isFinite(concentration)) continue;
+      const volumeDelta = b.volume_delta != null ? b.volume_delta : 0;
+      if (!Number.isFinite(volumeDelta)) continue;
       const x = Math.round(ts.logicalToCoordinate(i));
       const barW = Math.max(1, Math.round(ts.logicalToCoordinate(i + 1)) - x);
-      const norm = concentration / maxAbs;
+      const norm = volumeDelta / maxAbs;
       const barH = Math.abs(norm) * halfH;
       if (barH < 0.5) continue;
-      if (concentration >= 0) {
+      if (volumeDelta >= 0) {
         ctx.fillStyle = '#26a69a';
         ctx.fillRect(x, centerY - barH, barW, barH);
       } else {
