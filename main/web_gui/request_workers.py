@@ -70,8 +70,10 @@ def run_in_spawned_process(fn: Callable[..., list[dict] | None], *args) -> list[
     result_queue = ctx.Queue()
     p = ctx.Process(target=_run_worker, args=(result_queue, fn) + args)
     p.start()
-    p.join()
+    # Сначала читаем результат, затем join: при большом ответе дочерний процесс
+    # блокируется на put(), пока родитель не прочитает очередь — иначе дедлок.
     kind, payload = result_queue.get()
+    p.join()
     if kind == 'error':
         raise RuntimeError(f'Worker error: {payload}')
     return payload
