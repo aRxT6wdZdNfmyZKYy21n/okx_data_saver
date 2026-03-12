@@ -4,6 +4,7 @@
 
 import logging
 import multiprocessing
+import sys
 from collections.abc import Callable
 
 from enumerations import SymbolId
@@ -14,6 +15,9 @@ from main.web_gui.serialization import serialize_bar_row
 from settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Уровень логирования в spawn-процессах: выставляется из __main__ при старте с -v/--verbose.
+VERBOSE = False
 
 BAR_COLS = [
     'start_trade_id', 'end_trade_id',
@@ -48,11 +52,17 @@ def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None
 def _run_worker(
     result_queue: multiprocessing.Queue,
     fn: Callable[..., list[dict] | None],
+    verbose: bool,
     *args,
 ) -> None:
     """
     Точка входа в дочерний процесс (должна быть на уровне модуля, чтобы pickle при spawn).
     """
+    logging.basicConfig(
+        level=logging.INFO if verbose else logging.WARNING,
+        format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
+        stream=sys.stdout,
+    )
     try:
         result = fn(*args)
         result_queue.put(('ok', result))
@@ -68,7 +78,7 @@ def run_in_spawned_process(fn: Callable[..., list[dict] | None], *args) -> list[
     """
     ctx = multiprocessing.get_context('spawn')
     result_queue = ctx.Queue()
-    p = ctx.Process(target=_run_worker, args=(result_queue, fn) + args)
+    p = ctx.Process(target=_run_worker, args=(result_queue, fn, VERBOSE) + args)
     p.start()
     # Сначала читаем результат, затем join: при большом ответе дочерний процесс
     # блокируется на put(), пока родитель не прочитает очередь — иначе дедлок.
