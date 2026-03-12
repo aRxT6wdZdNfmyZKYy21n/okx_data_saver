@@ -14,7 +14,7 @@ import traceback
 import polars
 
 from enumerations import SymbolId
-from main.save_final_data_set_2.schemas import OKXDataSetRecordData_2
+from main.save_final_data_set_3.schemas import OKXDataSetRecordData_3
 from settings import settings
 
 logging.basicConfig(
@@ -104,7 +104,7 @@ def main() -> None:
         ', total_quantity'
         ', total_trades_count'
         ', total_volume'
-        f' FROM {OKXDataSetRecordData_2.__tablename__}'
+        f' FROM {OKXDataSetRecordData_3.__tablename__}'
         ' WHERE'
         f' symbol_id = {symbol_id.name!r}'
         ' ORDER BY'
