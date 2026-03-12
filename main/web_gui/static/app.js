@@ -307,7 +307,12 @@
     removeExtremaLineSeries();
     const LineSeries = LightweightCharts.LineSeries;
     if (!LineSeries) return;
-    const opts = { priceScaleId: 'right', lineWidth: 2 };
+    const opts = {
+      priceScaleId: 'right',
+      lineWidth: 2,
+      lastValueVisible: false,
+      priceLineVisible: false,
+    };
     for (const seg of extremaSegments.green) {
       const cFrom = candleDataByIndex[seg.indexFrom];
       const cTo = candleDataByIndex[seg.indexTo];
