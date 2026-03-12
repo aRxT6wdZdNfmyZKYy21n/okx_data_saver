@@ -82,7 +82,6 @@ def _tensor_to_list(t: torch.Tensor) -> list[float]:
 
 def get_dow_bars_for_level(
     final_tensors: dict[str, torch.Tensor],
-    base_timestamp_ms: int,
 ) -> list[dict] | None:
     """
     Извлекает из final_tensors (плоская структура с ключами open_price, close_price, ...)
@@ -99,13 +98,14 @@ def get_dow_bars_for_level(
         return []
 
     n = open_p.numel()
-    # start_timestamp_ms_tensor = level_data['start_timestamp_ms']  # TODO
+    start_timestamp_ms_tensor = level_data['start_timestamp_ms']
     high_p = level_data['high_price']
     low_p = level_data['low_price']
     close_p = level_data['close_price']
     total_vol = level_data['total_volume']
     buy_vol = level_data['buy_volume']
 
+    start_timestamp_ms_list = _tensor_to_list(start_timestamp_ms_tensor)
     open_list = _tensor_to_list(open_p)
     high_list = _tensor_to_list(high_p)
     low_list = _tensor_to_list(low_p)
@@ -125,7 +125,7 @@ def get_dow_bars_for_level(
         total_log2 = math.log2(total)
 
         bars.append({
-            'start_timestamp_ms': base_timestamp_ms + i * 1_000,
+            'start_timestamp_ms': start_timestamp_ms_list[i],
             'open_price': open_list[i],
             'high_price': high_list[i],
             'low_price': low_list[i],
@@ -155,10 +155,6 @@ def get_dow_bars_for_api(
     if final_tensors is None:
         return None
 
-    df = fetch_last_bars(symbol_id=symbol_id, limit=1, offset=0)
-    base_ts = int(df['start_timestamp_ms'][0]) if df is not None and df.height > 0 else 0
-
     return get_dow_bars_for_level(
         final_tensors,
-        base_timestamp_ms=base_ts,
     )
