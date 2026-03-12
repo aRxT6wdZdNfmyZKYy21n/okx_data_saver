@@ -1,10 +1,12 @@
 """
 Выполнение запросов с Polars в отдельном процессе (spawn), чтобы избежать утечки памяти.
+Одновременно выполняется не более одного такого процесса (ограничение по Lock).
 """
 
 import logging
 import multiprocessing
 import sys
+import threading
 from collections.abc import Callable
 
 from enumerations import SymbolId
@@ -18,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 # Уровень логирования в spawn-процессах: выставляется из __main__ при старте с -v/--verbose.
 VERBOSE = False
+
+# Один тяжёлый процесс (бары / Доу) одновременно — чтобы не съедать ресурсы при миллионах сделок.
+_process_lock = threading.Lock()
 
 BAR_COLS = [
     'start_trade_id', 'end_trade_id',
@@ -75,15 +80,17 @@ def run_in_spawned_process(fn: Callable[..., list[dict] | None], *args) -> list[
     """
     Запускает fn(*args) в отдельном процессе (spawn). Возвращает результат из дочернего процесса.
     Используется для запросов с Polars, чтобы после завершения процесса память освобождалась.
+    Одновременно выполняется не более одного вызова (ограничение по _process_lock).
     """
-    ctx = multiprocessing.get_context('spawn')
-    result_queue = ctx.Queue()
-    p = ctx.Process(target=_run_worker, args=(result_queue, fn, VERBOSE) + args)
-    p.start()
-    # Сначала читаем результат, затем join: при большом ответе дочерний процесс
-    # блокируется на put(), пока родитель не прочитает очередь — иначе дедлок.
-    kind, payload = result_queue.get()
-    p.join()
+    with _process_lock:
+        ctx = multiprocessing.get_context('spawn')
+        result_queue = ctx.Queue()
+        p = ctx.Process(target=_run_worker, args=(result_queue, fn, VERBOSE) + args)
+        p.start()
+        # Сначала читаем результат, затем join: при большом ответе дочерний процесс
+        # блокируется на put(), пока родитель не прочитает очередь — иначе дедлок.
+        kind, payload = result_queue.get()
+        p.join()
     if kind == 'error':
         raise RuntimeError(f'Worker error: {payload}')
     return payload
