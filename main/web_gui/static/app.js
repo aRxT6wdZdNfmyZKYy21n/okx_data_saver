@@ -27,6 +27,12 @@
   let barsData = [];
   /** Объёмы по индексу свечи (1:1 с candleData после сортировки и слияния по time) */
   let volumeDataByCandleIndex = [];
+  /** Свечи по индексу (time, open, high, low, close) для проекции линий экстремумов на ценовой график */
+  let candleDataByIndex = [];
+  /** Сегменты от экстремума к экстремуму: { green: [{indexFrom, valueFrom, indexTo, valueTo}, ...], red: [...] } */
+  let extremaSegments = { green: [], red: [] };
+  /** Серии линий на основном графике для отображения сегментов экстремумов */
+  let extremaLineSeries = [];
   let refreshTimer = null;
   const scaleSelect = document.getElementById('scale');
   const symbolSelect = document.getElementById('symbol');
@@ -181,6 +187,102 @@
     }
   }
 
+  /**
+   * Находит локальные экстремумы в ряде кумулятивного объёма (классика: сравнение с соседями).
+   * Возвращает { mins: [{ index, value }], maxs: [{ index, value }] }.
+   */
+  function findLocalExtrema(volumeData) {
+    const mins = [];
+    const maxs = [];
+    const n = volumeData.length;
+    for (let i = 1; i < n - 1; i++) {
+      const c = volumeData[i].cumulative_volume_delta;
+      if (c == null || !Number.isFinite(c)) continue;
+      const prev = volumeData[i - 1].cumulative_volume_delta;
+      const next = volumeData[i + 1].cumulative_volume_delta;
+      if (prev != null && Number.isFinite(prev) && next != null && Number.isFinite(next)) {
+        if (c < prev && c < next) mins.push({ index: i, value: c });
+        if (c > prev && c > next) maxs.push({ index: i, value: c });
+      }
+    }
+    return { mins, maxs };
+  }
+
+  /**
+   * Строит сегменты от экстремума к экстремуму.
+   * Зелёные: от отрицательного локального минимума к следующему локальному максимуму (>= 0).
+   * Красные: от положительного локального максимума к следующему локальному минимуму (< 0).
+   * Неполные сегменты не включаются.
+   */
+  function computeExtremaSegments(volumeData) {
+    extremaSegments = { green: [], red: [] };
+    if (volumeData.length === 0) return;
+    const { mins, maxs } = findLocalExtrema(volumeData);
+    for (const min of mins) {
+      if (min.value >= 0) continue;
+      const nextMax = maxs.find((m) => m.index > min.index && m.value >= 0);
+      if (nextMax == null) continue;
+      extremaSegments.green.push({
+        indexFrom: min.index,
+        valueFrom: min.value,
+        indexTo: nextMax.index,
+        valueTo: nextMax.value,
+      });
+    }
+    for (const max of maxs) {
+      if (max.value <= 0) continue;
+      const nextMin = mins.find((m) => m.index > max.index && m.value < 0);
+      if (nextMin == null) continue;
+      extremaSegments.red.push({
+        indexFrom: max.index,
+        valueFrom: max.value,
+        indexTo: nextMin.index,
+        valueTo: nextMin.value,
+      });
+    }
+  }
+
+  /** Удаляет серии линий экстремумов с графика и обновляет extremaLineSeries. */
+  function removeExtremaLineSeries() {
+    if (!chart) return;
+    extremaLineSeries.forEach((s) => chart.removeSeries(s));
+    extremaLineSeries = [];
+  }
+
+  /**
+   * Добавляет на основной ценовой график линии сегментов экстремумов (по времени и цене close).
+   * Требует candleDataByIndex и заполненный extremaSegments.
+   */
+  function addExtremaLinesToChart() {
+    if (!chart || candleDataByIndex.length === 0) return;
+    removeExtremaLineSeries();
+    const LineSeries = LightweightCharts.LineSeries;
+    if (!LineSeries) return;
+    const opts = { priceScaleId: 'right', lineWidth: 2 };
+    for (const seg of extremaSegments.green) {
+      const cFrom = candleDataByIndex[seg.indexFrom];
+      const cTo = candleDataByIndex[seg.indexTo];
+      if (!cFrom || !cTo) continue;
+      const series = chart.addSeries(LineSeries, { ...opts, color: '#26a69a' });
+      series.setData([
+        { time: cFrom.time, value: cFrom.close },
+        { time: cTo.time, value: cTo.close },
+      ]);
+      extremaLineSeries.push(series);
+    }
+    for (const seg of extremaSegments.red) {
+      const cFrom = candleDataByIndex[seg.indexFrom];
+      const cTo = candleDataByIndex[seg.indexTo];
+      if (!cFrom || !cTo) continue;
+      const series = chart.addSeries(LineSeries, { ...opts, color: '#ef5350' });
+      series.setData([
+        { time: cFrom.time, value: cFrom.close },
+        { time: cTo.time, value: cTo.close },
+      ]);
+      extremaLineSeries.push(series);
+    }
+  }
+
   function ensureChart() {
     if (chart) return;
     const w = Math.max(chartDiv.clientWidth || 800, 1);
@@ -257,6 +359,23 @@
         ctx.fillRect(x, centerY, barW, barH);
       }
     }
+
+    const valueToY = (value) => centerY - (value / maxAbs) * halfH;
+    const drawSegment = (seg, color) => {
+      if (seg.indexTo < from || seg.indexFrom > to) return;
+      const x1 = Math.round(ts.logicalToCoordinate(seg.indexFrom));
+      const y1 = Math.round(valueToY(seg.valueFrom));
+      const x2 = Math.round(ts.logicalToCoordinate(seg.indexTo));
+      const y2 = Math.round(valueToY(seg.valueTo));
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    };
+    extremaSegments.green.forEach((seg) => drawSegment(seg, '#26a69a'));
+    extremaSegments.red.forEach((seg) => drawSegment(seg, '#ef5350'));
   }
 
   function drawConcentrationBars(visibleRange) {
@@ -366,9 +485,12 @@
 
     computeCumulativeWithWindow(volumeData, getCvdWindowSize());
     volumeDataByCandleIndex = volumeData;
+    candleDataByIndex = candleData;
+    computeExtremaSegments(volumeData);
     ensureChart();
     candleSeries.setData(candleData);
     chart.timeScale().fitContent();
+    addExtremaLinesToChart();
 
     concentrationPanel.classList.remove('hidden');
     cumulativePanel.classList.remove('hidden');
@@ -436,6 +558,8 @@
   cvdWindowSelect.addEventListener('change', () => {
     if (volumeDataByCandleIndex.length === 0) return;
     computeCumulativeWithWindow(volumeDataByCandleIndex, getCvdWindowSize());
+    computeExtremaSegments(volumeDataByCandleIndex);
+    addExtremaLinesToChart();
     const range = chart && chart.timeScale().getVisibleLogicalRange();
     if (range) drawCumulativeBars(range);
   });
