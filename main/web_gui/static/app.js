@@ -37,6 +37,8 @@
   const chartDiv = document.getElementById('chart');
   const concentrationCanvas = document.getElementById('concentrationCanvas');
   const concentrationPanel = document.getElementById('concentrationPanel');
+  const cumulativeCanvas = document.getElementById('cumulativeCanvas');
+  const cumulativePanel = document.getElementById('cumulativePanel');
   const volumeCanvas = document.getElementById('volumeCanvas');
   const volumePanel = document.getElementById('volumePanel');
   const dowStub = document.getElementById('dowStub');
@@ -154,6 +156,11 @@
         volume_delta,
       };
     });
+    let sum = 0;
+    for (let i = 0; i < volumeDataNormalized.length; i++) {
+      sum += volumeDataNormalized[i].volume_delta;
+      volumeDataNormalized[i].cumulative_volume_delta = sum;
+    }
     return { candleData, volumeData: volumeDataNormalized };
   }
 
@@ -183,7 +190,56 @@
       if (!range || volumeDataByCandleIndex.length === 0) return;
       if (!volumePanel.classList.contains('hidden')) drawVolumeBars(range);
       if (!concentrationPanel.classList.contains('hidden')) drawConcentrationBars(range);
+      if (!cumulativePanel.classList.contains('hidden')) drawCumulativeBars(range);
     });
+  }
+
+  function drawCumulativeBars(visibleRange) {
+    if (!visibleRange || volumeDataByCandleIndex.length === 0 || !chart) return;
+    const ctx = cumulativeCanvas.getContext('2d');
+    const w = cumulativeCanvas.width;
+    const h = cumulativeCanvas.height;
+    if (!w || !h) return;
+
+    const from = Math.max(0, Math.floor(visibleRange.from));
+    const to = Math.min(volumeDataByCandleIndex.length, Math.ceil(visibleRange.to));
+    if (from >= to) return;
+
+    const ts = chart.timeScale();
+    let maxAbs = 0;
+    for (let i = from; i < to; i++) {
+      const c = volumeDataByCandleIndex[i].cumulative_volume_delta;
+      if (c != null && Number.isFinite(c)) maxAbs = Math.max(maxAbs, Math.abs(c));
+    }
+    if (maxAbs <= 0) maxAbs = 1;
+
+    const centerY = h / 2;
+    const halfH = (h - 4) / 2;
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = '#2a2e39';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(w, centerY);
+    ctx.stroke();
+
+    for (let i = from; i < to; i++) {
+      const b = volumeDataByCandleIndex[i];
+      const cum = b.cumulative_volume_delta != null ? b.cumulative_volume_delta : 0;
+      if (!Number.isFinite(cum)) continue;
+      const x = Math.round(ts.logicalToCoordinate(i));
+      const barW = Math.max(1, Math.round(ts.logicalToCoordinate(i + 1)) - x);
+      const norm = cum / maxAbs;
+      const barH = Math.abs(norm) * halfH;
+      if (barH < 0.5) continue;
+      if (cum >= 0) {
+        ctx.fillStyle = '#26a69a';
+        ctx.fillRect(x, centerY - barH, barW, barH);
+      } else {
+        ctx.fillStyle = '#ef5350';
+        ctx.fillRect(x, centerY, barW, barH);
+      }
+    }
   }
 
   function drawConcentrationBars(visibleRange) {
@@ -297,17 +353,21 @@
     chart.timeScale().fitContent();
 
     concentrationPanel.classList.remove('hidden');
+    cumulativePanel.classList.remove('hidden');
     const w = Math.max(chartDiv.clientWidth || 800, 1);
     const h = Math.max(chartDiv.clientHeight || 400, 300);
     chart.applyOptions({ width: w, height: chartDiv.clientHeight });
     concentrationCanvas.width = concentrationPanel.clientWidth;
     concentrationCanvas.height = concentrationPanel.clientHeight;
+    cumulativeCanvas.width = cumulativePanel.clientWidth;
+    cumulativeCanvas.height = cumulativePanel.clientHeight;
 
     requestAnimationFrame(() => {
       const range = chart.timeScale().getVisibleLogicalRange();
       if (range) {
         drawVolumeBars(range);
         drawConcentrationBars(range);
+        drawCumulativeBars(range);
       }
     });
   }
@@ -319,6 +379,7 @@
     dowStub.classList.add('hidden');
     volumePanel.classList.remove('hidden');
     concentrationPanel.classList.remove('hidden');
+    cumulativePanel.classList.remove('hidden');
 
     const symbol = symbolSelect.value;
     if (!symbol) return;
@@ -347,6 +408,7 @@
     dowStub.classList.add('hidden');
     volumePanel.classList.remove('hidden');
     concentrationPanel.classList.remove('hidden');
+    cumulativePanel.classList.remove('hidden');
     loadBars();
   });
   autoRefreshCheck.addEventListener('change', startAutoRefresh);
@@ -365,10 +427,13 @@
         volumeCanvas.height = volumePanel.clientHeight;
         concentrationCanvas.width = concentrationPanel.clientWidth;
         concentrationCanvas.height = concentrationPanel.clientHeight;
+        cumulativeCanvas.width = cumulativePanel.clientWidth;
+        cumulativeCanvas.height = cumulativePanel.clientHeight;
         const range = chart && chart.timeScale().getVisibleLogicalRange();
         if (range) {
           drawVolumeBars(range);
           drawConcentrationBars(range);
+          drawCumulativeBars(range);
         }
       });
       loadBars();
