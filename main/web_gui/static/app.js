@@ -94,6 +94,10 @@
             opt.textContent = l;
             scaleSelect.appendChild(opt);
           });
+          // Масштаб по умолчанию для обычных баров — x2048 (если доступен).
+          if (scales.includes('x2048')) {
+            scaleSelect.value = 'x2048';
+          }
         });
       }),
     ]).catch(e => {
@@ -629,7 +633,11 @@
   (async function init() {
     try {
       config = await API.config();
-      if (config.defaultLimit) limitInput.placeholder = config.defaultLimit;
+      if (config.defaultLimit) {
+        limitInput.placeholder = config.defaultLimit;
+        // По умолчанию количество баров фиксировано и равно defaultLimit (min(MAX, 1000)).
+        limitInput.value = config.defaultLimit;
+      }
       await initDropdowns();
       initCvdWindowDropdown();
       chartDiv.style.height = '100%';

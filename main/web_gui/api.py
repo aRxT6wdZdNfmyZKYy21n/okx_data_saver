@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title='OKX Data Set Web GUI', version='0.1.0')
 
+# Дефолтное число баров для обычных свечей:
+# минимум между глобальным лимитом и 1000 (остальное пользователь указывает явно).
+DEFAULT_BARS_LIMIT = min(settings.WEB_GUI_RECORDS_LIMIT, 1000)
+
 
 @app.get('/api/symbols')
 def list_symbols() -> list[dict]:
@@ -45,7 +49,7 @@ def list_dow_levels() -> list[str]:
 def get_config() -> dict:
     """Параметры для фронта: лимит по умолчанию, интервал обновления (сек)."""
     return {
-        'defaultLimit': settings.WEB_GUI_RECORDS_LIMIT,
+        'defaultLimit': DEFAULT_BARS_LIMIT,
         'refreshIntervalSec': settings.WEB_GUI_REFRESH_INTERVAL_SEC,
     }
 
@@ -55,7 +59,7 @@ def get_bars(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
     limit: int | None = Query(None, ge=1, description='Max bars to return (default from config)'),
     offset: int = Query(0, ge=0),
-    scale: str = Query('x1', description='Scale: x1, x2, x4, ... x2048'),
+    scale: str = Query('x2048', description='Scale: x1, x2, x4, ... x2048'),
 ) -> dict:
     """
     Последние бары для символа. Пагинация: offset (пропуск от конца), limit.
@@ -69,7 +73,7 @@ def get_bars(
     if scale not in SCALE_NAMES:
         raise HTTPException(422, detail=f'Unknown scale: {scale}')
 
-    effective_limit = min(limit or settings.WEB_GUI_RECORDS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
+    effective_limit = min(limit or DEFAULT_BARS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
     bars = run_in_spawned_process(
         _worker_bars, symbol_id, effective_limit, offset, scale,
     )
