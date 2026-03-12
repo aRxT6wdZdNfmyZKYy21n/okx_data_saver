@@ -188,57 +188,106 @@
   }
 
   /**
-   * Находит локальные экстремумы в ряде кумулятивного объёма (классика: сравнение с соседями).
-   * Возвращает { mins: [{ index, value }], maxs: [{ index, value }] }.
-   */
-  function findLocalExtrema(volumeData) {
-    const mins = [];
-    const maxs = [];
-    const n = volumeData.length;
-    for (let i = 1; i < n - 1; i++) {
-      const c = volumeData[i].cumulative_volume_delta;
-      if (c == null || !Number.isFinite(c)) continue;
-      const prev = volumeData[i - 1].cumulative_volume_delta;
-      const next = volumeData[i + 1].cumulative_volume_delta;
-      if (prev != null && Number.isFinite(prev) && next != null && Number.isFinite(next)) {
-        if (c < prev && c < next) mins.push({ index: i, value: c });
-        if (c > prev && c > next) maxs.push({ index: i, value: c });
-      }
-    }
-    return { mins, maxs };
-  }
-
-  /**
-   * Строит сегменты от экстремума к экстремуму.
-   * Зелёные: от отрицательного локального минимума к следующему локальному максимуму (>= 0).
-   * Красные: от положительного локального максимума к следующему локальному минимуму (< 0).
-   * Неполные сегменты не включаются.
+   * Строит сегменты между экстремумами на участках между пересечениями нуля.
+   * 1) Находим индексы пересечения нуля (<=0 -> >0 и >=0 -> <0).
+   * 2) Между соседними такими индексами берём глобальный экстремум по модулю:
+   *    - если значения > 0 — максимум;
+   *    - если значения < 0 — минимум.
+   * 3) Получаем последовательность точек (index, value) с чередующимся знаком и соединяем соседние:
+   *    - зелёные: из отрицательного в (>= 0);
+   *    - красные: из положительного в (<= 0).
    */
   function computeExtremaSegments(volumeData) {
     extremaSegments = { green: [], red: [] };
-    if (volumeData.length === 0) return;
-    const { mins, maxs } = findLocalExtrema(volumeData);
-    for (const min of mins) {
-      if (min.value >= 0) continue;
-      const nextMax = maxs.find((m) => m.index > min.index && m.value >= 0);
-      if (nextMax == null) continue;
-      extremaSegments.green.push({
-        indexFrom: min.index,
-        valueFrom: min.value,
-        indexTo: nextMax.index,
-        valueTo: nextMax.value,
-      });
+    const n = volumeData.length;
+    if (n === 0) return;
+
+    const sign = (x) => (x > 0 ? 1 : x < 0 ? -1 : 0);
+
+    // Индексы, где происходит пересечение нуля (границы участков).
+    const boundaries = [0];
+    for (let i = 1; i < n; i++) {
+      const prev = volumeData[i - 1].cumulative_volume_delta || 0;
+      const cur = volumeData[i].cumulative_volume_delta || 0;
+      const sPrev = sign(prev);
+      const sCur = sign(cur);
+      if ((sPrev <= 0 && sCur > 0) || (sPrev >= 0 && sCur < 0)) {
+        boundaries.push(i);
+      }
     }
-    for (const max of maxs) {
-      if (max.value <= 0) continue;
-      const nextMin = mins.find((m) => m.index > max.index && m.value < 0);
-      if (nextMin == null) continue;
-      extremaSegments.red.push({
-        indexFrom: max.index,
-        valueFrom: max.value,
-        indexTo: nextMin.index,
-        valueTo: nextMin.value,
-      });
+    boundaries.push(n);
+
+    const points = [];
+
+    for (let b = 0; b < boundaries.length - 1; b++) {
+      const start = boundaries[b];
+      const end = boundaries[b + 1] - 1;
+      if (start > end) continue;
+
+      let idx = -1;
+      let val = 0;
+
+      // Ищем первый ненулевой, чтобы определить знак участка.
+      for (let i = start; i <= end; i++) {
+        const v = volumeData[i].cumulative_volume_delta || 0;
+        if (v !== 0) {
+          idx = i;
+          val = v;
+          break;
+        }
+      }
+      if (idx === -1) {
+        // Весь участок в нуле — пропускаем.
+        continue;
+      }
+
+      const s = sign(val);
+      let bestIndex = idx;
+      let bestValue = val;
+
+      if (s > 0) {
+        // Участок выше нуля: ищем максимум.
+        for (let i = idx + 1; i <= end; i++) {
+          const v = volumeData[i].cumulative_volume_delta || 0;
+          if (v > bestValue) {
+            bestValue = v;
+            bestIndex = i;
+          }
+        }
+      } else if (s < 0) {
+        // Участок ниже нуля: ищем минимум.
+        for (let i = idx + 1; i <= end; i++) {
+          const v = volumeData[i].cumulative_volume_delta || 0;
+          if (v < bestValue) {
+            bestValue = v;
+            bestIndex = i;
+          }
+        }
+      }
+
+      points.push({ index: bestIndex, value: bestValue });
+    }
+
+    // Строим сегменты между соседними точками.
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+
+      if (a.value < 0 && b.value >= 0) {
+        extremaSegments.green.push({
+          indexFrom: a.index,
+          valueFrom: a.value,
+          indexTo: b.index,
+          valueTo: b.value,
+        });
+      } else if (a.value > 0 && b.value <= 0) {
+        extremaSegments.red.push({
+          indexFrom: a.index,
+          valueFrom: a.value,
+          indexTo: b.index,
+          valueTo: b.value,
+        });
+      }
     }
   }
 
