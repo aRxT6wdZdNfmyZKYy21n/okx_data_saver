@@ -41,9 +41,12 @@
   const cumulativePanel = document.getElementById('cumulativePanel');
   const volumeCanvas = document.getElementById('volumeCanvas');
   const volumePanel = document.getElementById('volumePanel');
+  const cvdWindowSelect = document.getElementById('cvdWindow');
   const dowStub = document.getElementById('dowStub');
 
   const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048'];
+  const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
+  const CVD_WINDOW_DEFAULT = 'x512';
 
   function setStatus(text, isError = false) {
     statusEl.textContent = text;
@@ -156,12 +159,26 @@
         volume_delta,
       };
     });
-    let sum = 0;
-    for (let i = 0; i < volumeDataNormalized.length; i++) {
-      sum += volumeDataNormalized[i].volume_delta;
-      volumeDataNormalized[i].cumulative_volume_delta = sum;
-    }
     return { candleData, volumeData: volumeDataNormalized };
+  }
+
+  function getCvdWindowSize() {
+    const raw = cvdWindowSelect && cvdWindowSelect.value ? cvdWindowSelect.value : CVD_WINDOW_DEFAULT;
+    if (!raw.startsWith('x')) return parseInt(CVD_WINDOW_DEFAULT.slice(1), 10);
+    return parseInt(raw.slice(1), 10) || 512;
+  }
+
+  function computeCumulativeWithWindow(volumeData, windowSize) {
+    const n = volumeData.length;
+    if (n === 0) return;
+    const W = Math.max(1, windowSize);
+    let sum = volumeData[0].volume_delta;
+    volumeData[0].cumulative_volume_delta = sum;
+    for (let i = 1; i < n; i++) {
+      sum += volumeData[i].volume_delta;
+      if (i >= W) sum -= volumeData[i - W].volume_delta;
+      volumeData[i].cumulative_volume_delta = sum;
+    }
   }
 
   function ensureChart() {
@@ -347,6 +364,7 @@
     const { candleData, volumeData } = barsToCandleAndVolumeData(barsData);
     if (candleData.length === 0) return;
 
+    computeCumulativeWithWindow(volumeData, getCvdWindowSize());
     volumeDataByCandleIndex = volumeData;
     ensureChart();
     candleSeries.setData(candleData);
@@ -403,7 +421,24 @@
     refreshTimer = setInterval(loadBars, config.refreshIntervalSec * 1000);
   }
 
+  function initCvdWindowDropdown() {
+    cvdWindowSelect.innerHTML = '';
+    CVD_WINDOW_OPTIONS.forEach((opt) => {
+      const option = document.createElement('option');
+      option.value = opt;
+      option.textContent = opt;
+      if (opt === CVD_WINDOW_DEFAULT) option.selected = true;
+      cvdWindowSelect.appendChild(option);
+    });
+  }
+
   loadBtn.addEventListener('click', loadBars);
+  cvdWindowSelect.addEventListener('change', () => {
+    if (volumeDataByCandleIndex.length === 0) return;
+    computeCumulativeWithWindow(volumeDataByCandleIndex, getCvdWindowSize());
+    const range = chart && chart.timeScale().getVisibleLogicalRange();
+    if (range) drawCumulativeBars(range);
+  });
   scaleSelect.addEventListener('change', () => {
     dowStub.classList.add('hidden');
     volumePanel.classList.remove('hidden');
@@ -418,6 +453,7 @@
       config = await API.config();
       if (config.defaultLimit) limitInput.placeholder = config.defaultLimit;
       await initDropdowns();
+      initCvdWindowDropdown();
       chartDiv.style.height = '100%';
       volumeCanvas.width = volumePanel.clientWidth;
       volumeCanvas.height = volumePanel.clientHeight;
