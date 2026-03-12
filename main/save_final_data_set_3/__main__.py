@@ -51,12 +51,14 @@ async def init_db_models():
 
 
 def get_direction(
-        open_price: float | Decimal,
-        close_price: float | Decimal
+        buy_volume: float | Decimal,
+        sell_volume: float | Decimal
 ) -> TradingDirection:
-    if close_price > open_price:
+    delta_volume = buy_volume - sell_volume
+
+    if delta_volume > 0:
         return TradingDirection.Bull
-    elif close_price < open_price:
+    elif delta_volume < 0:
         return TradingDirection.Bear
     else:
         return TradingDirection.Cross
@@ -143,11 +145,6 @@ async def save_final_data_set_3(
             last_final_data_set_record_start_trade_id = last_final_data_set_record_data.start_trade_id
             end_trade_id = last_final_data_set_record_data.end_trade_id
 
-            direction = get_direction(
-                open_price,
-                close_price,
-            )
-
             # Timestamp
 
             end_timestamp_ms = last_final_data_set_record_data.end_timestamp_ms
@@ -156,6 +153,13 @@ async def save_final_data_set_3(
             total_quantity = last_final_data_set_record_data.total_quantity
             total_trades_count = last_final_data_set_record_data.total_trades_count
             total_volume = last_final_data_set_record_data.total_volume
+
+            sell_volume = total_volume - buy_volume
+
+            direction = get_direction(
+                buy_volume,
+                sell_volume,
+            )
         else:
             buy_quantity = Decimal(0)
             buy_trades_count = 0
@@ -240,20 +244,15 @@ async def save_final_data_set_3(
                     f'Processed {record_idx} records. Committing...',
                 )
 
-            sell_volume = record_data.total_volume - record_data.buy_volume
-            delta_volume = record_data.buy_volume - sell_volume
-
-            new_direction: TradingDirection
-
-            if delta_volume > 0:
-                new_direction = TradingDirection.Bull
-            elif delta_volume < 0:
-                new_direction = TradingDirection.Bear
-            else:
-                new_direction = TradingDirection.Cross
-
             if record_data.open_price == record_data.close_price:
                 continue
+
+            sell_volume = record_data.total_volume - record_data.buy_volume
+
+            new_direction = get_direction(
+                record_data.buy_volume,
+                sell_volume
+            )
 
             if direction is None:
                 direction = new_direction
