@@ -498,38 +498,55 @@
     const ts = chart.timeScale();
     let maxVolume = 0;
     for (let i = from; i < to; i++) {
-      const v = volumeDataByCandleIndex[i].total_volume;
+      const b = volumeDataByCandleIndex[i];
+      const v = b.total_volume;
       if (v == null || !Number.isFinite(v) || v < 0) {
         throw new Error(`volumeData[${i}]: ожидается конечный total_volume >= 0, получено ${v}`);
       }
-      maxVolume = Math.max(maxVolume, v);
-    }
-    if (maxVolume <= 0) maxVolume = 1;
-
-    ctx.clearRect(0, 0, w, h);
-    for (let i = from; i < to; i++) {
-      const b = volumeDataByCandleIndex[i];
-      const x = Math.round(ts.logicalToCoordinate(i));
-      const barW = Math.max(1, Math.round(ts.logicalToCoordinate(i + 1)) - x);
-      const totalH = (b.total_volume / maxVolume) * (h - 4);
       if (b.buy_volume_percent == null || !Number.isFinite(b.buy_volume_percent) || b.buy_volume_percent < 0 || b.buy_volume_percent > 1) {
         throw new Error(`volumeData[${i}]: ожидается buy_volume_percent в [0,1], получено ${b.buy_volume_percent}`);
       }
       if (b.sell_volume_percent == null || !Number.isFinite(b.sell_volume_percent) || b.sell_volume_percent < 0 || b.sell_volume_percent > 1) {
         throw new Error(`volumeData[${i}]: ожидается sell_volume_percent в [0,1], получено ${b.sell_volume_percent}`);
       }
-      const buyPct = b.buy_volume_percent;
-      const sellPct = b.sell_volume_percent;
-      const buyH = totalH * buyPct;
-      const sellH = totalH * sellPct;
+      const buyVolume = v * b.buy_volume_percent;
+      const sellVolume = v * b.sell_volume_percent;
+      maxVolume = Math.max(maxVolume, buyVolume, sellVolume);
+    }
+    if (maxVolume <= 0) maxVolume = 1;
 
-      if (buyH > 0) {
+    const centerY = h / 2;
+    const halfH = (h - 4) / 2;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = '#2a2e39';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, centerY);
+    ctx.lineTo(w, centerY);
+    ctx.stroke();
+
+    for (let i = from; i < to; i++) {
+      const b = volumeDataByCandleIndex[i];
+      const v = b.total_volume;
+      const buyVolume = v * b.buy_volume_percent;
+      const sellVolume = v * b.sell_volume_percent;
+
+      const x = Math.round(ts.logicalToCoordinate(i));
+      const barW = Math.max(1, Math.round(ts.logicalToCoordinate(i + 1)) - x);
+
+      const normBuy = buyVolume / maxVolume;
+      const normSell = sellVolume / maxVolume;
+      const barHBuy = normBuy * halfH;
+      const barHSell = normSell * halfH;
+
+      if (barHBuy >= 0.5) {
         ctx.fillStyle = '#26a69a';
-        ctx.fillRect(x, h - buyH, barW, buyH);
+        ctx.fillRect(x, centerY - barHBuy, barW, barHBuy);
       }
-      if (sellH > 0) {
+      if (barHSell >= 0.5) {
         ctx.fillStyle = '#ef5350';
-        ctx.fillRect(x, h - buyH - sellH, barW, sellH);
+        ctx.fillRect(x, centerY, barW, barHSell);
       }
     }
   }
