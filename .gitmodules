@@ -1,3 +1,6 @@
 [submodule "dow_theory_aggregator"]
 	path = dow_theory_aggregator
 	url = ssh://git@77.51.224.36:23/server/git/Repositories/dow_theory_aggregator.git
+[submodule "trading_bot_dataset"]
+	path = trading_bot_dataset
+	url = ssh://git@77.51.224.36:23/server/git/Repositories/trading_bot_dataset.git

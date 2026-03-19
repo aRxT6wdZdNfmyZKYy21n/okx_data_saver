@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     WEB_GUI_RECORDS_LIMIT: int = 1_000_000
     WEB_GUI_REFRESH_INTERVAL_SEC: int = 30
     WEB_GUI_DOW_SEQUENCE_LENGTH: int = 32
+    WEB_GUI_INFERENCE_ENABLED: bool = True
+    WEB_GUI_INFERENCE_API_BASE_URL: str = 'http://127.0.0.1:8010'
 
     model_config = SettingsConfigDict(
         env_file='.env',

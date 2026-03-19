@@ -15,6 +15,7 @@ pyarrow
 pybind11
 pydantic
 pydantic-settings
+omegaconf
 PyQt6
 pyqtgraph
 qasync

@@ -19,6 +19,10 @@
       const q = new URLSearchParams(params).toString();
       return this.get('./api/dow?' + q);
     },
+    async inference(params) {
+      const q = new URLSearchParams(params).toString();
+      return this.get('./api/inference?' + q);
+    },
   };
 
   let config = { defaultLimit: 100000, refreshIntervalSec: 30 };
@@ -49,6 +53,10 @@
   const volumePanel = document.getElementById('volumePanel');
   const cvdWindowSelect = document.getElementById('cvdWindow');
   const dowStub = document.getElementById('dowStub');
+  const inferencePanel = document.getElementById('inferencePanel');
+  const inferenceContent = document.getElementById('inferenceContent');
+  let inferenceErrorBySymbolAndHorizon = {};
+  let inferenceMinRows = 0;
 
   const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048'];
   const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
@@ -57,6 +65,83 @@
   function setStatus(text, isError = false) {
     statusEl.textContent = text;
     statusEl.style.color = isError ? '#ef5350' : '';
+  }
+
+  function parseErrorDetail(rawMessage) {
+    if (!rawMessage) return 'Ошибка инференса';
+    try {
+      const parsed = JSON.parse(rawMessage);
+      if (parsed && typeof parsed === 'object' && parsed.detail != null) return String(parsed.detail);
+    } catch (_) {
+      // no-op
+    }
+    return rawMessage;
+  }
+
+  function extractHorizon(targetName) {
+    const m = targetName.match(/_(x\d+)$/);
+    return m ? m[1] : targetName;
+  }
+
+  function signedLog2ToPercent(v) {
+    return (2 ** v - 1) * 100;
+  }
+
+  function setInferenceWarning(message) {
+    inferencePanel.classList.remove('hidden');
+    inferenceContent.innerHTML = `<div class="inference-warning">${message}</div>`;
+  }
+
+  function renderInference(predictions, symbol) {
+    const keys = Object.keys(predictions || {});
+    if (keys.length === 0) {
+      setInferenceWarning('Нет предсказаний для отображения');
+      return;
+    }
+
+    const errorConfig = inferenceErrorBySymbolAndHorizon[symbol] || {};
+    const sorted = keys.sort((a, b) => {
+      const ha = extractHorizon(a);
+      const hb = extractHorizon(b);
+      const va = parseInt(ha.slice(1), 10);
+      const vb = parseInt(hb.slice(1), 10);
+      return va - vb;
+    });
+
+    const rows = [];
+    for (const key of sorted) {
+      const horizon = extractHorizon(key);
+      const signedLog2 = Number(predictions[key]);
+      if (!Number.isFinite(signedLog2)) continue;
+      const predictedPct = signedLog2ToPercent(signedLog2);
+      const errorPct = errorConfig[horizon] != null ? Number(errorConfig[horizon]) : 0;
+      const minPct = predictedPct - errorPct;
+      const maxPct = predictedPct + errorPct;
+      const lineClass = predictedPct >= 0 ? 'positive' : 'negative';
+      rows.push(
+        `<div class="inference-line ${lineClass}" title="Точное значение: ${predictedPct.toFixed(3)}%">
+          <span class="inference-horizon">${horizon}</span>
+          <span>Прогноз: ${predictedPct.toFixed(2)}%</span>
+          <span>Мин: ${minPct.toFixed(2)}%</span>
+          <span>Макс: ${maxPct.toFixed(2)}%</span>
+        </div>`
+      );
+    }
+
+    inferencePanel.classList.remove('hidden');
+    inferenceContent.innerHTML = rows.join('');
+  }
+
+  function loadInference(symbol, limit) {
+    if (inferenceMinRows > 0 && Number(limit) < inferenceMinRows) {
+      setInferenceWarning(`Инференс невозможен при таком количестве свечей x1 (требуется минимум ${inferenceMinRows})`);
+      return Promise.resolve();
+    }
+    return API.inference({ symbol_id: symbol, limit })
+      .then(predictions => renderInference(predictions, symbol))
+      .catch(e => {
+        setInferenceWarning(parseErrorDetail(e.message));
+      });
   }
 
   function isDowLevel(value) {
@@ -606,9 +691,13 @@
       : API.bars({ symbol_id: symbol, limit, scale });
 
     promise
-      .then(data => applyBarsToChart(data))
+      .then(data => {
+        applyBarsToChart(data);
+        return loadInference(symbol, limit);
+      })
       .catch(e => {
         setStatus('Ошибка: ' + e.message, true);
+        setInferenceWarning(parseErrorDetail(e.message));
       });
   }
 
@@ -650,6 +739,8 @@
   (async function init() {
     try {
       config = await API.config();
+      inferenceMinRows = config.inferenceMinRows != null ? Number(config.inferenceMinRows) : 0;
+      inferenceErrorBySymbolAndHorizon = config.inferenceErrorBySymbolAndHorizon || {};
       if (config.defaultLimit) {
         limitInput.placeholder = config.defaultLimit;
         // По умолчанию количество баров фиксировано и равно defaultLimit (min(MAX, 1000)).

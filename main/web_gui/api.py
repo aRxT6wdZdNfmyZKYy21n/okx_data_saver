@@ -11,9 +11,13 @@ from fastapi.staticfiles import StaticFiles
 
 from enumerations import SymbolId
 from main.web_gui.constants import DOW_LEVEL_NAMES, SCALE_NAMES
+from main.web_gui.inference_service import (
+    fetch_inference_metadata,
+)
 from main.web_gui.request_workers import (
     _worker_bars,
     _worker_dow,
+    _worker_inference,
     run_in_spawned_process,
 )
 from settings import settings
@@ -48,9 +52,13 @@ def list_dow_levels() -> list[str]:
 @app.get('/api/config')
 def get_config() -> dict:
     """Параметры для фронта: лимит по умолчанию, интервал обновления (сек)."""
+    metadata = fetch_inference_metadata()
+    inference_min_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
     return {
         'defaultLimit': DEFAULT_BARS_LIMIT,
         'refreshIntervalSec': settings.WEB_GUI_REFRESH_INTERVAL_SEC,
+        'inferenceMinRows': inference_min_rows,
+        'inferenceErrorBySymbolAndHorizon': metadata['error_by_symbol_and_horizon'],
     }
 
 
@@ -101,6 +109,21 @@ def get_dow(
     if bars is None:
         raise HTTPException(503, detail='Dow theory aggregator not available or failed')
     return {'bars': bars, 'count': len(bars)}
+
+
+@app.get('/api/inference')
+def get_inference(
+    symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
+    limit: int | None = Query(None, ge=1, description='x1 bars used for tensor preparation'),
+) -> dict:
+    try:
+        SymbolId[symbol_id]
+    except KeyError:
+        raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
+
+    effective_limit = min(limit or DEFAULT_BARS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
+    predictions = run_in_spawned_process(_worker_inference, symbol_id, effective_limit)
+    return predictions
 
 
 def mount_static(static_dir: str) -> None:

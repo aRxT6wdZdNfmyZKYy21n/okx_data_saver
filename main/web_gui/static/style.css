@@ -156,6 +156,46 @@ body {
   color: #c4a535;
 }
 
+.inference-panel {
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.inference-panel h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+}
+
+.inference-line {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.inference-line:last-child {
+  margin-bottom: 0;
+}
+
+.inference-line.positive {
+  color: var(--green);
+}
+
+.inference-line.negative {
+  color: var(--red);
+}
+
+.inference-horizon {
+  width: 4.5rem;
+  color: #787b86;
+}
+
+.inference-warning {
+  color: #c4a535;
+}
+
 .hidden {
   display: none;
 }

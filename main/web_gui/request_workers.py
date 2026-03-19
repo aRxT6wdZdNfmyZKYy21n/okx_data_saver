@@ -13,6 +13,7 @@ from enumerations import SymbolId
 
 from main.web_gui.data_service import get_bars_for_api
 from main.web_gui.dow_service import get_dow_bars_for_api
+from main.web_gui.inference_service import run_remote_inference
 from main.web_gui.serialization import serialize_bar_row
 from settings import settings
 
@@ -54,9 +55,14 @@ def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None
     return [serialize_bar_row(r) for r in bars]
 
 
+def _worker_inference(symbol_id_str: str, limit: int) -> dict[str, float]:
+    """Вызывается в дочернем процессе. Возвращает словарь предсказаний."""
+    return run_remote_inference(symbol_id=symbol_id_str, limit=limit)
+
+
 def _run_worker(
     result_queue: multiprocessing.Queue,
-    fn: Callable[..., list[dict] | None],
+    fn: Callable[..., object],
     verbose: bool,
     *args,
 ) -> None:
@@ -76,7 +82,7 @@ def _run_worker(
         result_queue.put(('error', str(e)))
 
 
-def run_in_spawned_process(fn: Callable[..., list[dict] | None], *args) -> list[dict] | None:
+def run_in_spawned_process(fn: Callable[..., object], *args) -> object:
     """
     Запускает fn(*args) в отдельном процессе (spawn). Возвращает результат из дочернего процесса.
     Используется для запросов с Polars, чтобы после завершения процесса память освобождалась.
