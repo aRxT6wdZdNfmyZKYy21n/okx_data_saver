@@ -69,9 +69,13 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     if last_index < 0:
         raise RuntimeError('No samples available after dataset preparation')
     x_seq, x_static = dataset[last_index]
+    normalized_x_seq: dict[str, object] = {}
+    for scale_name, scale_tensor in x_seq.items():
+        # Модель ожидает [batch, seq_len, features]; при инференсе из датасета обычно [seq_len, features].
+        normalized_x_seq[scale_name] = scale_tensor.unsqueeze(0)
 
     return {
-        'x_seq': x_seq,
+        'x_seq': normalized_x_seq,
         'x_static': x_static.unsqueeze(0),
     }
 
