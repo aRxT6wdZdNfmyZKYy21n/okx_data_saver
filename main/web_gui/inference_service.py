@@ -62,6 +62,7 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
         indicator_cols=list(dataset_cfg['indicator_cols']),
         model_config=model_cfg_omega,
         direction_thresholds=direction_thresholds,
+        inference_mode=True,
     )
 
     last_index = len(dataset) - 1
