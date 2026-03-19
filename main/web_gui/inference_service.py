@@ -68,7 +68,7 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     last_index = len(dataset) - 1
     if last_index < 0:
         raise RuntimeError('No samples available after dataset preparation')
-    x_seq, x_static, _ = dataset[last_index]
+    x_seq, x_static = dataset[last_index]
 
     return {
         'x_seq': x_seq,
