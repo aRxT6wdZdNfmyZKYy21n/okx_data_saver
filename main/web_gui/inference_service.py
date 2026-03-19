@@ -42,15 +42,6 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
         },
     )
 
-    direction_thresholds = dataset_cfg['direction_thresholds']
-    if direction_thresholds is None:
-        direction_thresholds = {}
-
-    direction_thresholds = OmegaConf.to_container(
-        OmegaConf.create(direction_thresholds),
-        resolve=True,
-    )
-
     dataset = HybridTradeDataset(
         dataframe=df,
         sequence_length=sequence_length,
@@ -61,7 +52,6 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
         use_indicators=bool(dataset_cfg['use_indicators']),
         indicator_cols=list(dataset_cfg['indicator_cols']),
         model_config=model_cfg_omega,
-        direction_thresholds=direction_thresholds,
         inference_mode=True,
     )
 
