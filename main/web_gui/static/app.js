@@ -117,13 +117,20 @@
       const errorPct = errorConfig[horizon] != null ? Number(errorConfig[horizon]) : 0;
       const minPct = predictedPct - errorPct;
       const maxPct = predictedPct + errorPct;
-      const lineClass = predictedPct >= 0 ? 'positive' : 'negative';
+      const allNegative = maxPct < 0;
+      const allPositive = minPct > 0;
+      const forecastClass = predictedPct >= 0 ? 'positive' : 'negative';
+      const minClass = minPct >= 0 ? 'positive' : 'negative';
+      const maxClass = maxPct >= 0 ? 'positive' : 'negative';
+      const lineClass = allNegative ? 'short-signal' : (allPositive ? 'positive' : (predictedPct >= 0 ? 'positive' : 'negative'));
       rows.push(
         `<div class="inference-line ${lineClass}" title="Точное значение: ${predictedPct.toFixed(3)}%">
           <span class="inference-horizon">${horizon}</span>
-          <span>Прогноз: ${predictedPct.toFixed(2)}%</span>
-          <span>Мин: ${minPct.toFixed(2)}%</span>
-          <span>Макс: ${maxPct.toFixed(2)}%</span>
+          ${allNegative ? '<span class="inference-short">SHORT</span>' : ''}
+          ${allPositive ? '<span class="inference-long">LONG</span>' : ''}
+          <span>Прогноз: <span class="inference-value ${forecastClass}">${predictedPct.toFixed(2)}%</span></span>
+          <span>Мин: <span class="inference-value ${minClass}">${minPct.toFixed(2)}%</span></span>
+          <span>Макс: <span class="inference-value ${maxClass}">${maxPct.toFixed(2)}%</span></span>
         </div>`
       );
     }

@@ -180,11 +180,40 @@ body {
 }
 
 .inference-line.positive {
-  color: var(--green);
+  border-left: 4px solid var(--green);
+  padding-left: 0.55rem;
 }
 
 .inference-line.negative {
+  border-left: 4px solid var(--red);
+  padding-left: 0.55rem;
+}
+
+.inference-line.short-signal {
+  border-left: 4px solid var(--red);
+  padding-left: 0.55rem;
+}
+
+.inference-value.positive {
+  color: var(--green);
+  font-weight: 600;
+}
+
+.inference-value.negative {
   color: var(--red);
+  font-weight: 600;
+}
+
+.inference-short {
+  margin-right: 0.1rem;
+  color: #ff5252;
+  font-weight: 700;
+}
+
+.inference-long {
+  margin-right: 0.1rem;
+  color: #26a69a;
+  font-weight: 700;
 }
 
 .inference-horizon {
