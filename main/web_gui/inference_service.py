@@ -58,6 +58,9 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     last_index = len(dataset) - 1
     if last_index < 0:
         raise RuntimeError('No samples available after dataset preparation')
+
+    logger.info(f'Last index: {last_index}')
+
     x_seq, x_static = dataset[last_index]
     normalized_x_seq: dict[str, object] = {}
     for scale_name, scale_tensor in x_seq.items():
@@ -71,7 +74,12 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
 
 
 def _encode_payload(payload_dict: dict) -> str:
+    logger.info('Encoding payload to Pickle...')
+
     payload_bytes = pickle.dumps(payload_dict)
+
+    logger.info('Encoding payload to Base64...')
+
     return base64.b64encode(payload_bytes).decode('ascii')
 
 
