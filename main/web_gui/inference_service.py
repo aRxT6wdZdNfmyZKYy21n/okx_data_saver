@@ -1,4 +1,3 @@
-import base64
 import logging
 import pickle
 import traceback
@@ -73,14 +72,10 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     }
 
 
-def _encode_payload(payload_dict: dict) -> str:
+def _encode_payload(payload_dict: dict) -> bytes:
     logger.info('Encoding payload to Pickle...')
 
-    payload_bytes = pickle.dumps(payload_dict)
-
-    logger.info('Encoding payload to Base64...')
-
-    return base64.b64encode(payload_bytes).decode('ascii')
+    return pickle.dumps(payload_dict)
 
 
 def run_remote_inference(symbol_id: str, limit: int) -> dict[str, float]:
@@ -106,13 +101,11 @@ def run_remote_inference(symbol_id: str, limit: int) -> dict[str, float]:
     try:
         payload_dict = _prepare_payload_dict_from_df(df)
         encoded_payload = _encode_payload(payload_dict)
-        body = {
-            'symbol': symbol_id,
-            'pickled_tensors_b64': encoded_payload,
-        }
         response = httpx.post(
             f'{settings.WEB_GUI_INFERENCE_API_BASE_URL}/inference',
-            json=body,
+            content=encoded_payload,
+            params={'symbol': symbol_id},
+            headers={'Content-Type': 'application/octet-stream'},
             timeout=60.0,
         )
         if response.status_code == 404:
