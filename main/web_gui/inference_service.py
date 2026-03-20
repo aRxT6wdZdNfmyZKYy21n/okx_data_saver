@@ -1,7 +1,6 @@
 import logging
 import pickle
 import traceback
-from functools import lru_cache
 
 import httpx
 import polars
@@ -16,7 +15,6 @@ from trading_bot_dataset.src.dataset import HybridTradeDataset
 logger = logging.getLogger(__name__)
 
 
-@lru_cache(maxsize=1)
 def fetch_inference_metadata() -> dict:
     response = httpx.get(
         f'{settings.WEB_GUI_INFERENCE_API_BASE_URL}/metadata',
