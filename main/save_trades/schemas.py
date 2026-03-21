@@ -32,8 +32,8 @@ class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 
-class OKXTradeData(Base):
-    __tablename__ = 'okx_trade_data'
+class OKXTradeDataOld(Base):
+    __tablename__ = 'okx_trade_data_old'
     __table_args__ = (
         PrimaryKeyConstraint(  # Explicitly define composite primary key
             'symbol_name',

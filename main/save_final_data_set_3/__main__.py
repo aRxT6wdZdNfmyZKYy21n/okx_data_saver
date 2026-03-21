@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import traceback
+import typing
 from decimal import (
     Decimal,
 )
@@ -11,16 +12,16 @@ from sqlalchemy import (
     update,
 )
 
-from main.save_final_data_set_3.schemas import OKXDataSetRecordData_3
-
 try:
     import uvloop
 except ImportError:
     uvloop = asyncio
 
 import main.save_final_data_set_2.schemas
+import main.save_final_data_set_3.schemas
 from enumerations import (
-    SymbolId, TradingDirection,
+    SymbolId,
+    TradingDirection,
 )
 from main.save_final_data_set_3.globals import (
     g_globals,
@@ -66,13 +67,21 @@ def get_direction(
 
 async def save_final_data_set_3(
         symbol_id: SymbolId,
+        source_schema: (
+            typing.Type[main.save_trades.schemas.OKXDataSetRecordDataOld] |
+            typing.Type[main.save_trades.schemas.OKXDataSetRecordData_2]
+        ),
+        target_schema: (
+            typing.Type[main.save_final_data_set_2.schemas.OKXDataSetRecordDataOld2] |
+            typing.Type[main.save_final_data_set_2.schemas.OKXDataSetRecordData_3]
+        ),
 ) -> None:
     logger.info(
         f'Saving final data set 3 for symbol with ID {symbol_id.name}'
     )
 
     final_data_set_record_data_3_db_schema = (
-        main.save_final_data_set_3.schemas.OKXDataSetRecordData_3
+        target_schema
     )
 
     postgres_db_session_maker = g_globals.get_postgres_db_session_maker()
@@ -98,7 +107,7 @@ async def save_final_data_set_3(
             )
 
             last_final_data_set_record_data: (
-                main.save_final_data_set_3.schemas.OKXDataSetRecordData_3 | None
+                target_schema | None
             ) = result.scalar_one_or_none()
 
         # Buy
@@ -192,7 +201,7 @@ async def save_final_data_set_3(
         # - Fetch 100000 records
 
         final_data_set_record_data_2_db_schema = (
-            main.save_final_data_set_2.schemas.OKXDataSetRecordData_2
+            source_schema
         )
 
         async with session_read_1.begin():
@@ -219,7 +228,7 @@ async def save_final_data_set_3(
                 )
             )
 
-            final_data_set_records_2: list[main.save_final_data_set_2.schemas.OKXDataSetRecordData_2] = result_1.scalars().all()
+            final_data_set_records_2: list[source_schema] = result_1.scalars().all()
 
         final_data_set_records_2_count = len(
             final_data_set_records_2,
@@ -234,7 +243,7 @@ async def save_final_data_set_3(
 
         # Processing records
 
-        data_set_records_3: list[OKXDataSetRecordData_3] = []
+        data_set_records_3: list[target_schema] = []
 
         for record_idx, record_data in enumerate(
                 final_data_set_records_2,
@@ -260,7 +269,7 @@ async def save_final_data_set_3(
                 # Flush
 
                 data_set_records_3.append(
-                    OKXDataSetRecordData_3(
+                    target_schema(
                         # Primary key fields
                         symbol_id=symbol_id,
                         start_trade_id=start_trade_id,
@@ -354,7 +363,7 @@ async def save_final_data_set_3(
             # Don't flush
 
             # data_set_records_2.append(
-            #     OKXDataSetRecordData_2(
+            #     source_schema(
             #         # Primary key fields
             #         symbol_id=symbol_id,
             #         start_trade_id=start_trade_id,
@@ -451,10 +460,25 @@ async def start_save_final_data_sets_loop() -> None:
             try:
                 await save_final_data_set_3(
                     symbol_id,
+                    source_schema=main.save_final_data_set_2.schemas.OKXDataSetRecordDataOld,
+                    target_schema=main.save_final_data_set_3.schemas.OKXDataSetRecordDataOld2,
                 )
             except Exception as exception:
                 logger.error(
-                    'Handled exception while saving final data set 3'
+                    'Handled exception while saving final data set 3 (1)'
+                    f' of symbol with ID {symbol_id.name}'
+                    f': {"".join(traceback.format_exception(exception))}',
+                )
+
+            try:
+                await save_final_data_set_3(
+                    symbol_id,
+                    source_schema=main.save_final_data_set_2.schemas.OKXDataSetRecordData_2,
+                    target_schema=main.save_final_data_set_3.schemas.OKXDataSetRecordData_3,
+                )
+            except Exception as exception:
+                logger.error(
+                    'Handled exception while saving final data set 3 (2)'
                     f' of symbol with ID {symbol_id.name}'
                     f': {"".join(traceback.format_exception(exception))}',
                 )
