@@ -205,16 +205,34 @@ async def _import_file(
             )
 
             if len(rows_batch) >= _BATCH_SIZE:
-                inserted_rows_count += await _flush_batch(
+                batch_size = len(rows_batch)
+                inserted_batch_count = await _flush_batch(
                     session_maker=session_maker,
                     rows_batch=rows_batch,
+                )
+                inserted_rows_count += inserted_batch_count
+                logger.info(
+                    'Batch inserted for %s: batch_size=%s, inserted=%s, duplicates_skipped=%s',
+                    csv_path.name,
+                    batch_size,
+                    inserted_batch_count,
+                    batch_size - inserted_batch_count,
                 )
                 rows_batch.clear()
 
     if rows_batch:
-        inserted_rows_count += await _flush_batch(
+        batch_size = len(rows_batch)
+        inserted_batch_count = await _flush_batch(
             session_maker=session_maker,
             rows_batch=rows_batch,
+        )
+        inserted_rows_count += inserted_batch_count
+        logger.info(
+            'Batch inserted for %s: batch_size=%s, inserted=%s, duplicates_skipped=%s',
+            csv_path.name,
+            batch_size,
+            inserted_batch_count,
+            batch_size - inserted_batch_count,
         )
 
     return parsed_rows_count, inserted_rows_count
