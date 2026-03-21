@@ -66,6 +66,45 @@ class OKXTradeDataOld(Base):
     )
 
 
+class OKXTradeDataOld2(Base):
+    __tablename__ = 'okx_trade_data_old2'
+    __table_args__ = (
+        PrimaryKeyConstraint(  # Explicitly define composite primary key
+            'symbol_id',
+            'trade_id',
+        ),
+    )
+
+    # Primary key fields
+
+    symbol_id: Mapped[SymbolId] = Column(
+        Enum(
+            SymbolId,
+        ),
+    )
+
+    trade_id: Mapped[int] = Column(BigInteger)
+
+    # Attribute fields
+
+    is_buy: Mapped[bool] = Column(Boolean)
+
+    price: Mapped[Decimal] = Column(Numeric)
+    quantity: Mapped[Decimal] = Column(Numeric)
+
+    timestamp_ms: Mapped[int] = Column(BigInteger)
+
+    # Indices
+
+    timestamp_ms_idx = (
+        Index(
+            'timestamp_ms_idx',
+            'symbol_id',
+            'timestamp_ms',
+        ),
+    )
+
+
 class OKXTradeData2(Base):
     __tablename__ = 'okx_trade_data_2'
     __table_args__ = (
