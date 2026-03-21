@@ -68,12 +68,12 @@ def get_direction(
 async def save_final_data_set_3(
         symbol_id: SymbolId,
         source_schema: (
-            typing.Type[main.save_trades.schemas.OKXDataSetRecordDataOld] |
-            typing.Type[main.save_trades.schemas.OKXDataSetRecordData_2]
+            typing.Type[main.save_final_data_set_2.schemas.OKXDataSetRecordDataOld] |
+            typing.Type[main.save_final_data_set_2.schemas.OKXDataSetRecordData_2]
         ),
         target_schema: (
-            typing.Type[main.save_final_data_set_2.schemas.OKXDataSetRecordDataOld2] |
-            typing.Type[main.save_final_data_set_2.schemas.OKXDataSetRecordData_3]
+            typing.Type[main.save_final_data_set_3.schemas.OKXDataSetRecordDataOld2] |
+            typing.Type[main.save_final_data_set_3.schemas.OKXDataSetRecordData_3]
         ),
 ) -> None:
     logger.info(
