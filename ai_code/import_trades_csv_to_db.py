@@ -152,6 +152,8 @@ async def _flush_batch(
             OKXTradeData2.symbol_id,
             OKXTradeData2.trade_id,
         ],
+    ).returning(
+        OKXTradeData2.trade_id,
     )
 
     async with session_maker() as session:
@@ -161,9 +163,8 @@ async def _flush_batch(
                 rows_batch,
             )
 
-    return int(
-        result.rowcount or 0,
-    )
+    inserted_trade_ids = result.scalars().all()
+    return len(inserted_trade_ids)
 
 
 async def _import_file(
