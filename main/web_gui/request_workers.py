@@ -43,8 +43,8 @@ def _worker_bars(symbol_id_str: str, limit: int, offset: int, scale: str) -> lis
     if df is None:
         return None
     available = [c for c in BAR_COLS if c in df.columns]
-    rows = df.select(available).to_dicts()[:-_SHOW_LIMIT]
-    return [serialize_bar_row(r) for r in rows]
+    rows = df.select(available).to_dicts()
+    return [serialize_bar_row(r) for r in rows][-_SHOW_LIMIT:]
 
 
 def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None:
@@ -54,7 +54,7 @@ def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None
     bars = get_dow_bars_for_api(symbol_id=symbol, limit=effective_limit, level=level)
     if bars is None:
         return None
-    return [serialize_bar_row(r) for r in bars[:-_SHOW_LIMIT]]
+    return [serialize_bar_row(r) for r in bars][-_SHOW_LIMIT:]
 
 
 def _worker_inference(symbol_id_str: str, limit: int) -> dict[str, float]:
