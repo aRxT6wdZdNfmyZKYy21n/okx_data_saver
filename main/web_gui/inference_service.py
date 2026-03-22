@@ -62,11 +62,13 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     normalized_x_seq: dict[str, object] = {}
     for scale_name, scale_tensor in x_seq.items():
         # Модель ожидает [batch, seq_len, features]; при инференсе из датасета обычно [seq_len, features].
-        normalized_x_seq[scale_name] = scale_tensor.unsqueeze(0)
+        # Срезы из HybridTradeDataset — views на огромный level_tensor; pickle сериализует весь storage,
+        # поэтому перед pickle нужен compact-клон, иначе размер пейлоада ~ O(число баров в датасете).
+        normalized_x_seq[scale_name] = scale_tensor.unsqueeze(0).clone()
 
     return {
         'x_seq': normalized_x_seq,
-        'x_static': x_static.unsqueeze(0),
+        'x_static': x_static.unsqueeze(0).clone(),
     }
 
 
