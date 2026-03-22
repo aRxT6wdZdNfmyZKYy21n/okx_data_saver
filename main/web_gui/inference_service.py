@@ -99,6 +99,9 @@ def run_remote_inference(symbol_id: str, limit: int) -> dict[str, float]:
     try:
         payload_dict = _prepare_payload_dict_from_df(df)
         encoded_payload = _encode_payload(payload_dict)
+
+        logger.info(f'Payload size: {len(encoded_payload)}')
+
         response = httpx.post(
             f'{settings.WEB_GUI_INFERENCE_API_BASE_URL}/inference',
             content=encoded_payload,

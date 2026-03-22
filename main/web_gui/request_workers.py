@@ -32,6 +32,8 @@ BAR_COLS = [
     'total_volume', 'buy_volume_percent', 'sell_volume_percent', 'total_volume_log2',
 ]
 
+_MAX_LIMIT = 50000
+
 
 def _worker_bars(symbol_id_str: str, limit: int, offset: int, scale: str) -> list[dict] | None:
     """Вызывается в дочернем процессе. Возвращает список сериализованных баров или None."""
@@ -41,7 +43,7 @@ def _worker_bars(symbol_id_str: str, limit: int, offset: int, scale: str) -> lis
     if df is None:
         return None
     available = [c for c in BAR_COLS if c in df.columns]
-    rows = df.select(available).to_dicts()
+    rows = df.select(available).to_dicts()[:-_MAX_LIMIT]
     return [serialize_bar_row(r) for r in rows]
 
 
@@ -52,7 +54,7 @@ def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None
     bars = get_dow_bars_for_api(symbol_id=symbol, limit=effective_limit, level=level)
     if bars is None:
         return None
-    return [serialize_bar_row(r) for r in bars]
+    return [serialize_bar_row(r) for r in bars[:-_MAX_LIMIT]]
 
 
 def _worker_inference(symbol_id_str: str, limit: int) -> dict[str, float]:
