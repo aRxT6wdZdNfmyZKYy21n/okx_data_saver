@@ -202,7 +202,7 @@
    * Возвращает { candleData, volumeData } — volumeData[i] соответствует candleData[i].
    * При встрече non-finite или некорректных значений — выбрасывает ошибку.
    */
-  function barsToCandleAndVolumeData(bars) {
+  function barsToCandleAndVolumeData(bars, diagnosticsLabel = '') {
     const raw = bars.map((b, index) => {
       const time = b.start_timestamp_ms != null ? Math.floor(b.start_timestamp_ms / 1000) : null;
       const open = b.open_price != null ? Number(b.open_price) : null;
@@ -228,9 +228,58 @@
         throw new Error(`Бар #${index} (start_trade_id=${b.start_trade_id}): неверный buy_volume_percent=${b.buy_volume_percent}`);
       }
       const buyPct = buyPctRaw != null ? buyPctRaw : 0;
-      return { time, open, high, low, close, totalVolume, buyPct };
+      return { time, open, high, low, close, totalVolume, buyPct, sourceIndex: index };
     });
     raw.sort((a, b) => a.time - b.time);
+    const duplicateTimeGroups = [];
+    const zeroVolumeIndices = [];
+    let currentGroupStart = 0;
+    while (currentGroupStart < raw.length) {
+      const currentTime = raw[currentGroupStart].time;
+      const groupIndices = [raw[currentGroupStart].sourceIndex];
+      let j = currentGroupStart + 1;
+      while (j < raw.length && raw[j].time === currentTime) {
+        groupIndices.push(raw[j].sourceIndex);
+        j += 1;
+      }
+      if (groupIndices.length > 1) {
+        duplicateTimeGroups.push({ time: currentTime, sourceIndices: groupIndices });
+      }
+      currentGroupStart = j;
+    }
+    for (let i = 0; i < raw.length; i++) {
+      if (raw[i].totalVolume === 0) zeroVolumeIndices.push(raw[i].sourceIndex);
+    }
+
+    if (diagnosticsLabel) {
+      const duplicateIndices = duplicateTimeGroups.flatMap((g) => g.sourceIndices);
+      if (duplicateTimeGroups.length > 0) {
+        console.warn(
+          `[${diagnosticsLabel}] Duplicate start_timestamp_ms/time detected`,
+          {
+            duplicateStartTimestampCount: duplicateTimeGroups.length,
+            duplicateIndicesCount: duplicateIndices.length,
+            duplicateGroups: duplicateTimeGroups,
+            duplicateIndices,
+          },
+        );
+      }
+      if (zeroVolumeIndices.length > 0) {
+        console.warn(
+          `[${diagnosticsLabel}] Bars with total_volume == 0 detected`,
+          {
+            zeroVolumeCount: zeroVolumeIndices.length,
+            zeroVolumeIndices,
+          },
+        );
+      }
+      if (duplicateTimeGroups.length === 0 && zeroVolumeIndices.length === 0) {
+        console.info(
+          `[${diagnosticsLabel}] Diagnostics: no duplicate start_timestamp_ms/time and no total_volume == 0 bars`,
+        );
+      }
+    }
+
     const candleData = [];
     const volumeData = [];
     for (let i = 0; i < raw.length; i++) {
@@ -643,11 +692,14 @@
     }
   }
 
-  function applyBarsToChart(data) {
+  function applyBarsToChart(data, selectedScale = '') {
     barsData = data.bars || [];
     setStatus(`Загружено ${data.count} баров`);
 
-    const { candleData, volumeData } = barsToCandleAndVolumeData(barsData);
+    const diagnosticsLabel = isDowLevel(selectedScale)
+      ? `Dow ${selectedScale}`
+      : '';
+    const { candleData, volumeData } = barsToCandleAndVolumeData(barsData, diagnosticsLabel);
     if (candleData.length === 0) return;
 
     computeCumulativeWithWindow(volumeData, getCvdWindowSize());
@@ -699,7 +751,7 @@
 
     promise
       .then(data => {
-        applyBarsToChart(data);
+        applyBarsToChart(data, scale);
         return loadInference(symbol, limit);
       })
       .catch(e => {

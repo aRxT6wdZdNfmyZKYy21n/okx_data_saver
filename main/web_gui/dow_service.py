@@ -82,6 +82,8 @@ def _tensor_to_list(t: torch.Tensor) -> list[float]:
 
 def get_dow_bars_for_level(
     final_tensors: dict[str, torch.Tensor],
+    level: int,
+    symbol_id: SymbolId,
 ) -> list[dict] | None:
     """
     Извлекает из final_tensors (плоская структура с ключами open_price, close_price, ...)
@@ -113,10 +115,29 @@ def get_dow_bars_for_level(
     total_list = _tensor_to_list(total_vol)
     buy_list = _tensor_to_list(buy_vol)
 
+    zero_volume_indices: list[int] = []
+    zero_volume_timestamps_ms: list[int] = []
+    timestamp_to_indices: dict[int, list[int]] = {}
+    for i, ts_raw in enumerate(start_timestamp_ms_list):
+        ts = int(ts_raw)
+        if ts in timestamp_to_indices:
+            timestamp_to_indices[ts].append(i)
+        else:
+            timestamp_to_indices[ts] = [i]
+
+    duplicate_timestamp_indices: list[int] = []
+    duplicate_timestamps_ms: list[int] = []
+    for ts, indices in timestamp_to_indices.items():
+        if len(indices) > 1:
+            duplicate_timestamps_ms.append(ts)
+            duplicate_timestamp_indices.extend(indices)
+
     bars = []
     for i in range(n):
         total = total_list[i]
         if total == 0:
+            zero_volume_indices.append(i)
+            zero_volume_timestamps_ms.append(int(start_timestamp_ms_list[i]))
             continue  # исключаем паддинг нулями
 
         buy = buy_list[i]
@@ -135,6 +156,35 @@ def get_dow_bars_for_level(
             'sell_volume_percent': sell_pct,
             'total_volume_log2': total_log2,
         })
+
+    if duplicate_timestamps_ms:
+        logger.warning(
+            (
+                'Dow diagnostics: duplicate start_timestamp_ms detected '
+                '(symbol=%s, level=%d, duplicate_timestamps_count=%d, duplicate_indices_count=%d, '
+                'duplicate_timestamps_ms=%s, duplicate_indices=%s)'
+            ),
+            symbol_id.name,
+            level,
+            len(duplicate_timestamps_ms),
+            len(duplicate_timestamp_indices),
+            duplicate_timestamps_ms,
+            duplicate_timestamp_indices,
+        )
+
+    if zero_volume_indices:
+        logger.warning(
+            (
+                'Dow diagnostics: total_volume == 0 bars filtered out '
+                '(symbol=%s, level=%d, zero_volume_count=%d, zero_volume_indices=%s, '
+                'zero_volume_timestamps_ms=%s)'
+            ),
+            symbol_id.name,
+            level,
+            len(zero_volume_indices),
+            zero_volume_indices,
+            zero_volume_timestamps_ms,
+        )
 
     return bars
 
@@ -157,4 +207,6 @@ def get_dow_bars_for_api(
 
     return get_dow_bars_for_level(
         final_tensors,
+        level=level,
+        symbol_id=symbol_id,
     )
