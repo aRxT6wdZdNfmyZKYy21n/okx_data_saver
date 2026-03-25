@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars
 from settings import settings
-from trading_bot_dataset.src.dataset import HybridTradeDataset
+from trading_bot_dataset.src.dataset import HybridTradeDatasetInference
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
         },
     )
 
-    dataset = HybridTradeDataset(
+    dataset = HybridTradeDatasetInference(
         dataframe=df,
         sequence_length=sequence_length,
         raw_columns=list(dataset_cfg['raw_cols']),
@@ -49,7 +49,6 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
         use_indicators=bool(dataset_cfg['use_indicators']),
         indicator_cols=list(dataset_cfg['indicator_cols']),
         model_config=model_cfg_omega,
-        inference_mode=True,
     )
 
     last_index = len(dataset) - 1
