@@ -67,7 +67,7 @@ def get_bars(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
     limit: int | None = Query(None, ge=1, description='Max bars to return (default from config)'),
     offset: int = Query(0, ge=0),
-    scale: str = Query('x2048', description='Scale: x1, x2, x4, ... x2048'),
+    scale: str = Query('x4096', description='Scale: x1, x2, x4, ... x262144'),
 ) -> dict:
     """
     Последние бары для символа. Пагинация: offset (пропуск от конца), limit.

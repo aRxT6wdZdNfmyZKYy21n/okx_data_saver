@@ -1,5 +1,5 @@
 """
-Агрегация баров по масштабу (x2, x4, ... x2048) для веб-GUI.
+Агрегация баров по масштабу (x2, x4, ... x262144) для веб-GUI.
 
 Правила как в trading_bot_2 CandleAggregator: OHLC first/last/max/min, volume/count sum.
 """

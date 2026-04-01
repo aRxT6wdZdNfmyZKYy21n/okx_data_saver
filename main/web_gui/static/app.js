@@ -58,7 +58,7 @@
   let inferenceErrorBySymbolAndHorizon = {};
   let inferenceMinRows = 0;
 
-  const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048'];
+  const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384', 'x32768', 'x65536', 'x131072', 'x262144'];
   const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
   const CVD_WINDOW_DEFAULT = 'x512';
 
@@ -186,9 +186,9 @@
             opt.textContent = l;
             scaleSelect.appendChild(opt);
           });
-          // Масштаб по умолчанию для обычных баров — x2048 (если доступен).
-          if (scales.includes('x2048')) {
-            scaleSelect.value = 'x2048';
+          // Масштаб по умолчанию для обычных баров — x4096 (если доступен).
+          if (scales.includes('x4096')) {
+            scaleSelect.value = 'x4096';
           }
         });
       }),
