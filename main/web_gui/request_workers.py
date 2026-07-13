@@ -16,6 +16,7 @@ from main.web_gui.dow_service import get_dow_bars_for_api
 from main.web_gui.inference_service import run_remote_inference
 from main.web_gui.serialization import serialize_bar_row
 from main.web_gui.trade_journal_service import (
+    apply_mark_price_to_open_position,
     build_journal_response,
     close_position,
     discard_open_position,
@@ -82,6 +83,9 @@ def _worker_trade_journal_state(
         and open_position_data['symbol_id'] == symbol_id_str
         and mark_price is not None
     ):
+        apply_mark_price_to_open_position(mark_price=mark_price)
+        journal = get_journal_state()
+        open_position_data = journal['open_position']
         symbol = SymbolId[symbol_id_str]
         entry_start_trade_id = int(open_position_data['entry_start_trade_id'])
         bars_elapsed = count_x1_bars_since_entry(
@@ -92,6 +96,8 @@ def _worker_trade_journal_state(
 
 
 def _worker_trade_journal_entry(payload: dict) -> dict:
+    entry_policy = payload['entry_policy']
+    entry_predictions = payload['entry_predictions']
     return open_position(
         symbol_id=payload['symbol_id'],
         side=payload['side'],
@@ -102,6 +108,8 @@ def _worker_trade_journal_entry(payload: dict) -> dict:
         notional_usd=float(payload['notional_usd']),
         policy_action=payload['policy_action'],
         notes=payload['notes'],
+        entry_policy=entry_policy,
+        entry_predictions=entry_predictions,
     )
 
 

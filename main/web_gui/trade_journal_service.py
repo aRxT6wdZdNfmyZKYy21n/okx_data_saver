@@ -75,6 +75,91 @@ def net_return_pct(gross_return_pct_value: float, include_exit_fee: bool) -> flo
     return gross_return_pct_value - TAKER_FEE_RATE_PER_SIDE
 
 
+def _empty_excursion_state(entry_price: float) -> dict[str, float]:
+    return {
+        'mfe_gross_return': 0.0,
+        'mae_gross_return': 0.0,
+        'mfe_mark_price': entry_price,
+        'mae_mark_price': entry_price,
+    }
+
+
+def update_excursion_state(
+    side: str,
+    entry_price: float,
+    mark_price: float,
+    excursion: dict[str, float],
+) -> dict[str, float]:
+    gross = gross_return_pct(side, entry_price, mark_price)
+    mfe_gross = gross
+    if gross < excursion['mfe_gross_return']:
+        mfe_gross = excursion['mfe_gross_return']
+    mae_gross = gross
+    if gross > excursion['mae_gross_return']:
+        mae_gross = excursion['mae_gross_return']
+    mfe_mark_price = mark_price
+    if mfe_gross != gross:
+        mfe_mark_price = excursion['mfe_mark_price']
+    mae_mark_price = mark_price
+    if mae_gross != gross:
+        mae_mark_price = excursion['mae_mark_price']
+    return {
+        'mfe_gross_return': mfe_gross,
+        'mae_gross_return': mae_gross,
+        'mfe_mark_price': mfe_mark_price,
+        'mae_mark_price': mae_mark_price,
+    }
+
+
+def excursion_metrics_for_display(
+    side: str,
+    entry_price: float,
+    notional_usd: float,
+    excursion: dict[str, float],
+    current_gross_return: float,
+) -> dict[str, float]:
+    mfe_gross = excursion['mfe_gross_return']
+    mae_gross = excursion['mae_gross_return']
+    mfe_net = net_return_pct(mfe_gross, include_exit_fee=False)
+    mae_net = net_return_pct(mae_gross, include_exit_fee=False)
+    current_net = net_return_pct(current_gross_return, include_exit_fee=False)
+    giveback_net = mfe_net - current_net
+    return {
+        'mfe_gross_return_pct': mfe_gross * 100.0,
+        'mae_gross_return_pct': mae_gross * 100.0,
+        'mfe_net_return_pct': mfe_net * 100.0,
+        'mae_net_return_pct': mae_net * 100.0,
+        'mfe_pnl_usd': notional_usd * mfe_net,
+        'mae_pnl_usd': notional_usd * mae_net,
+        'giveback_net_return_pct': giveback_net * 100.0,
+        'giveback_pnl_usd': notional_usd * giveback_net,
+        'mfe_mark_price': excursion['mfe_mark_price'],
+        'mae_mark_price': excursion['mae_mark_price'],
+    }
+
+
+def apply_mark_price_to_open_position(mark_price: float) -> None:
+    with _JOURNAL_LOCK:
+        journal = _load_journal_unlocked()
+        open_position_data = journal['open_position']
+        if open_position_data is None:
+            return
+        side = open_position_data['side']
+        entry_price = float(open_position_data['entry_price'])
+        if 'excursion' in open_position_data:
+            excursion = open_position_data['excursion']
+        else:
+            excursion = _empty_excursion_state(entry_price)
+        open_position_data['excursion'] = update_excursion_state(
+            side=side,
+            entry_price=entry_price,
+            mark_price=mark_price,
+            excursion=excursion,
+        )
+        journal['open_position'] = open_position_data
+        _save_journal_unlocked(journal)
+
+
 def compute_position_metrics(
     side: str,
     entry_price: float,
@@ -82,10 +167,11 @@ def compute_position_metrics(
     eval_horizon_steps: int,
     bars_elapsed: int,
     mark_price: float,
+    excursion: dict[str, float] | None,
 ) -> dict[str, float | int | bool]:
     gross_pct = gross_return_pct(side, entry_price, mark_price)
     unrealized_net_pct = net_return_pct(gross_pct, include_exit_fee=False)
-    return {
+    metrics: dict[str, float | int | bool] = {
         'bars_elapsed': bars_elapsed,
         'eval_horizon_steps': eval_horizon_steps,
         'bars_remaining': max(0, eval_horizon_steps - bars_elapsed),
@@ -96,6 +182,16 @@ def compute_position_metrics(
         'unrealized_net_return_pct': unrealized_net_pct * 100.0,
         'unrealized_pnl_usd': notional_usd * unrealized_net_pct,
     }
+    if excursion is not None:
+        excursion_display = excursion_metrics_for_display(
+            side=side,
+            entry_price=entry_price,
+            notional_usd=notional_usd,
+            excursion=excursion,
+            current_gross_return=gross_pct,
+        )
+        metrics.update(excursion_display)
+    return metrics
 
 
 def get_journal_state() -> dict[str, Any]:
@@ -113,6 +209,8 @@ def open_position(
     notional_usd: float,
     policy_action: str | None,
     notes: str,
+    entry_policy: dict[str, Any] | None,
+    entry_predictions: dict[str, float] | None,
 ) -> dict[str, Any]:
     side_normalized = side.lower()
     if side_normalized not in ('long', 'short'):
@@ -142,6 +240,9 @@ def open_position(
             'notional_usd': notional_usd,
             'policy_action': policy_action,
             'notes': notes,
+            'entry_policy': entry_policy,
+            'entry_predictions': entry_predictions,
+            'excursion': _empty_excursion_state(entry_price),
             'opened_at_utc': now_iso,
         }
         journal['open_position'] = position
@@ -171,6 +272,20 @@ def close_position(
         notional_usd = float(open_position_data['notional_usd'])
         gross_pct = gross_return_pct(side, entry_price, exit_price)
         net_pct = net_return_pct(gross_pct, include_exit_fee=True)
+        excursion = open_position_data['excursion'] if 'excursion' in open_position_data else _empty_excursion_state(entry_price)
+        excursion = update_excursion_state(
+            side=side,
+            entry_price=entry_price,
+            mark_price=exit_price,
+            excursion=excursion,
+        )
+        excursion_summary = excursion_metrics_for_display(
+            side=side,
+            entry_price=entry_price,
+            notional_usd=notional_usd,
+            excursion=excursion,
+            current_gross_return=gross_pct,
+        )
 
         closed_trade = {
             'id': open_position_data['id'],
@@ -186,6 +301,8 @@ def close_position(
             'eval_horizon_steps': open_position_data['eval_horizon_steps'],
             'notional_usd': notional_usd,
             'policy_action': open_position_data['policy_action'],
+            'entry_policy': open_position_data['entry_policy'] if 'entry_policy' in open_position_data else None,
+            'entry_predictions': open_position_data['entry_predictions'] if 'entry_predictions' in open_position_data else None,
             'entry_notes': open_position_data['notes'],
             'exit_notes': notes,
             'opened_at_utc': open_position_data['opened_at_utc'],
@@ -194,6 +311,11 @@ def close_position(
             'net_return_pct': net_pct * 100.0,
             'realized_pnl_usd': notional_usd * net_pct,
             'fee_model_round_trip_rate': ROUND_TRIP_FEE_RATE,
+            'mfe_net_return_pct': excursion_summary['mfe_net_return_pct'],
+            'mae_net_return_pct': excursion_summary['mae_net_return_pct'],
+            'mfe_pnl_usd': excursion_summary['mfe_pnl_usd'],
+            'giveback_net_return_pct': excursion_summary['giveback_net_return_pct'],
+            'giveback_pnl_usd': excursion_summary['giveback_pnl_usd'],
         }
         journal['closed_trades'].append(closed_trade)
         journal['open_position'] = None
@@ -213,6 +335,9 @@ def enrich_open_position(
     bars_elapsed: int,
     mark_price: float,
 ) -> dict[str, Any]:
+    excursion = open_position_data['excursion'] if 'excursion' in open_position_data else _empty_excursion_state(
+        float(open_position_data['entry_price']),
+    )
     metrics = compute_position_metrics(
         side=open_position_data['side'],
         entry_price=float(open_position_data['entry_price']),
@@ -220,6 +345,7 @@ def enrich_open_position(
         eval_horizon_steps=int(open_position_data['eval_horizon_steps']),
         bars_elapsed=bars_elapsed,
         mark_price=mark_price,
+        excursion=excursion,
     )
     enriched = dict(open_position_data)
     enriched['metrics'] = metrics

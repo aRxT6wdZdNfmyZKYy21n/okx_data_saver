@@ -103,6 +103,7 @@
   let checkpointPathBySymbol = {};
   let inferenceMinRows = 0;
   let lastPolicy = null;
+  let lastPredictions = null;
   let latestX1Bar = null;
   let journalDefaults = {
     notional_usd: 7,
@@ -392,6 +393,7 @@
   }
 
   function renderInference(predictions, symbol, policy) {
+    lastPredictions = predictions || null;
     const keys = Object.keys(predictions || {});
     if (keys.length === 0) {
       setInferenceWarning('Нет предсказаний для отображения');
@@ -494,6 +496,30 @@
       });
   }
 
+  function buildEntryJournalPayload(side) {
+    const evalHorizon = getJournalEvalHorizon();
+    let entryPolicy = null;
+    if (lastPolicy) {
+      entryPolicy = {
+        action: lastPolicy.action != null ? String(lastPolicy.action) : null,
+        eval_horizon: lastPolicy.eval_horizon != null ? String(lastPolicy.eval_horizon) : evalHorizon,
+        run_label: lastPolicy.run_label != null ? String(lastPolicy.run_label) : null,
+        probabilities: lastPolicy.probabilities || null,
+      };
+    }
+    let entryPredictions = null;
+    if (lastPredictions) {
+      entryPredictions = {};
+      Object.keys(lastPredictions).forEach((key) => {
+        const value = Number(lastPredictions[key]);
+        if (Number.isFinite(value)) {
+          entryPredictions[key] = value;
+        }
+      });
+    }
+    return { entryPolicy, entryPredictions };
+  }
+
   function refreshTradeJournal(symbol) {
     if (!symbol) return Promise.resolve();
     return fetchLatestX1Bar(symbol)
@@ -544,6 +570,19 @@
       alertHtml = m.at_target_horizon
         ? `<div class="trade-journal-alert">⚠ Достигнут горизонт ${evalHorizonLabel} — по policy пора выходить</div>`
         : '';
+      const policySideNow = policyActionToSide(lastPolicy && lastPolicy.action);
+      if (policySideNow && policySideNow !== openPos.side) {
+        alertHtml += `<div class="trade-journal-alert">↔ Policy flip → ${policySideNow.toUpperCase()}, открыт ${String(openPos.side).toUpperCase()} — рассмотри exit</div>`;
+      }
+      const mfeLine = m.mfe_net_return_pct != null
+        ? `<span>MFE: <strong class="${pnlClass(m.mfe_pnl_usd)}">${formatPct(m.mfe_net_return_pct)} (${formatUsd(m.mfe_pnl_usd)})</strong></span>`
+        : '';
+      const maeLine = m.mae_net_return_pct != null
+        ? `<span>MAE: <strong class="${pnlClass(m.mae_pnl_usd)}">${formatPct(m.mae_net_return_pct)} (${formatUsd(m.mae_pnl_usd)})</strong></span>`
+        : '';
+      const givebackLine = m.giveback_net_return_pct != null
+        ? `<span>Giveback: <strong class="${pnlClass(-m.giveback_pnl_usd)}">${formatPct(m.giveback_net_return_pct)} (${formatUsd(m.giveback_pnl_usd)})</strong></span>`
+        : '';
       metricsHtml = `
         <div class="trade-journal-metrics">
           <span>Бары: <strong>${m.bars_elapsed}</strong> / ${m.eval_horizon_steps}</span>
@@ -551,6 +590,9 @@
           <span>Entry: <strong>${Number(openPos.entry_price).toFixed(2)}</strong></span>
           <span>Mark: <strong>${Number(m.mark_price).toFixed(2)}</strong></span>
           <span>Unrealized: <strong class="${pnlClass(m.unrealized_pnl_usd)}">${formatPct(m.unrealized_net_return_pct)} (${formatUsd(m.unrealized_pnl_usd)})</strong></span>
+          ${mfeLine}
+          ${maeLine}
+          ${givebackLine}
           <span>Notional: <strong>$${Number(openPos.notional_usd).toFixed(2)}</strong></span>
         </div>
         <div class="trade-journal-progress" title="${m.progress_pct.toFixed(1)}%">
@@ -591,19 +633,28 @@
 
     let historyHtml = '';
     if (closedTrades.length > 0) {
-      const rows = closedTrades.map(t => `
+      const rows = closedTrades.map(t => {
+        const mfeCell = t.mfe_net_return_pct != null
+          ? `<td class="${pnlClass(t.mfe_pnl_usd)}">${formatPct(t.mfe_net_return_pct)}</td>`
+          : '<td>—</td>';
+        const givebackCell = t.giveback_net_return_pct != null
+          ? `<td class="${pnlClass(-t.giveback_pnl_usd)}">${formatPct(t.giveback_net_return_pct)}</td>`
+          : '<td>—</td>';
+        return `
         <tr>
           <td>${String(t.side).toUpperCase()}</td>
           <td>${Number(t.entry_price).toFixed(1)} → ${Number(t.exit_price).toFixed(1)}</td>
           <td class="${pnlClass(t.realized_pnl_usd)}">${formatUsd(t.realized_pnl_usd)}</td>
-          <td class="${pnlClass(t.net_return_pct)}">${formatPct(t.net_return_pct)}</td>
+          ${mfeCell}
+          ${givebackCell}
         </tr>
-      `).join('');
+      `;
+      }).join('');
       historyHtml = `
         <div class="trade-journal-history">
           <h4>Последние сделки</h4>
           <table>
-            <thead><tr><th>Side</th><th>Entry → Exit</th><th>PnL $</th><th>Net %</th></tr></thead>
+            <thead><tr><th>Side</th><th>Entry → Exit</th><th>PnL $</th><th>MFE</th><th>Giveback</th></tr></thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
@@ -650,6 +701,7 @@
     const policyAction = lastPolicy && lastPolicy.action ? String(lastPolicy.action).toUpperCase() : null;
     const evalHorizon = getJournalEvalHorizon();
     const notionalUsd = getJournalNotionalUsd();
+    const entrySnapshot = buildEntryJournalPayload(side);
 
     API.tradeJournalEntry({
       symbol_id: symbol,
@@ -661,6 +713,8 @@
       notional_usd: notionalUsd,
       policy_action: policyAction,
       notes: '',
+      entry_policy: entrySnapshot.entryPolicy,
+      entry_predictions: entrySnapshot.entryPredictions,
     })
       .then(() => {
         resetHorizonAlertState();

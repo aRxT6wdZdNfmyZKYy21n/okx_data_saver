@@ -149,6 +149,8 @@ class TradeJournalEntryRequest(BaseModel):
     notional_usd: float = Field(..., gt=0)
     policy_action: str | None = None
     notes: str = ''
+    entry_policy: dict | None = None
+    entry_predictions: dict[str, float] | None = None
 
 
 class TradeJournalExitRequest(BaseModel):
