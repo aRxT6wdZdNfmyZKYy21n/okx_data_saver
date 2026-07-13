@@ -277,20 +277,18 @@
     const title = `Micro live: выход по ${evalHorizonLabel}`;
     const body = `${sideLabel} ${openPos.symbol_id} — счётчик баров достиг горизонта, закрой позицию на бирже.`;
 
-    if (isFirstJournalLoad) {
-      playHorizonOverdueSound();
-      showHorizonBrowserNotification(title, body);
-      horizonAlertPositionId = positionId;
-      previousAtTargetHorizon = true;
-      return;
-    }
-
-    if (!previousAtTargetHorizon && horizonAlertPositionId !== positionId) {
+    const isFirstCrossThisSession = !previousAtTargetHorizon && !isFirstJournalLoad;
+    if (isFirstCrossThisSession) {
       playHorizonReachedSound();
-      showHorizonBrowserNotification(title, body);
-      horizonAlertPositionId = positionId;
+    } else {
+      playHorizonOverdueSound();
     }
 
+    if (!previousAtTargetHorizon) {
+      showHorizonBrowserNotification(title, body);
+    }
+
+    horizonAlertPositionId = positionId;
     previousAtTargetHorizon = true;
   }
 
