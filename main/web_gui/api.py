@@ -8,6 +8,7 @@ import os
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from enumerations import SymbolId
 from main.web_gui.constants import DOW_LEVEL_NAMES, SCALE_NAMES
@@ -18,6 +19,10 @@ from main.web_gui.request_workers import (
     _worker_bars,
     _worker_dow,
     _worker_inference,
+    _worker_trade_journal_discard,
+    _worker_trade_journal_entry,
+    _worker_trade_journal_exit,
+    _worker_trade_journal_state,
     run_in_spawned_process,
 )
 from settings import settings
@@ -132,6 +137,73 @@ def get_inference(
     effective_limit = min(limit or DEFAULT_BARS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
     predictions = run_in_spawned_process(_worker_inference, symbol_id, effective_limit)
     return predictions
+
+
+class TradeJournalEntryRequest(BaseModel):
+    symbol_id: str
+    side: str
+    entry_price: float = Field(..., gt=0)
+    entry_start_trade_id: int = Field(..., ge=0)
+    entry_timestamp_ms: int = Field(..., ge=0)
+    eval_horizon: str
+    notional_usd: float = Field(..., gt=0)
+    policy_action: str | None = None
+    notes: str = ''
+
+
+class TradeJournalExitRequest(BaseModel):
+    exit_price: float = Field(..., gt=0)
+    exit_start_trade_id: int = Field(..., ge=0)
+    exit_timestamp_ms: int = Field(..., ge=0)
+    notes: str = ''
+
+
+@app.get('/api/trade-journal')
+def get_trade_journal(
+    symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
+    mark_price: float | None = Query(None, gt=0, description='Latest x1 close for unrealized PnL'),
+) -> dict:
+    try:
+        SymbolId[symbol_id]
+    except KeyError:
+        raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
+
+    return run_in_spawned_process(_worker_trade_journal_state, symbol_id, mark_price)
+
+
+@app.post('/api/trade-journal/entry')
+def post_trade_journal_entry(body: TradeJournalEntryRequest) -> dict:
+    try:
+        SymbolId[body.symbol_id]
+    except KeyError:
+        raise HTTPException(422, detail=f'Unknown symbol_id: {body.symbol_id}')
+
+    try:
+        position = run_in_spawned_process(
+            _worker_trade_journal_entry,
+            body.model_dump(),
+        )
+    except ValueError as exception:
+        raise HTTPException(409, detail=str(exception))
+    return {'open_position': position}
+
+
+@app.post('/api/trade-journal/exit')
+def post_trade_journal_exit(body: TradeJournalExitRequest) -> dict:
+    try:
+        closed_trade = run_in_spawned_process(
+            _worker_trade_journal_exit,
+            body.model_dump(),
+        )
+    except ValueError as exception:
+        raise HTTPException(409, detail=str(exception))
+    return {'closed_trade': closed_trade}
+
+
+@app.delete('/api/trade-journal/open')
+def delete_trade_journal_open() -> dict:
+    run_in_spawned_process(_worker_trade_journal_discard)
+    return {'ok': True}
 
 
 def mount_static(static_dir: str) -> None:

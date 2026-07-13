@@ -23,6 +23,42 @@
       const q = new URLSearchParams(params).toString();
       return this.get('./api/inference?' + q);
     },
+    async tradeJournal(params) {
+      const q = new URLSearchParams(params).toString();
+      return this.get('./api/trade-journal?' + q);
+    },
+    async tradeJournalEntry(body) {
+      const r = await fetch('./api/trade-journal/entry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(text);
+      }
+      return r.json();
+    },
+    async tradeJournalExit(body) {
+      const r = await fetch('./api/trade-journal/exit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(text);
+      }
+      return r.json();
+    },
+    async tradeJournalDiscardOpen() {
+      const r = await fetch('./api/trade-journal/open', { method: 'DELETE' });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(text);
+      }
+      return r.json();
+    },
   };
 
   let config = { defaultLimit: 100000, refreshIntervalSec: 30 };
@@ -56,14 +92,100 @@
   const inferencePanel = document.getElementById('inferencePanel');
   const policySummary = document.getElementById('policySummary');
   const inferenceContent = document.getElementById('inferenceContent');
+  const tradeJournalPanel = document.getElementById('tradeJournalPanel');
+  const tradeJournalContent = document.getElementById('tradeJournalContent');
+  const tradeJournalTotals = document.getElementById('tradeJournalTotals');
+  const journalNotionalInput = document.getElementById('journalNotional');
+  const journalEvalHorizonSelect = document.getElementById('journalEvalHorizon');
   let inferenceErrorBySymbolAndHorizon = {};
   let policyBySymbol = {};
   let checkpointPathBySymbol = {};
   let inferenceMinRows = 0;
+  let lastPolicy = null;
+  let latestX1Bar = null;
+  let journalDefaults = {
+    notional_usd: 7,
+    eval_horizon: 'x2048',
+    round_trip_fee_rate: 0.001,
+  };
 
   const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384', 'x32768', 'x65536', 'x131072', 'x262144'];
   const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
   const CVD_WINDOW_DEFAULT = 'x512';
+  const JOURNAL_EVAL_HORIZON_OPTIONS = ['x512', 'x1024', 'x1536', 'x2048', 'x3072', 'x4096'];
+  const JOURNAL_SETTINGS_STORAGE_KEY = 'okx_web_gui_journal_settings';
+
+  function loadJournalSettingsFromStorage() {
+    try {
+      const raw = localStorage.getItem(JOURNAL_SETTINGS_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      return parsed;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function saveJournalSettingsToStorage() {
+    const notional = Number(journalNotionalInput.value);
+    const evalHorizon = journalEvalHorizonSelect.value;
+    if (!Number.isFinite(notional) || notional <= 0) return;
+    if (!evalHorizon) return;
+    localStorage.setItem(
+      JOURNAL_SETTINGS_STORAGE_KEY,
+      JSON.stringify({ notional_usd: notional, eval_horizon: evalHorizon }),
+    );
+  }
+
+  function getJournalNotionalUsd() {
+    const value = Number(journalNotionalInput.value);
+    if (!Number.isFinite(value) || value <= 0) {
+      return Number(journalDefaults.notional_usd);
+    }
+    return value;
+  }
+
+  function getJournalEvalHorizon() {
+    const value = journalEvalHorizonSelect.value;
+    if (value) return value;
+    return journalDefaults.eval_horizon;
+  }
+
+  function setJournalEvalHorizon(value) {
+    if (!value) return;
+    if (!JOURNAL_EVAL_HORIZON_OPTIONS.includes(value)) return;
+    journalEvalHorizonSelect.value = value;
+    saveJournalSettingsToStorage();
+  }
+
+  function initJournalSettingsControls() {
+    journalEvalHorizonSelect.innerHTML = '';
+    JOURNAL_EVAL_HORIZON_OPTIONS.forEach((horizon) => {
+      const option = document.createElement('option');
+      option.value = horizon;
+      option.textContent = horizon;
+      journalEvalHorizonSelect.appendChild(option);
+    });
+
+    const stored = loadJournalSettingsFromStorage();
+    if (stored && stored.notional_usd != null) {
+      journalNotionalInput.value = String(stored.notional_usd);
+    }
+    if (stored && stored.eval_horizon != null && JOURNAL_EVAL_HORIZON_OPTIONS.includes(stored.eval_horizon)) {
+      journalEvalHorizonSelect.value = stored.eval_horizon;
+    } else {
+      journalEvalHorizonSelect.value = journalDefaults.eval_horizon;
+    }
+
+    journalNotionalInput.addEventListener('change', saveJournalSettingsToStorage);
+    journalEvalHorizonSelect.addEventListener('change', saveJournalSettingsToStorage);
+  }
+
+  function syncJournalSettingsDisabled(hasOpen) {
+    journalNotionalInput.disabled = hasOpen;
+    journalEvalHorizonSelect.disabled = hasOpen;
+  }
 
   function setStatus(text, isError = false) {
     statusEl.textContent = text;
@@ -96,6 +218,7 @@
   }
 
   function renderPolicy(policy, symbol) {
+    lastPolicy = policy || null;
     if (!policy || !policy.action) {
       policySummary.classList.add('hidden');
       policySummary.innerHTML = '';
@@ -104,6 +227,9 @@
 
     const action = String(policy.action).toUpperCase();
     const evalHorizon = policy.eval_horizon || '—';
+    if (policy.eval_horizon) {
+      setJournalEvalHorizon(policy.eval_horizon);
+    }
     const runLabel = policy.run_label || '—';
     const probs = policy.probabilities || {};
     const holdPct = probs.hold != null ? (Number(probs.hold) * 100).toFixed(1) : '—';
@@ -189,6 +315,236 @@
       .catch(e => {
         setInferenceWarning(parseErrorDetail(e.message));
       });
+  }
+
+  function formatUsd(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    const sign = n >= 0 ? '+' : '';
+    return `${sign}$${n.toFixed(4)}`;
+  }
+
+  function formatPct(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    const sign = n >= 0 ? '+' : '';
+    return `${sign}${n.toFixed(3)}%`;
+  }
+
+  function pnlClass(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n === 0) return '';
+    return n > 0 ? 'pnl-positive' : 'pnl-negative';
+  }
+
+  function policyActionToSide(action) {
+    const normalized = String(action || '').toUpperCase();
+    if (normalized === 'LONG') return 'long';
+    if (normalized === 'SHORT') return 'short';
+    return null;
+  }
+
+  function fetchLatestX1Bar(symbol) {
+    return API.bars({ symbol_id: symbol, scale: 'x1', limit: 1 })
+      .then(data => {
+        const bars = data.bars || [];
+        if (bars.length === 0) {
+          latestX1Bar = null;
+          return null;
+        }
+        latestX1Bar = bars[bars.length - 1];
+        return latestX1Bar;
+      });
+  }
+
+  function refreshTradeJournal(symbol) {
+    if (!symbol) return Promise.resolve();
+    return fetchLatestX1Bar(symbol)
+      .then(bar => {
+        const params = { symbol_id: symbol };
+        if (bar && bar.close_price != null) {
+          params.mark_price = String(Number(bar.close_price));
+        }
+        return API.tradeJournal(params);
+      })
+      .then(state => {
+      if (state.defaults) {
+        journalDefaults = state.defaults;
+        if (!loadJournalSettingsFromStorage()) {
+          journalNotionalInput.value = String(journalDefaults.notional_usd);
+          if (JOURNAL_EVAL_HORIZON_OPTIONS.includes(journalDefaults.eval_horizon)) {
+            journalEvalHorizonSelect.value = journalDefaults.eval_horizon;
+          }
+        }
+      }
+        renderTradeJournal(state, symbol);
+      })
+      .catch(e => {
+        tradeJournalContent.innerHTML = `<div class="trade-journal-loading">Ошибка журнала: ${parseErrorDetail(e.message)}</div>`;
+      });
+  }
+
+  function renderTradeJournal(state, symbol) {
+    const openPos = state.open_position;
+    const closedTrades = state.closed_trades || [];
+    const totalPnl = state.total_realized_pnl_usd;
+    const closedCount = state.closed_trades_count || 0;
+
+    tradeJournalTotals.textContent = `Закрыто: ${closedCount} · Realized: ${formatUsd(totalPnl)}`;
+
+    const policySide = policyActionToSide(lastPolicy && lastPolicy.action);
+    const hasOpen = openPos && openPos.side;
+    const sideLabel = hasOpen ? openPos.side.toUpperCase() : 'FLAT';
+    const sideClass = hasOpen ? (openPos.side === 'long' ? 'position-long' : 'position-short') : 'position-flat';
+
+    let metricsHtml = '';
+    let alertHtml = '';
+    if (hasOpen && openPos.metrics) {
+      const m = openPos.metrics;
+      const progressClass = m.at_target_horizon ? 'at-target' : '';
+      const evalHorizonLabel = openPos.eval_horizon || `x${m.eval_horizon_steps}`;
+      alertHtml = m.at_target_horizon
+        ? `<div class="trade-journal-alert">⚠ Достигнут горизонт ${evalHorizonLabel} — по policy пора выходить</div>`
+        : '';
+      metricsHtml = `
+        <div class="trade-journal-metrics">
+          <span>Бары: <strong>${m.bars_elapsed}</strong> / ${m.eval_horizon_steps}</span>
+          <span>Осталось: <strong>${m.bars_remaining}</strong></span>
+          <span>Entry: <strong>${Number(openPos.entry_price).toFixed(2)}</strong></span>
+          <span>Mark: <strong>${Number(m.mark_price).toFixed(2)}</strong></span>
+          <span>Unrealized: <strong class="${pnlClass(m.unrealized_pnl_usd)}">${formatPct(m.unrealized_net_return_pct)} (${formatUsd(m.unrealized_pnl_usd)})</strong></span>
+          <span>Notional: <strong>$${Number(openPos.notional_usd).toFixed(2)}</strong></span>
+        </div>
+        <div class="trade-journal-progress" title="${m.progress_pct.toFixed(1)}%">
+          <div class="trade-journal-progress-bar ${progressClass}" style="width: ${Math.min(100, m.progress_pct)}%"></div>
+        </div>
+      `;
+    } else if (!hasOpen) {
+      metricsHtml = `
+        <div class="trade-journal-metrics">
+          <span>Policy: <strong>${lastPolicy && lastPolicy.action ? String(lastPolicy.action).toUpperCase() : '—'}</strong></span>
+          <span>eval (policy): <strong>${lastPolicy && lastPolicy.eval_horizon ? lastPolicy.eval_horizon : '—'}</strong></span>
+        </div>
+      `;
+    }
+
+    syncJournalSettingsDisabled(hasOpen);
+    const canEnterLong = !hasOpen && policySide === 'long';
+    const canEnterShort = !hasOpen && policySide === 'short';
+    const canEnterManual = !hasOpen && !policySide;
+
+    const actionsHtml = `
+      <div class="trade-journal-actions">
+        <button type="button" id="btnJournalEntryLong" class="btn-entry-long" ${canEnterLong || canEnterManual ? '' : 'disabled'}>
+          Вошёл LONG
+        </button>
+        <button type="button" id="btnJournalEntryShort" class="btn-entry-short" ${canEnterShort || canEnterManual ? '' : 'disabled'}>
+          Вошёл SHORT
+        </button>
+        <button type="button" id="btnJournalExit" class="btn-exit" ${hasOpen ? '' : 'disabled'}>
+          Вышел
+        </button>
+        <button type="button" id="btnJournalDiscard" ${hasOpen ? '' : 'disabled'} title="Сбросить без записи в историю">
+          Сброс
+        </button>
+      </div>
+    `;
+
+    let historyHtml = '';
+    if (closedTrades.length > 0) {
+      const rows = closedTrades.map(t => `
+        <tr>
+          <td>${String(t.side).toUpperCase()}</td>
+          <td>${Number(t.entry_price).toFixed(1)} → ${Number(t.exit_price).toFixed(1)}</td>
+          <td class="${pnlClass(t.realized_pnl_usd)}">${formatUsd(t.realized_pnl_usd)}</td>
+          <td class="${pnlClass(t.net_return_pct)}">${formatPct(t.net_return_pct)}</td>
+        </tr>
+      `).join('');
+      historyHtml = `
+        <div class="trade-journal-history">
+          <h4>Последние сделки</h4>
+          <table>
+            <thead><tr><th>Side</th><th>Entry → Exit</th><th>PnL $</th><th>Net %</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    tradeJournalContent.innerHTML = `
+      <div class="trade-journal-card ${sideClass}">
+        <div class="trade-journal-side">${sideLabel}${hasOpen ? ` · ${openPos.symbol_id}` : ''}</div>
+        ${alertHtml}
+        ${metricsHtml}
+        ${actionsHtml}
+      </div>
+      ${historyHtml}
+    `;
+
+    const btnLong = document.getElementById('btnJournalEntryLong');
+    const btnShort = document.getElementById('btnJournalEntryShort');
+    const btnExit = document.getElementById('btnJournalExit');
+    const btnDiscard = document.getElementById('btnJournalDiscard');
+
+    if (btnLong) {
+      btnLong.addEventListener('click', () => handleJournalEntry(symbol, 'long'));
+    }
+    if (btnShort) {
+      btnShort.addEventListener('click', () => handleJournalEntry(symbol, 'short'));
+    }
+    if (btnExit) {
+      btnExit.addEventListener('click', () => handleJournalExit(symbol));
+    }
+    if (btnDiscard) {
+      btnDiscard.addEventListener('click', () => handleJournalDiscard(symbol));
+    }
+  }
+
+  function handleJournalEntry(symbol, side) {
+    if (!latestX1Bar) {
+      setStatus('Нет x1-бара для entry', true);
+      return;
+    }
+    const entryPrice = Number(latestX1Bar.close_price);
+    const policyAction = lastPolicy && lastPolicy.action ? String(lastPolicy.action).toUpperCase() : null;
+    const evalHorizon = getJournalEvalHorizon();
+    const notionalUsd = getJournalNotionalUsd();
+
+    API.tradeJournalEntry({
+      symbol_id: symbol,
+      side,
+      entry_price: entryPrice,
+      entry_start_trade_id: Number(latestX1Bar.start_trade_id),
+      entry_timestamp_ms: Number(latestX1Bar.start_timestamp_ms),
+      eval_horizon: evalHorizon,
+      notional_usd: notionalUsd,
+      policy_action: policyAction,
+      notes: '',
+    })
+      .then(() => refreshTradeJournal(symbol))
+      .catch(e => setStatus('Entry: ' + parseErrorDetail(e.message), true));
+  }
+
+  function handleJournalExit(symbol) {
+    if (!latestX1Bar) {
+      setStatus('Нет x1-бара для exit', true);
+      return;
+    }
+    API.tradeJournalExit({
+      exit_price: Number(latestX1Bar.close_price),
+      exit_start_trade_id: Number(latestX1Bar.start_trade_id),
+      exit_timestamp_ms: Number(latestX1Bar.end_timestamp_ms || latestX1Bar.start_timestamp_ms),
+      notes: '',
+    })
+      .then(() => refreshTradeJournal(symbol))
+      .catch(e => setStatus('Exit: ' + parseErrorDetail(e.message), true));
+  }
+
+  function handleJournalDiscard(symbol) {
+    if (!window.confirm('Сбросить открытую позицию без записи в историю?')) return;
+    API.tradeJournalDiscardOpen()
+      .then(() => refreshTradeJournal(symbol))
+      .catch(e => setStatus('Discard: ' + parseErrorDetail(e.message), true));
   }
 
   function isDowLevel(value) {
@@ -794,6 +1150,7 @@
         applyBarsToChart(data, scale);
         return loadInference(symbol, limit);
       })
+      .then(() => refreshTradeJournal(symbol))
       .catch(e => {
         setStatus('Ошибка: ' + e.message, true);
         setInferenceWarning(parseErrorDetail(e.message));
@@ -849,6 +1206,7 @@
       }
       await initDropdowns();
       initCvdWindowDropdown();
+      initJournalSettingsControls();
       chartDiv.style.height = '100%';
       volumeCanvas.width = volumePanel.clientWidth;
       volumeCanvas.height = volumePanel.clientHeight;

@@ -11,10 +11,17 @@ from collections.abc import Callable
 
 from enumerations import SymbolId
 
-from main.web_gui.data_service import get_bars_for_api
+from main.web_gui.data_service import count_x1_bars_since_entry, get_bars_for_api
 from main.web_gui.dow_service import get_dow_bars_for_api
 from main.web_gui.inference_service import run_remote_inference
 from main.web_gui.serialization import serialize_bar_row
+from main.web_gui.trade_journal_service import (
+    build_journal_response,
+    close_position,
+    discard_open_position,
+    get_journal_state,
+    open_position,
+)
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -60,6 +67,55 @@ def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None
 def _worker_inference(symbol_id_str: str, limit: int) -> dict[str, float]:
     """Вызывается в дочернем процессе. Возвращает словарь предсказаний."""
     return run_remote_inference(symbol_id=symbol_id_str, limit=limit)
+
+
+def _worker_trade_journal_state(
+    symbol_id_str: str,
+    mark_price: float | None,
+) -> dict:
+    """Загружает journal и при открытой позиции считает bars_elapsed из БД."""
+    journal = get_journal_state()
+    open_position_data = journal['open_position']
+    bars_elapsed = None
+    if (
+        open_position_data is not None
+        and open_position_data['symbol_id'] == symbol_id_str
+        and mark_price is not None
+    ):
+        symbol = SymbolId[symbol_id_str]
+        entry_start_trade_id = int(open_position_data['entry_start_trade_id'])
+        bars_elapsed = count_x1_bars_since_entry(
+            symbol_id=symbol,
+            entry_start_trade_id=entry_start_trade_id,
+        )
+    return build_journal_response(journal, bars_elapsed, mark_price)
+
+
+def _worker_trade_journal_entry(payload: dict) -> dict:
+    return open_position(
+        symbol_id=payload['symbol_id'],
+        side=payload['side'],
+        entry_price=float(payload['entry_price']),
+        entry_start_trade_id=int(payload['entry_start_trade_id']),
+        entry_timestamp_ms=int(payload['entry_timestamp_ms']),
+        eval_horizon=payload['eval_horizon'],
+        notional_usd=float(payload['notional_usd']),
+        policy_action=payload['policy_action'],
+        notes=payload['notes'],
+    )
+
+
+def _worker_trade_journal_exit(payload: dict) -> dict:
+    return close_position(
+        exit_price=float(payload['exit_price']),
+        exit_start_trade_id=int(payload['exit_start_trade_id']),
+        exit_timestamp_ms=int(payload['exit_timestamp_ms']),
+        notes=payload['notes'],
+    )
+
+
+def _worker_trade_journal_discard() -> None:
+    discard_open_position()
 
 
 def _run_worker(

@@ -96,6 +96,27 @@ def add_computed_columns(df: polars.DataFrame) -> polars.DataFrame:
     ])
 
 
+def count_x1_bars_since_entry(symbol_id: SymbolId, entry_start_trade_id: int) -> int | None:
+    """Число x1-баров с start_trade_id >= entry_start_trade_id (включая entry bar)."""
+    query = f"""
+    SELECT COUNT(*) AS bar_count
+    FROM {OKXDataSetRecordData_3.__tablename__}
+    WHERE symbol_id = '{symbol_id.name}'
+      AND start_trade_id >= {entry_start_trade_id}
+    """
+    try:
+        df = polars.read_database_uri(engine='connectorx', query=query, uri=_db_uri())
+    except Exception as exception:
+        logger.error(
+            'Failed to count bars since entry: %s',
+            ''.join(__import__('traceback').format_exception(exception)),
+        )
+        return None
+    if df.height == 0:
+        return None
+    return int(df['bar_count'][0])
+
+
 def get_bars_for_api(
     symbol_id: SymbolId,
     limit: int,
