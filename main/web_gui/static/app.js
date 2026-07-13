@@ -97,6 +97,7 @@
   const tradeJournalTotals = document.getElementById('tradeJournalTotals');
   const journalNotionalInput = document.getElementById('journalNotional');
   const journalEvalHorizonSelect = document.getElementById('journalEvalHorizon');
+  const journalSoundEnabledCheck = document.getElementById('journalSoundEnabled');
   let inferenceErrorBySymbolAndHorizon = {};
   let policyBySymbol = {};
   let checkpointPathBySymbol = {};
@@ -108,12 +109,18 @@
     eval_horizon: 'x2048',
     round_trip_fee_rate: 0.001,
   };
+  let previousAtTargetHorizon = false;
+  let isFirstJournalLoad = true;
+  let horizonAlertPositionId = null;
+  let audioContext = null;
+  let audioUnlocked = false;
 
   const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384', 'x32768', 'x65536', 'x131072', 'x262144'];
   const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
   const CVD_WINDOW_DEFAULT = 'x512';
   const JOURNAL_EVAL_HORIZON_OPTIONS = ['x512', 'x1024', 'x1536', 'x2048', 'x3072', 'x4096'];
   const JOURNAL_SETTINGS_STORAGE_KEY = 'okx_web_gui_journal_settings';
+  const JOURNAL_SOUND_ENABLED_STORAGE_KEY = 'okx_web_gui_journal_sound_enabled';
 
   function loadJournalSettingsFromStorage() {
     try {
@@ -185,6 +192,136 @@
   function syncJournalSettingsDisabled(hasOpen) {
     journalNotionalInput.disabled = hasOpen;
     journalEvalHorizonSelect.disabled = hasOpen;
+  }
+
+  function isJournalSoundEnabled() {
+    return journalSoundEnabledCheck.checked;
+  }
+
+  function loadJournalSoundEnabledFromStorage() {
+    const raw = localStorage.getItem(JOURNAL_SOUND_ENABLED_STORAGE_KEY);
+    if (raw === '0') {
+      journalSoundEnabledCheck.checked = false;
+      return;
+    }
+    journalSoundEnabledCheck.checked = true;
+  }
+
+  function saveJournalSoundEnabledToStorage() {
+    localStorage.setItem(
+      JOURNAL_SOUND_ENABLED_STORAGE_KEY,
+      journalSoundEnabledCheck.checked ? '1' : '0',
+    );
+  }
+
+  function getAudioContext() {
+    if (!audioContext) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      audioContext = new AudioCtx();
+    }
+    return audioContext;
+  }
+
+  function unlockAudio() {
+    const ctx = getAudioContext();
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
+    audioUnlocked = true;
+  }
+
+  function playTone(frequencyHz, durationSec, startSec, gainValue) {
+    const ctx = getAudioContext();
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = frequencyHz;
+    gainNode.gain.value = gainValue;
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    const startAt = ctx.currentTime + startSec;
+    oscillator.start(startAt);
+    oscillator.stop(startAt + durationSec);
+  }
+
+  function playHorizonReachedSound() {
+    if (!isJournalSoundEnabled()) return;
+    unlockAudio();
+    playTone(880, 0.12, 0, 0.08);
+    playTone(1175, 0.18, 0.18, 0.08);
+  }
+
+  function playHorizonOverdueSound() {
+    if (!isJournalSoundEnabled()) return;
+    unlockAudio();
+    playTone(740, 0.14, 0, 0.1);
+    playTone(740, 0.14, 0.22, 0.1);
+    playTone(988, 0.22, 0.44, 0.1);
+  }
+
+  function resetHorizonAlertState() {
+    previousAtTargetHorizon = false;
+    horizonAlertPositionId = null;
+  }
+
+  function maybeNotifyHorizonAlert(openPos, atTargetHorizon) {
+    if (!openPos || !atTargetHorizon) {
+      previousAtTargetHorizon = false;
+      return;
+    }
+
+    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
+    const evalHorizonLabel = openPos.eval_horizon || 'horizon';
+    const sideLabel = String(openPos.side || '').toUpperCase();
+    const title = `Micro live: выход по ${evalHorizonLabel}`;
+    const body = `${sideLabel} ${openPos.symbol_id} — счётчик баров достиг горизонта, закрой позицию на бирже.`;
+
+    if (isFirstJournalLoad) {
+      playHorizonOverdueSound();
+      showHorizonBrowserNotification(title, body);
+      horizonAlertPositionId = positionId;
+      previousAtTargetHorizon = true;
+      return;
+    }
+
+    if (!previousAtTargetHorizon && horizonAlertPositionId !== positionId) {
+      playHorizonReachedSound();
+      showHorizonBrowserNotification(title, body);
+      horizonAlertPositionId = positionId;
+    }
+
+    previousAtTargetHorizon = true;
+  }
+
+  function showHorizonBrowserNotification(title, body) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    try {
+      new Notification(title, { body, tag: 'okx-micro-live-horizon' });
+    } catch (_) {
+      // no-op
+    }
+  }
+
+  function requestNotificationPermissionIfNeeded() {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'default') return;
+    Notification.requestPermission();
+  }
+
+  function initJournalSoundControls() {
+    loadJournalSoundEnabledFromStorage();
+    journalSoundEnabledCheck.addEventListener('change', () => {
+      saveJournalSoundEnabledToStorage();
+      if (journalSoundEnabledCheck.checked) {
+        unlockAudio();
+        requestNotificationPermissionIfNeeded();
+      }
+    });
+
+    document.addEventListener('click', () => {
+      unlockAudio();
+    }, { once: true });
   }
 
   function setStatus(text, isError = false) {
@@ -368,15 +505,15 @@
         return API.tradeJournal(params);
       })
       .then(state => {
-      if (state.defaults) {
-        journalDefaults = state.defaults;
-        if (!loadJournalSettingsFromStorage()) {
-          journalNotionalInput.value = String(journalDefaults.notional_usd);
-          if (JOURNAL_EVAL_HORIZON_OPTIONS.includes(journalDefaults.eval_horizon)) {
-            journalEvalHorizonSelect.value = journalDefaults.eval_horizon;
+        if (state.defaults) {
+          journalDefaults = state.defaults;
+          if (!loadJournalSettingsFromStorage()) {
+            journalNotionalInput.value = String(journalDefaults.notional_usd);
+            if (JOURNAL_EVAL_HORIZON_OPTIONS.includes(journalDefaults.eval_horizon)) {
+              journalEvalHorizonSelect.value = journalDefaults.eval_horizon;
+            }
           }
         }
-      }
         renderTradeJournal(state, symbol);
       })
       .catch(e => {
@@ -401,6 +538,7 @@
     let alertHtml = '';
     if (hasOpen && openPos.metrics) {
       const m = openPos.metrics;
+      maybeNotifyHorizonAlert(openPos, m.at_target_horizon);
       const progressClass = m.at_target_horizon ? 'at-target' : '';
       const evalHorizonLabel = openPos.eval_horizon || `x${m.eval_horizon_steps}`;
       alertHtml = m.at_target_horizon
@@ -420,6 +558,7 @@
         </div>
       `;
     } else if (!hasOpen) {
+      resetHorizonAlertState();
       metricsHtml = `
         <div class="trade-journal-metrics">
           <span>Policy: <strong>${lastPolicy && lastPolicy.action ? String(lastPolicy.action).toUpperCase() : '—'}</strong></span>
@@ -498,6 +637,8 @@
     if (btnDiscard) {
       btnDiscard.addEventListener('click', () => handleJournalDiscard(symbol));
     }
+
+    isFirstJournalLoad = false;
   }
 
   function handleJournalEntry(symbol, side) {
@@ -521,7 +662,10 @@
       policy_action: policyAction,
       notes: '',
     })
-      .then(() => refreshTradeJournal(symbol))
+      .then(() => {
+        resetHorizonAlertState();
+        return refreshTradeJournal(symbol);
+      })
       .catch(e => setStatus('Entry: ' + parseErrorDetail(e.message), true));
   }
 
@@ -536,14 +680,20 @@
       exit_timestamp_ms: Number(latestX1Bar.end_timestamp_ms || latestX1Bar.start_timestamp_ms),
       notes: '',
     })
-      .then(() => refreshTradeJournal(symbol))
+      .then(() => {
+        resetHorizonAlertState();
+        return refreshTradeJournal(symbol);
+      })
       .catch(e => setStatus('Exit: ' + parseErrorDetail(e.message), true));
   }
 
   function handleJournalDiscard(symbol) {
     if (!window.confirm('Сбросить открытую позицию без записи в историю?')) return;
     API.tradeJournalDiscardOpen()
-      .then(() => refreshTradeJournal(symbol))
+      .then(() => {
+        resetHorizonAlertState();
+        return refreshTradeJournal(symbol);
+      })
       .catch(e => setStatus('Discard: ' + parseErrorDetail(e.message), true));
   }
 
@@ -1207,6 +1357,8 @@
       await initDropdowns();
       initCvdWindowDropdown();
       initJournalSettingsControls();
+      initJournalSoundControls();
+      requestNotificationPermissionIfNeeded();
       chartDiv.style.height = '100%';
       volumeCanvas.width = volumePanel.clientWidth;
       volumeCanvas.height = volumePanel.clientHeight;
