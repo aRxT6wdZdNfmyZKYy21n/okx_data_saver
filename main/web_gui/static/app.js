@@ -54,8 +54,11 @@
   const cvdWindowSelect = document.getElementById('cvdWindow');
   const dowStub = document.getElementById('dowStub');
   const inferencePanel = document.getElementById('inferencePanel');
+  const policySummary = document.getElementById('policySummary');
   const inferenceContent = document.getElementById('inferenceContent');
   let inferenceErrorBySymbolAndHorizon = {};
+  let policyBySymbol = {};
+  let checkpointPathBySymbol = {};
   let inferenceMinRows = 0;
 
   const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384', 'x32768', 'x65536', 'x131072', 'x262144'];
@@ -92,7 +95,40 @@
     inferenceContent.innerHTML = `<div class="inference-warning">${message}</div>`;
   }
 
-  function renderInference(predictions, symbol) {
+  function renderPolicy(policy, symbol) {
+    if (!policy || !policy.action) {
+      policySummary.classList.add('hidden');
+      policySummary.innerHTML = '';
+      return;
+    }
+
+    const action = String(policy.action).toUpperCase();
+    const evalHorizon = policy.eval_horizon || '—';
+    const runLabel = policy.run_label || '—';
+    const probs = policy.probabilities || {};
+    const holdPct = probs.hold != null ? (Number(probs.hold) * 100).toFixed(1) : '—';
+    const longPct = probs.long != null ? (Number(probs.long) * 100).toFixed(1) : '—';
+    const shortPct = probs.short != null ? (Number(probs.short) * 100).toFixed(1) : '—';
+    const checkpointPath = checkpointPathBySymbol[symbol] || '—';
+    let actionClass = 'policy-hold';
+    if (action === 'LONG') actionClass = 'policy-long';
+    if (action === 'SHORT') actionClass = 'policy-short';
+
+    policySummary.classList.remove('hidden');
+    policySummary.innerHTML = `
+      <div class="policy-card ${actionClass}">
+        <div class="policy-action">${action}</div>
+        <div class="policy-meta">
+          <span>eval: <strong>${evalHorizon}</strong></span>
+          <span>stack: <strong>${runLabel}</strong></span>
+          <span>P(hold/long/short): ${holdPct}% / ${longPct}% / ${shortPct}%</span>
+        </div>
+        <div class="policy-checkpoint" title="${checkpointPath}">base ckpt: ${checkpointPath}</div>
+      </div>
+    `;
+  }
+
+  function renderInference(predictions, symbol, policy) {
     const keys = Object.keys(predictions || {});
     if (keys.length === 0) {
       setInferenceWarning('Нет предсказаний для отображения');
@@ -136,6 +172,7 @@
     }
 
     inferencePanel.classList.remove('hidden');
+    renderPolicy(policy, symbol);
     inferenceContent.innerHTML = rows.join('');
   }
 
@@ -145,7 +182,10 @@
       return Promise.resolve();
     }
     return API.inference({ symbol_id: symbol, limit })
-      .then(predictions => renderInference(predictions, symbol))
+      .then(response => {
+        const predictions = response.predictions || response;
+        renderInference(predictions, symbol, response.policy || null);
+      })
       .catch(e => {
         setInferenceWarning(parseErrorDetail(e.message));
       });
@@ -800,6 +840,8 @@
       config = await API.config();
       inferenceMinRows = config.inferenceMinRows != null ? Number(config.inferenceMinRows) : 0;
       inferenceErrorBySymbolAndHorizon = config.inferenceErrorBySymbolAndHorizon || {};
+      policyBySymbol = config.policyBySymbol || {};
+      checkpointPathBySymbol = config.checkpointPathBySymbol || {};
       if (config.defaultLimit) {
         limitInput.placeholder = config.defaultLimit;
         // По умолчанию количество баров фиксировано и равно defaultLimit (min(MAX, 1000)).

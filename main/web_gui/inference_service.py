@@ -77,7 +77,7 @@ def _encode_payload(payload_dict: dict) -> bytes:
     return pickle.dumps(payload_dict)
 
 
-def run_remote_inference(symbol_id: str, limit: int) -> dict[str, float]:
+def run_remote_inference(symbol_id: str, limit: int) -> dict[str, object]:
     if not settings.WEB_GUI_INFERENCE_ENABLED:
         raise HTTPException(status_code=503, detail='Inference is disabled')
 

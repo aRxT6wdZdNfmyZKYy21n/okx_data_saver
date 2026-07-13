@@ -225,6 +225,64 @@ body {
   color: #c4a535;
 }
 
+.policy-summary {
+  margin-bottom: 0.75rem;
+}
+
+.policy-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.65rem 0.85rem;
+  background: #1e222d;
+}
+
+.policy-card.policy-long {
+  border-left: 4px solid var(--green);
+}
+
+.policy-card.policy-short {
+  border-left: 4px solid var(--red);
+}
+
+.policy-card.policy-hold {
+  border-left: 4px solid #787b86;
+}
+
+.policy-action {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.policy-long .policy-action {
+  color: var(--green);
+}
+
+.policy-short .policy-action {
+  color: var(--red);
+}
+
+.policy-hold .policy-action {
+  color: #787b86;
+}
+
+.policy-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: #b2b5be;
+}
+
+.policy-checkpoint {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: #787b86;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .hidden {
   display: none;
 }

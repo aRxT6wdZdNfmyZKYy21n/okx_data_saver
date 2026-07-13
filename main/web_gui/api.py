@@ -54,11 +54,19 @@ def get_config() -> dict:
     """Параметры для фронта: лимит по умолчанию, интервал обновления (сек)."""
     metadata = fetch_inference_metadata()
     inference_min_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
+    policy_by_symbol = metadata['policy_by_symbol'] if 'policy_by_symbol' in metadata else {}
+    checkpoint_path_by_symbol = (
+        metadata['checkpoint_path_by_symbol']
+        if 'checkpoint_path_by_symbol' in metadata
+        else {}
+    )
     return {
         'defaultLimit': DEFAULT_BARS_LIMIT,
         'refreshIntervalSec': settings.WEB_GUI_REFRESH_INTERVAL_SEC,
         'inferenceMinRows': inference_min_rows,
         'inferenceErrorBySymbolAndHorizon': metadata['error_by_symbol_and_horizon'],
+        'policyBySymbol': policy_by_symbol,
+        'checkpointPathBySymbol': checkpoint_path_by_symbol,
     }
 
 
