@@ -116,6 +116,7 @@
   let checkpointPathBySymbol = {};
   let inferenceMinRows = 0;
   let lastPolicy = null;
+  let lastEntryHint = null;
   let lastPredictions = null;
   let lastExitPolicy = null;
   let latestX1Bar = null;
@@ -506,8 +507,9 @@
     inferenceContent.innerHTML = `<div class="inference-warning">${message}</div>`;
   }
 
-  function renderPolicy(policy, symbol) {
+  function renderPolicy(policy, symbol, entryHint) {
     lastPolicy = policy || null;
+    lastEntryHint = entryHint || null;
     if (!policy || !policy.action) {
       policySummary.classList.add('hidden');
       policySummary.innerHTML = '';
@@ -529,6 +531,32 @@
     if (action === 'LONG') actionClass = 'policy-long';
     if (action === 'SHORT') actionClass = 'policy-short';
 
+    let entryHintHtml = '';
+    if (entryHint) {
+      const snr = entryHint.snr != null ? Number(entryHint.snr).toFixed(2) : '—';
+      const snrThreshold = entryHint.snr_threshold != null ? Number(entryHint.snr_threshold) : 0.5;
+      const rmsePct = entryHint.rmse_pct != null ? Number(entryHint.rmse_pct).toFixed(3) : '—';
+      const recommended = entryHint.recommended_action
+        ? String(entryHint.recommended_action).toUpperCase()
+        : '—';
+      const blocked = Boolean(entryHint.entry_blocked);
+      const blockReason = entryHint.block_reason ? String(entryHint.block_reason) : '';
+      entryHintHtml = `
+        <div class="entry-hint ${blocked ? 'entry-hint-blocked' : 'entry-hint-ok'}">
+          <div class="entry-hint-title">Entry hint @ ${evalHorizon} (SNR≥${snrThreshold}, rmse=${rmsePct}%)</div>
+          <div class="entry-hint-meta">
+            <span>SNR: <strong>${snr}</strong></span>
+            <span>band: [${Number(entryHint.min_pct).toFixed(2)}%, ${Number(entryHint.max_pct).toFixed(2)}%]</span>
+            <span>→ <strong>${recommended}</strong></span>
+          </div>
+          ${blocked ? `<div class="entry-hint-warning">${blockReason || 'uncertainty — подождать'}</div>` : ''}
+        </div>
+      `;
+      if (blocked && (action === 'LONG' || action === 'SHORT')) {
+        actionClass += ' policy-entry-blocked';
+      }
+    }
+
     policySummary.classList.remove('hidden');
     policySummary.innerHTML = `
       <div class="policy-card ${actionClass}">
@@ -538,12 +566,13 @@
           <span>stack: <strong>${runLabel}</strong></span>
           <span>P(hold/long/short): ${holdPct}% / ${longPct}% / ${shortPct}%</span>
         </div>
+        ${entryHintHtml}
         <div class="policy-checkpoint" title="${checkpointPath}">base ckpt: ${checkpointPath}</div>
       </div>
     `;
   }
 
-  function renderInference(predictions, symbol, policy) {
+  function renderInference(predictions, symbol, policy, entryHint) {
     lastPredictions = predictions || null;
     const keys = Object.keys(predictions || {});
     if (keys.length === 0) {
@@ -552,6 +581,7 @@
     }
 
     const errorConfig = inferenceErrorBySymbolAndHorizon[symbol] || {};
+    const evalHorizonForPolicy = policy && policy.eval_horizon ? String(policy.eval_horizon) : null;
     const sorted = keys.sort((a, b) => {
       const ha = extractHorizon(a);
       const hb = extractHorizon(b);
@@ -575,8 +605,9 @@
       const minClass = minPct >= 0 ? 'positive' : 'negative';
       const maxClass = maxPct >= 0 ? 'positive' : 'negative';
       const lineClass = allNegative ? 'short-signal' : (allPositive ? 'positive' : (predictedPct >= 0 ? 'positive' : 'negative'));
+      const evalHorizonClass = evalHorizonForPolicy === horizon ? ' inference-eval-horizon' : '';
       rows.push(
-        `<div class="inference-line ${lineClass}" title="Точное значение: ${predictedPct.toFixed(3)}%">
+        `<div class="inference-line ${lineClass}${evalHorizonClass}" title="Точное значение: ${predictedPct.toFixed(3)}%${errorPct > 0 ? '' : ' (rmse не задан)'}">
           <span class="inference-horizon">${horizon}</span>
           ${allNegative ? '<span class="inference-short">SHORT</span>' : ''}
           ${allPositive ? '<span class="inference-long">LONG</span>' : ''}
@@ -588,7 +619,7 @@
     }
 
     inferencePanel.classList.remove('hidden');
-    renderPolicy(policy, symbol);
+    renderPolicy(policy, symbol, entryHint);
     inferenceContent.innerHTML = rows.join('');
   }
 
@@ -600,7 +631,7 @@
     return API.inference({ symbol_id: symbol, limit })
       .then(response => {
         const predictions = response.predictions || response;
-        renderInference(predictions, symbol, response.policy || null);
+        renderInference(predictions, symbol, response.policy || null, response.entry_hint || null);
       })
       .catch(e => {
         setInferenceWarning(parseErrorDetail(e.message));
@@ -656,6 +687,7 @@
         eval_horizon: lastPolicy.eval_horizon != null ? String(lastPolicy.eval_horizon) : evalHorizon,
         run_label: lastPolicy.run_label != null ? String(lastPolicy.run_label) : null,
         probabilities: lastPolicy.probabilities || null,
+        entry_hint: lastEntryHint || null,
       };
     }
     let entryPredictions = null;
@@ -841,25 +873,37 @@
     } else if (!hasOpen) {
       resetHorizonAlertState();
       resetExitGbmAlertState();
+      const hintRecommended = lastEntryHint && lastEntryHint.recommended_action
+        ? String(lastEntryHint.recommended_action).toUpperCase()
+        : null;
       metricsHtml = `
         <div class="trade-journal-metrics">
           <span>Policy: <strong>${lastPolicy && lastPolicy.action ? String(lastPolicy.action).toUpperCase() : '—'}</strong></span>
           <span>eval (policy): <strong>${lastPolicy && lastPolicy.eval_horizon ? lastPolicy.eval_horizon : '—'}</strong></span>
+          ${hintRecommended ? `<span>entry hint: <strong>${hintRecommended}</strong></span>` : ''}
         </div>
       `;
+      if (lastEntryHint && lastEntryHint.entry_blocked) {
+        const blockReason = lastEntryHint.block_reason
+          ? String(lastEntryHint.block_reason)
+          : 'uncertainty @ eval horizon';
+        alertHtml += `<div class="trade-journal-alert">⏸ SNR gate: ${blockReason}</div>`;
+      }
     }
 
     syncJournalSettingsDisabled(hasOpen);
-    const canEnterLong = !hasOpen && policySide === 'long';
-    const canEnterShort = !hasOpen && policySide === 'short';
+    const snrAllowLong = !lastEntryHint || lastEntryHint.allow_long !== false;
+    const snrAllowShort = !lastEntryHint || lastEntryHint.allow_short !== false;
+    const canEnterLong = !hasOpen && policySide === 'long' && snrAllowLong;
+    const canEnterShort = !hasOpen && policySide === 'short' && snrAllowShort;
     const canEnterManual = !hasOpen && !policySide;
 
     const actionsHtml = `
       <div class="trade-journal-actions">
-        <button type="button" id="btnJournalEntryLong" class="btn-entry-long" ${canEnterLong || canEnterManual ? '' : 'disabled'}>
+        <button type="button" id="btnJournalEntryLong" class="btn-entry-long" ${canEnterLong || canEnterManual ? '' : 'disabled'} title="${canEnterLong ? '' : (policySide === 'long' && !snrAllowLong ? 'SNR gate: подождать' : '')}">
           Вошёл LONG
         </button>
-        <button type="button" id="btnJournalEntryShort" class="btn-entry-short" ${canEnterShort || canEnterManual ? '' : 'disabled'}>
+        <button type="button" id="btnJournalEntryShort" class="btn-entry-short" ${canEnterShort || canEnterManual ? '' : 'disabled'} title="${canEnterShort ? '' : (policySide === 'short' && !snrAllowShort ? 'SNR gate: подождать' : '')}">
           Вошёл SHORT
         </button>
         <button type="button" id="btnJournalExit" class="btn-exit" ${hasOpen ? '' : 'disabled'}>

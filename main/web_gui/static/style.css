@@ -283,6 +283,48 @@ body {
   text-overflow: ellipsis;
 }
 
+.policy-card.policy-entry-blocked {
+  border-left-color: #c4a535;
+}
+
+.entry-hint {
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  background: #131722;
+}
+
+.entry-hint-ok {
+  border: 1px solid #2a2e39;
+}
+
+.entry-hint-blocked {
+  border: 1px solid #c4a535;
+}
+
+.entry-hint-title {
+  color: #d1d4dc;
+  margin-bottom: 0.25rem;
+}
+
+.entry-hint-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  color: #787b86;
+}
+
+.entry-hint-warning {
+  margin-top: 0.35rem;
+  color: #c4a535;
+}
+
+.inference-line.inference-eval-horizon {
+  border-left: 3px solid #2962ff;
+  padding-left: 0.35rem;
+}
+
 .exit-policy-card {
   border: 1px solid var(--border);
   border-radius: 6px;
