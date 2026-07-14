@@ -15,6 +15,7 @@ from main.web_gui.data_service import count_x1_bars_since_entry, get_bars_for_ap
 from main.web_gui.dow_service import get_dow_bars_for_api
 from main.web_gui.exit_policy_service import run_remote_exit_policy
 from main.web_gui.inference_service import run_remote_inference
+from main.web_gui.trade_research_service import run_trade_research
 from main.web_gui.serialization import serialize_bar_row
 from main.web_gui.trade_journal_service import (
     apply_mark_price_to_open_position,
@@ -69,6 +70,20 @@ def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None
 def _worker_inference(symbol_id_str: str, limit: int) -> dict[str, object]:
     """Вызывается в дочернем процессе. Возвращает словарь предсказаний."""
     return run_remote_inference(symbol_id=symbol_id_str, limit=limit)
+
+
+def _worker_trade_research(
+    symbol_id_str: str,
+    limit: int,
+    eval_horizon: str,
+    step_bars: int,
+) -> dict[str, object]:
+    return run_trade_research(
+        symbol_id=symbol_id_str,
+        limit=limit,
+        eval_horizon=eval_horizon,
+        step_bars=step_bars,
+    )
 
 
 def _worker_exit_policy(payload: dict) -> dict[str, object]:

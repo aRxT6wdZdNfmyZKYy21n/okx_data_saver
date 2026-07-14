@@ -23,6 +23,10 @@
       const q = new URLSearchParams(params).toString();
       return this.get('./api/inference?' + q);
     },
+    async tradeResearch(params) {
+      const q = new URLSearchParams(params).toString();
+      return this.get('./api/trade-research?' + q);
+    },
     async tradeJournal(params) {
       const q = new URLSearchParams(params).toString();
       return this.get('./api/trade-journal?' + q);
@@ -83,7 +87,9 @@
   let candleDataByIndex = [];
   /** Сегменты от экстремума к экстремуму: { green: [{indexFrom, valueFrom, indexTo, valueTo}, ...], red: [...] } */
   let extremaSegments = { green: [], red: [] };
-  /** Серии линий на основном графике для отображения сегментов экстремумов */
+  /** Серии линий non-overlapping trade research @ x2048 */
+  let tradeResearchSegments = [];
+  let tradeResearchLineSeries = [];
   let extremaLineSeries = [];
   let refreshTimer = null;
   const scaleSelect = document.getElementById('scale');
@@ -91,6 +97,7 @@
   const limitInput = document.getElementById('limit');
   const loadBtn = document.getElementById('load');
   const autoRefreshCheck = document.getElementById('autoRefresh');
+  const tradeResearchEnabledCheck = document.getElementById('tradeResearchEnabled');
   const statusEl = document.getElementById('status');
   const chartDiv = document.getElementById('chart');
   const concentrationCanvas = document.getElementById('concentrationCanvas');
@@ -137,6 +144,8 @@
   const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
   const CVD_WINDOW_DEFAULT = 'x512';
   const JOURNAL_EVAL_HORIZON_OPTIONS = ['x512', 'x1024', 'x1536', 'x2048', 'x3072', 'x4096'];
+  const TRADE_RESEARCH_EVAL_HORIZON = 'x2048';
+  const TRADE_RESEARCH_SCALE = 'x1';
   const JOURNAL_SETTINGS_STORAGE_KEY = 'okx_web_gui_journal_settings';
   const JOURNAL_SOUND_ENABLED_STORAGE_KEY = 'okx_web_gui_journal_sound_enabled';
 
@@ -1344,6 +1353,107 @@
     }
   }
 
+  function isTradeResearchEnabled() {
+    return Boolean(tradeResearchEnabledCheck && tradeResearchEnabledCheck.checked);
+  }
+
+  function ensureTradeResearchScale() {
+    if (!isTradeResearchEnabled()) return true;
+    if (scaleSelect.value === TRADE_RESEARCH_SCALE) return true;
+    scaleSelect.value = TRADE_RESEARCH_SCALE;
+    return false;
+  }
+
+  function removeTradeResearchLineSeries() {
+    if (!chart) return;
+    tradeResearchLineSeries.forEach((series) => chart.removeSeries(series));
+    tradeResearchLineSeries = [];
+  }
+
+  function addTradeResearchLinesToChart() {
+    if (!chart || !isTradeResearchEnabled()) {
+      removeTradeResearchLineSeries();
+      return;
+    }
+    removeTradeResearchLineSeries();
+    const LineSeries = LightweightCharts.LineSeries;
+    if (!LineSeries) return;
+    const opts = {
+      priceScaleId: 'right',
+      lineWidth: 2,
+      lastValueVisible: false,
+      priceLineVisible: false,
+    };
+    for (const segment of tradeResearchSegments) {
+      const entryTime = Math.floor(Number(segment.entry_timestamp_ms) / 1000);
+      const exitTime = Math.floor(Number(segment.exit_timestamp_ms) / 1000);
+      const entryClose = Number(segment.entry_close);
+      const exitClose = Number(segment.exit_close);
+      if (
+        !Number.isFinite(entryTime) ||
+        !Number.isFinite(exitTime) ||
+        !Number.isFinite(entryClose) ||
+        !Number.isFinite(exitClose)
+      ) {
+        continue;
+      }
+      const color = segment.action === 'long' ? '#26a69a' : '#ef5350';
+      const series = chart.addSeries(LineSeries, { ...opts, color });
+      series.setData([
+        { time: entryTime, value: entryClose },
+        { time: exitTime, value: exitClose },
+      ]);
+      tradeResearchLineSeries.push(series);
+    }
+  }
+
+  function loadTradeResearch(symbol, limit) {
+    if (!isTradeResearchEnabled()) {
+      tradeResearchSegments = [];
+      removeTradeResearchLineSeries();
+      return Promise.resolve(null);
+    }
+    if (scaleSelect.value !== TRADE_RESEARCH_SCALE) {
+      tradeResearchSegments = [];
+      removeTradeResearchLineSeries();
+      setStatus('Trade research: выберите масштаб x1', true);
+      return Promise.resolve(null);
+    }
+    const horizonSteps = Number(TRADE_RESEARCH_EVAL_HORIZON.slice(1));
+    const minimumRows = inferenceMinRows + horizonSteps;
+    if (Number(limit) < minimumRows) {
+      tradeResearchSegments = [];
+      removeTradeResearchLineSeries();
+      setStatus(
+        `Trade research: нужно минимум ${minimumRows} x1 баров (сейчас ${limit})`,
+        true,
+      );
+      return Promise.resolve(null);
+    }
+    setStatus('Trade research: онлайн-инференс…');
+    return API.tradeResearch({
+      symbol_id: symbol,
+      limit,
+      eval_horizon: TRADE_RESEARCH_EVAL_HORIZON,
+      step_bars: horizonSteps,
+    })
+      .then((payload) => {
+        tradeResearchSegments = Array.isArray(payload.segments) ? payload.segments : [];
+        addTradeResearchLinesToChart();
+        setStatus(
+          `Trade research: ${tradeResearchSegments.length} сегментов ` +
+          `(non-overlapping @ ${TRADE_RESEARCH_EVAL_HORIZON})`,
+        );
+        return payload;
+      })
+      .catch((error) => {
+        tradeResearchSegments = [];
+        removeTradeResearchLineSeries();
+        setStatus('Trade research: ' + parseErrorDetail(error.message), true);
+        return null;
+      });
+  }
+
   /** Удаляет серии линий экстремумов с графика и обновляет extremaLineSeries. */
   function removeExtremaLineSeries() {
     if (!chart) return;
@@ -1618,6 +1728,7 @@
     candleSeries.setData(candleData);
     chart.timeScale().fitContent();
     addExtremaLinesToChart();
+    addTradeResearchLinesToChart();
 
     concentrationPanel.classList.remove('hidden');
     cumulativePanel.classList.remove('hidden');
@@ -1643,6 +1754,10 @@
     const scale = scaleSelect.value;
     if (!scale) return;
 
+    if (isTradeResearchEnabled()) {
+      ensureTradeResearchScale();
+    }
+
     dowStub.classList.add('hidden');
     volumePanel.classList.remove('hidden');
     concentrationPanel.classList.remove('hidden');
@@ -1653,14 +1768,21 @@
     const limit = limitInput.value ? parseInt(limitInput.value, 10) : config.defaultLimit;
     setStatus('Загрузка…');
 
-    const promise = isDowLevel(scale)
-      ? API.dow({ symbol_id: symbol, limit, level: parseDowLevel(scale) })
-      : API.bars({ symbol_id: symbol, limit, scale });
+    const effectiveScale = scaleSelect.value;
+    const promise = isDowLevel(effectiveScale)
+      ? API.dow({ symbol_id: symbol, limit, level: parseDowLevel(effectiveScale) })
+      : API.bars({ symbol_id: symbol, limit, scale: effectiveScale });
 
     promise
       .then(data => {
-        applyBarsToChart(data, scale);
+        applyBarsToChart(data, effectiveScale);
         return loadInference(symbol, limit);
+      })
+      .then(() => {
+        if (!isTradeResearchEnabled()) {
+          return null;
+        }
+        return loadTradeResearch(symbol, limit);
       })
       .then(() => refreshTradeJournal(symbol))
       .catch(e => {
@@ -1703,6 +1825,19 @@
     loadBars();
   });
   autoRefreshCheck.addEventListener('change', startAutoRefresh);
+  if (tradeResearchEnabledCheck) {
+    tradeResearchEnabledCheck.addEventListener('change', () => {
+      if (isTradeResearchEnabled()) {
+        ensureTradeResearchScale();
+        autoRefreshCheck.checked = false;
+        startAutoRefresh();
+      } else {
+        tradeResearchSegments = [];
+        removeTradeResearchLineSeries();
+      }
+      loadBars();
+    });
+  }
 
   (async function init() {
     try {

@@ -25,8 +25,10 @@ def fetch_inference_metadata() -> dict:
     return response.json()
 
 
-def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
-    metadata = fetch_inference_metadata()
+def _build_dataset(
+    df: polars.DataFrame,
+    metadata: dict,
+) -> HybridTradeDatasetInference:
     sequence_length = int(metadata['sequence_length'])
     dataset_cfg = metadata['dataset_config']
     model_cfg = metadata['model_config']
@@ -39,7 +41,7 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
         },
     )
 
-    dataset = HybridTradeDatasetInference(
+    return HybridTradeDatasetInference(
         dataframe=df,
         sequence_length=sequence_length,
         raw_columns=list(dataset_cfg['raw_cols']),
@@ -51,13 +53,12 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
         model_config=model_cfg_omega,
     )
 
-    last_index = len(dataset) - 1
-    if last_index < 0:
-        raise RuntimeError('No samples available after dataset preparation')
 
-    logger.info(f'Last index: {last_index}')
-
-    x_seq, x_static = dataset[last_index]
+def _prepare_payload_dict_from_sample(
+    dataset: HybridTradeDatasetInference,
+    sample_index: int,
+) -> dict:
+    x_seq, x_static = dataset[sample_index]
     normalized_x_seq: dict[str, object] = {}
     for scale_name, scale_tensor in x_seq.items():
         # Модель ожидает [batch, seq_len, features]; при инференсе из датасета обычно [seq_len, features].
@@ -71,9 +72,20 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     }
 
 
+def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
+    metadata = fetch_inference_metadata()
+    dataset = _build_dataset(df, metadata)
+
+    last_index = len(dataset) - 1
+    if last_index < 0:
+        raise RuntimeError('No samples available after dataset preparation')
+
+    logger.info(f'Last index: {last_index}')
+    return _prepare_payload_dict_from_sample(dataset, last_index)
+
+
 def _encode_payload(payload_dict: dict) -> bytes:
     logger.info('Encoding payload to Pickle...')
-
     return pickle.dumps(payload_dict)
 
 

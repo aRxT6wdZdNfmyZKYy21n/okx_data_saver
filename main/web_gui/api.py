@@ -25,6 +25,7 @@ from main.web_gui.request_workers import (
     _worker_trade_journal_entry,
     _worker_trade_journal_exit,
     _worker_trade_journal_state,
+    _worker_trade_research,
     run_in_spawned_process,
 )
 from settings import settings
@@ -145,6 +146,35 @@ def get_inference(
     effective_limit = min(limit or DEFAULT_BARS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
     predictions = run_in_spawned_process(_worker_inference, symbol_id, effective_limit)
     return predictions
+
+
+@app.get('/api/trade-research')
+def get_trade_research(
+    symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
+    limit: int | None = Query(None, ge=1, description='x1 bars used for tensor preparation'),
+    eval_horizon: str = Query('x2048', description='Eval horizon, e.g. x2048'),
+    step_bars: int | None = Query(None, ge=1, description='Non-overlapping step in x1 bars'),
+) -> dict:
+    try:
+        SymbolId[symbol_id]
+    except KeyError:
+        raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
+
+    effective_limit = min(limit or DEFAULT_BARS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
+    if step_bars is None:
+        if not eval_horizon.startswith('x'):
+            raise HTTPException(422, detail=f'Invalid eval_horizon: {eval_horizon}')
+        effective_step_bars = int(eval_horizon[1:])
+    else:
+        effective_step_bars = step_bars
+
+    return run_in_spawned_process(
+        _worker_trade_research,
+        symbol_id,
+        effective_limit,
+        eval_horizon,
+        effective_step_bars,
+    )
 
 
 class TradeJournalEntryRequest(BaseModel):
