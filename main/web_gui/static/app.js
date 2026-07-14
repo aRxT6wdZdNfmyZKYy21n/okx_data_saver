@@ -97,6 +97,7 @@
   const limitInput = document.getElementById('limit');
   const loadBtn = document.getElementById('load');
   const autoRefreshCheck = document.getElementById('autoRefresh');
+  const extremaLinesEnabledCheck = document.getElementById('extremaLinesEnabled');
   const tradeResearchEnabledCheck = document.getElementById('tradeResearchEnabled');
   const statusEl = document.getElementById('status');
   const chartDiv = document.getElementById('chart');
@@ -1353,6 +1354,26 @@
     }
   }
 
+  function isExtremaLinesEnabled() {
+    return Boolean(extremaLinesEnabledCheck && extremaLinesEnabledCheck.checked);
+  }
+
+  function refreshExtremaOverlays() {
+    if (volumeDataByCandleIndex.length === 0) {
+      extremaSegments = { green: [], red: [] };
+      removeExtremaLineSeries();
+      return;
+    }
+    if (isExtremaLinesEnabled()) {
+      computeExtremaSegments(volumeDataByCandleIndex);
+    } else {
+      extremaSegments = { green: [], red: [] };
+    }
+    addExtremaLinesToChart();
+    const range = chart && chart.timeScale().getVisibleLogicalRange();
+    if (range) drawCumulativeBars(range);
+  }
+
   function isTradeResearchEnabled() {
     return Boolean(tradeResearchEnabledCheck && tradeResearchEnabledCheck.checked);
   }
@@ -1468,6 +1489,7 @@
   function addExtremaLinesToChart() {
     if (!chart || candleDataByIndex.length === 0) return;
     removeExtremaLineSeries();
+    if (!isExtremaLinesEnabled()) return;
     const LineSeries = LightweightCharts.LineSeries;
     if (!LineSeries) return;
     const opts = {
@@ -1591,8 +1613,10 @@
       ctx.lineTo(x2, y2);
       ctx.stroke();
     };
-    extremaSegments.green.forEach((seg) => drawSegment(seg, '#26a69a'));
-    extremaSegments.red.forEach((seg) => drawSegment(seg, '#ef5350'));
+    if (isExtremaLinesEnabled()) {
+      extremaSegments.green.forEach((seg) => drawSegment(seg, '#26a69a'));
+      extremaSegments.red.forEach((seg) => drawSegment(seg, '#ef5350'));
+    }
   }
 
   function drawConcentrationBars(visibleRange) {
@@ -1723,7 +1747,11 @@
     computeCumulativeWithWindow(volumeData, getCvdWindowSize());
     volumeDataByCandleIndex = volumeData;
     candleDataByIndex = candleData;
-    computeExtremaSegments(volumeData);
+    if (isExtremaLinesEnabled()) {
+      computeExtremaSegments(volumeData);
+    } else {
+      extremaSegments = { green: [], red: [] };
+    }
     ensureChart();
     candleSeries.setData(candleData);
     chart.timeScale().fitContent();
@@ -1812,8 +1840,7 @@
   cvdWindowSelect.addEventListener('change', () => {
     if (volumeDataByCandleIndex.length === 0) return;
     computeCumulativeWithWindow(volumeDataByCandleIndex, getCvdWindowSize());
-    computeExtremaSegments(volumeDataByCandleIndex);
-    addExtremaLinesToChart();
+    refreshExtremaOverlays();
     const range = chart && chart.timeScale().getVisibleLogicalRange();
     if (range) drawCumulativeBars(range);
   });
@@ -1825,6 +1852,9 @@
     loadBars();
   });
   autoRefreshCheck.addEventListener('change', startAutoRefresh);
+  if (extremaLinesEnabledCheck) {
+    extremaLinesEnabledCheck.addEventListener('change', refreshExtremaOverlays);
+  }
   if (tradeResearchEnabledCheck) {
     tradeResearchEnabledCheck.addEventListener('change', () => {
       if (isTradeResearchEnabled()) {
