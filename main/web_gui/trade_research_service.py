@@ -152,6 +152,46 @@ def _row_value(row: dict[str, object], column_name: str) -> object:
     return row[column_name]
 
 
+def _build_level0_to_raw_row_indices(
+    raw_df: polars.DataFrame,
+    level0_df: polars.DataFrame,
+) -> list[int]:
+    level0_log2 = level0_df['close_price_log2'].to_numpy()
+    raw_log2 = raw_df['close_price'].log(base=2).to_numpy()
+
+    raw_indices: list[int] = []
+    raw_pos = 0
+    raw_len = len(raw_log2)
+
+    for level0_pos, target_log2 in enumerate(level0_log2):
+        found = False
+        while raw_pos < raw_len:
+            if abs(raw_log2[raw_pos] - target_log2) <= 1e-4:
+                raw_indices.append(raw_pos)
+                raw_pos = raw_pos + 1
+                found = True
+                break
+            raw_pos = raw_pos + 1
+        if not found:
+            raise RuntimeError(
+                f'Failed to align level0 row {level0_pos} to raw dataframe',
+            )
+
+    return raw_indices
+
+
+def _raw_bar_metadata(
+    raw_df: polars.DataFrame,
+    raw_row_index: int,
+) -> dict[str, float | int]:
+    row = raw_df.row(raw_row_index, named=True)
+    return {
+        'start_trade_id': int(_row_value(row, 'start_trade_id')),
+        'start_timestamp_ms': int(_row_value(row, 'start_timestamp_ms')),
+        'close_price': float(_row_value(row, 'close_price')),
+    }
+
+
 def run_trade_research(
     symbol_id: str,
     limit: int,
@@ -207,6 +247,7 @@ def run_trade_research(
     dataset_length = len(dataset)
     level0_df = dataset.dataset.aggregated_data[0]
     level0_height = int(level0_df.height)
+    level0_to_raw_row_indices = _build_level0_to_raw_row_indices(df, level0_df)
 
     max_sample_index = dataset_length - 1 - horizon_steps
     if max_sample_index < 0:
@@ -306,10 +347,12 @@ def run_trade_research(
             if entry_bar_index < chart_first_row_index:
                 continue
 
-            entry_row = level0_df.row(entry_bar_index, named=True)
-            exit_row = level0_df.row(exit_bar_index, named=True)
-            entry_close = float(_row_value(entry_row, 'close_price'))
-            exit_close = float(_row_value(exit_row, 'close_price'))
+            entry_raw_index = level0_to_raw_row_indices[entry_bar_index]
+            exit_raw_index = level0_to_raw_row_indices[exit_bar_index]
+            entry_meta = _raw_bar_metadata(df, entry_raw_index)
+            exit_meta = _raw_bar_metadata(df, exit_raw_index)
+            entry_close = float(entry_meta['close_price'])
+            exit_close = float(exit_meta['close_price'])
 
             pred_eval_log2 = 0.0
             if 'predictions' in inference_result:
@@ -322,10 +365,10 @@ def run_trade_research(
                     'sample_index': int(sample_index),
                     'entry_bar_index': int(entry_bar_index),
                     'exit_bar_index': int(exit_bar_index),
-                    'entry_start_trade_id': int(_row_value(entry_row, 'start_trade_id')),
-                    'exit_start_trade_id': int(_row_value(exit_row, 'start_trade_id')),
-                    'entry_timestamp_ms': int(_row_value(entry_row, 'start_timestamp_ms')),
-                    'exit_timestamp_ms': int(_row_value(exit_row, 'start_timestamp_ms')),
+                    'entry_start_trade_id': int(entry_meta['start_trade_id']),
+                    'exit_start_trade_id': int(exit_meta['start_trade_id']),
+                    'entry_timestamp_ms': int(entry_meta['start_timestamp_ms']),
+                    'exit_timestamp_ms': int(exit_meta['start_timestamp_ms']),
                     'entry_close': entry_close,
                     'exit_close': exit_close,
                     'pred_target_close': _pred_target_close(
