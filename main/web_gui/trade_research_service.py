@@ -101,15 +101,8 @@ def _call_inference_batch_api(
 def _pred_target_close(
     entry_close: float,
     pred_eval_log2: float,
-    action: str,
 ) -> float:
-    if action == 'long':
-        signed_log2 = pred_eval_log2
-    elif action == 'short':
-        signed_log2 = -pred_eval_log2
-    else:
-        signed_log2 = pred_eval_log2
-    return float(entry_close * math.pow(2.0, signed_log2))
+    return float(entry_close * math.pow(2.0, pred_eval_log2))
 
 
 def _row_value(row: dict[str, object], column_name: str) -> object:
@@ -355,7 +348,6 @@ def run_trade_research(
                     'pred_target_close': _pred_target_close(
                         entry_close=entry_close,
                         pred_eval_log2=pred_eval_log2,
-                        action=action,
                     ),
                     'pred_eval_log2': pred_eval_log2,
                     'action': action,
