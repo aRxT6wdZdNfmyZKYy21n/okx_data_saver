@@ -98,11 +98,11 @@ def _call_inference_batch_api(
     return results
 
 
-def _pred_target_close(
-    entry_close: float,
+def _pred_target_price(
+    entry_price: float,
     pred_eval_log2: float,
 ) -> float:
-    return float(entry_close * math.pow(2.0, pred_eval_log2))
+    return float(entry_price * math.pow(2.0, pred_eval_log2))
 
 
 def _row_value(row: dict[str, object], column_name: str) -> object:
@@ -348,8 +348,12 @@ def run_trade_research(
                     'entry_open': entry_open,
                     'entry_close': entry_close,
                     'exit_close': exit_close,
-                    'pred_target_close': _pred_target_close(
-                        entry_close=entry_close,
+                    'pred_target_open': _pred_target_price(
+                        entry_price=entry_open,
+                        pred_eval_log2=pred_eval_log2,
+                    ),
+                    'pred_target_close': _pred_target_price(
+                        entry_price=entry_close,
                         pred_eval_log2=pred_eval_log2,
                     ),
                     'pred_eval_log2': pred_eval_log2,

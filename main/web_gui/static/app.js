@@ -1506,8 +1506,8 @@
         missingExitCount = missingExitCount + 1;
         continue;
       }
-      const predTargetClose = Number(segment.pred_target_close);
-      if (!Number.isFinite(predTargetClose) || predTargetClose <= 0) {
+      const predTargetOpen = Number(segment.pred_target_open);
+      if (!Number.isFinite(predTargetOpen) || predTargetOpen <= 0) {
         missingExitCount = missingExitCount + 1;
         continue;
       }
@@ -1527,7 +1527,7 @@
       const series = chart.addSeries(LineSeries, { ...opts, color });
       series.setData([
         { time: entryCandle.time, value: entryStartPrice },
-        { time: exitCandle.time, value: predTargetClose },
+        { time: exitCandle.time, value: predTargetOpen },
       ]);
       tradeResearchLineSeries.push(series);
       renderedCount = renderedCount + 1;
