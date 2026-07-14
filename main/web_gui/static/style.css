@@ -444,6 +444,42 @@ body {
   background: #ff9800;
 }
 
+.trade-journal-prediction-block {
+  margin-bottom: 0.5rem;
+}
+
+.trade-journal-prediction-hint {
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+  color: #787b86;
+}
+
+.trade-journal-prediction-metrics {
+  margin-bottom: 0.35rem;
+}
+
+.trade-journal-pred-progress {
+  height: 6px;
+  background: #2a2e39;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.trade-journal-pred-progress-bar {
+  height: 100%;
+  background: #42a5f5;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.trade-journal-pred-progress-bar.pred-capture-done {
+  background: #66bb6a;
+}
+
+.pred-capture-done {
+  color: var(--green);
+}
+
 .trade-journal-actions {
   display: flex;
   flex-wrap: wrap;

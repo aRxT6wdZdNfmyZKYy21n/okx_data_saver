@@ -414,6 +414,93 @@
     return (2 ** v - 1) * 100;
   }
 
+  function predictionKeyForHorizon(horizon) {
+    return `target_close_return_signed_log2_${horizon}`;
+  }
+
+  function expectedMovePctForSide(signedLog2, side) {
+    const linearPct = signedLog2ToPercent(Number(signedLog2));
+    if (side === 'short') return -linearPct;
+    return linearPct;
+  }
+
+  function entryPredictionSnapshot(openPos) {
+    if (!openPos || !openPos.entry_predictions) return null;
+    const evalHorizon = openPos.eval_horizon || journalDefaults.eval_horizon;
+    const predictionKey = predictionKeyForHorizon(evalHorizon);
+    const entryPredictions = openPos.entry_predictions;
+    if (!(predictionKey in entryPredictions)) return null;
+    const signedLog2 = Number(entryPredictions[predictionKey]);
+    if (!Number.isFinite(signedLog2)) return null;
+    const expectedPct = expectedMovePctForSide(signedLog2, openPos.side);
+    return {
+      evalHorizon,
+      signedLog2,
+      expectedPct,
+    };
+  }
+
+  function currentPredictionSnapshot(openPos) {
+    if (!openPos || !lastPredictions) return null;
+    const evalHorizon = openPos.eval_horizon || journalDefaults.eval_horizon;
+    const predictionKey = predictionKeyForHorizon(evalHorizon);
+    if (!(predictionKey in lastPredictions)) return null;
+    const signedLog2 = Number(lastPredictions[predictionKey]);
+    if (!Number.isFinite(signedLog2)) return null;
+    return {
+      evalHorizon,
+      signedLog2,
+      expectedPct: expectedMovePctForSide(signedLog2, openPos.side),
+    };
+  }
+
+  function renderEntryPredictionMetrics(openPos, metrics) {
+    const entrySnap = entryPredictionSnapshot(openPos);
+    if (!entrySnap) {
+      return `
+        <div class="trade-journal-prediction-hint">
+          Pred @ entry: <strong>—</strong> (нет snapshot — переоткрой позицию после обновления)
+        </div>
+      `;
+    }
+
+    const unrealizedPct = Number(metrics.unrealized_net_return_pct);
+    const expectedPct = entrySnap.expectedPct;
+    const capturePct = expectedPct !== 0 && Number.isFinite(unrealizedPct)
+      ? (100 * unrealizedPct / expectedPct)
+      : null;
+    const captureLabel = capturePct != null && Number.isFinite(capturePct)
+      ? `${Math.max(0, capturePct).toFixed(0)}%`
+      : '—';
+    const captureClass = capturePct != null && capturePct >= 100 ? 'pred-capture-done' : '';
+    const captureWidth = capturePct != null && Number.isFinite(capturePct)
+      ? Math.min(100, Math.max(0, capturePct))
+      : 0;
+
+    const currentSnap = currentPredictionSnapshot(openPos);
+    const currentPredLine = currentSnap
+      ? `<span>Pred now (${currentSnap.evalHorizon}): <strong class="${pnlClass(currentSnap.expectedPct)}">${formatPct(currentSnap.expectedPct)}</strong></span>`
+      : '';
+
+    const deltaLine = currentSnap
+      ? `<span>Δ pred: <strong class="${pnlClass(currentSnap.expectedPct - entrySnap.expectedPct)}">${formatPct(currentSnap.expectedPct - entrySnap.expectedPct)}</strong></span>`
+      : '';
+
+    return `
+      <div class="trade-journal-prediction-block">
+        <div class="trade-journal-metrics trade-journal-prediction-metrics">
+          <span>Pred @ entry (${entrySnap.evalHorizon}): <strong class="${pnlClass(entrySnap.expectedPct)}">${formatPct(entrySnap.expectedPct)}</strong></span>
+          <span>Capture: <strong class="${captureClass}">${captureLabel}</strong> (${formatPct(unrealizedPct)} / ${formatPct(expectedPct)})</span>
+          ${currentPredLine}
+          ${deltaLine}
+        </div>
+        <div class="trade-journal-pred-progress" title="Capture ${captureLabel} от pred @ entry">
+          <div class="trade-journal-pred-progress-bar ${captureClass}" style="width: ${captureWidth}%"></div>
+        </div>
+      </div>
+    `;
+  }
+
   function setInferenceWarning(message) {
     inferencePanel.classList.remove('hidden');
     inferenceContent.innerHTML = `<div class="inference-warning">${message}</div>`;
@@ -735,6 +822,7 @@
         : '';
       metricsHtml = `
         ${renderExitPolicyCard(lastExitPolicy)}
+        ${renderEntryPredictionMetrics(openPos, m)}
         <div class="trade-journal-metrics">
           <span>Бары: <strong>${m.bars_elapsed}</strong> / ${m.eval_horizon_steps}</span>
           <span>Осталось: <strong>${m.bars_remaining}</strong></span>
