@@ -1506,11 +1506,16 @@
         missingExitCount = missingExitCount + 1;
         continue;
       }
+      const predTargetClose = Number(segment.pred_target_close);
+      if (!Number.isFinite(predTargetClose) || predTargetClose <= 0) {
+        missingExitCount = missingExitCount + 1;
+        continue;
+      }
       const color = segment.action === 'long' ? '#26a69a' : '#ef5350';
       const series = chart.addSeries(LineSeries, { ...opts, color });
       series.setData([
         { time: entryCandle.time, value: entryCandle.close },
-        { time: exitCandle.time, value: exitCandle.close },
+        { time: exitCandle.time, value: predTargetClose },
       ]);
       tradeResearchLineSeries.push(series);
       renderedCount = renderedCount + 1;
