@@ -12,12 +12,14 @@ from pydantic import BaseModel, Field
 
 from enumerations import SymbolId
 from main.web_gui.constants import DOW_LEVEL_NAMES, SCALE_NAMES
+from main.web_gui.exit_policy_service import run_remote_exit_policy
 from main.web_gui.inference_service import (
     fetch_inference_metadata,
 )
 from main.web_gui.request_workers import (
     _worker_bars,
     _worker_dow,
+    _worker_exit_policy,
     _worker_inference,
     _worker_trade_journal_discard,
     _worker_trade_journal_entry,
@@ -65,12 +67,18 @@ def get_config() -> dict:
         if 'checkpoint_path_by_symbol' in metadata
         else {}
     )
+    exit_policy_by_symbol = (
+        metadata['exit_policy_by_symbol']
+        if 'exit_policy_by_symbol' in metadata
+        else {}
+    )
     return {
         'defaultLimit': DEFAULT_BARS_LIMIT,
         'refreshIntervalSec': settings.WEB_GUI_REFRESH_INTERVAL_SEC,
         'inferenceMinRows': inference_min_rows,
         'inferenceErrorBySymbolAndHorizon': metadata['error_by_symbol_and_horizon'],
         'policyBySymbol': policy_by_symbol,
+        'exitPolicyBySymbol': exit_policy_by_symbol,
         'checkpointPathBySymbol': checkpoint_path_by_symbol,
     }
 
@@ -158,6 +166,34 @@ class TradeJournalExitRequest(BaseModel):
     exit_start_trade_id: int = Field(..., ge=0)
     exit_timestamp_ms: int = Field(..., ge=0)
     notes: str = ''
+
+
+class ExitPolicyRequest(BaseModel):
+    symbol_id: str
+    side: str
+    eval_horizon: str
+    bars_held: int = Field(..., ge=0)
+    entry_predictions: dict[str, float]
+    current_predictions: dict[str, float]
+    entry_policy: dict
+    current_policy: dict
+    unrealized_linear: float
+    mfe_linear: float
+    mae_linear: float
+    giveback_linear: float
+
+
+@app.post('/api/exit-policy')
+def post_exit_policy(body: ExitPolicyRequest) -> dict:
+    try:
+        SymbolId[body.symbol_id]
+    except KeyError:
+        raise HTTPException(422, detail=f'Unknown symbol_id: {body.symbol_id}')
+
+    return run_in_spawned_process(
+        _worker_exit_policy,
+        body.model_dump(),
+    )
 
 
 @app.get('/api/trade-journal')

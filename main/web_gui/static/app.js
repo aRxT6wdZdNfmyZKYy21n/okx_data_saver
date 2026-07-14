@@ -59,6 +59,18 @@
       }
       return r.json();
     },
+    async exitPolicy(body) {
+      const r = await fetch('./api/exit-policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(text);
+      }
+      return r.json();
+    },
   };
 
   let config = { defaultLimit: 100000, refreshIntervalSec: 30 };
@@ -100,10 +112,12 @@
   const journalSoundEnabledCheck = document.getElementById('journalSoundEnabled');
   let inferenceErrorBySymbolAndHorizon = {};
   let policyBySymbol = {};
+  let exitPolicyBySymbol = {};
   let checkpointPathBySymbol = {};
   let inferenceMinRows = 0;
   let lastPolicy = null;
   let lastPredictions = null;
+  let lastExitPolicy = null;
   let latestX1Bar = null;
   let journalDefaults = {
     notional_usd: 7,
@@ -113,6 +127,8 @@
   let previousAtTargetHorizon = false;
   let isFirstJournalLoad = true;
   let horizonAlertPositionId = null;
+  let previousExitGbmSuggestClose = false;
+  let exitGbmAlertPositionId = null;
   let audioContext = null;
   let audioUnlocked = false;
 
@@ -263,6 +279,56 @@
   function resetHorizonAlertState() {
     previousAtTargetHorizon = false;
     horizonAlertPositionId = null;
+  }
+
+  function resetExitGbmAlertState() {
+    previousExitGbmSuggestClose = false;
+    exitGbmAlertPositionId = null;
+    lastExitPolicy = null;
+  }
+
+  function playExitGbmAlertSound() {
+    if (!isJournalSoundEnabled()) return;
+    unlockAudio();
+    playTone(988, 0.12, 0, 0.09);
+    playTone(1319, 0.2, 0.16, 0.09);
+  }
+
+  function maybeNotifyExitGbmAlert(openPos, exitPolicy) {
+    if (!openPos || !exitPolicy) {
+      previousExitGbmSuggestClose = false;
+      return;
+    }
+    const suggestClose = Boolean(exitPolicy.suggest_close);
+    if (!suggestClose) {
+      previousExitGbmSuggestClose = false;
+      return;
+    }
+
+    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
+    const sideLabel = String(openPos.side || '').toUpperCase();
+    const threshold = exitPolicy.close_probability_threshold;
+    const pClose = exitPolicy.close_probability;
+    const title = 'Micro live: Exit GBM → CLOSE';
+    const body = `${sideLabel} ${openPos.symbol_id} — P(close)=${(Number(pClose) * 100).toFixed(1)}% ≥ ${(Number(threshold) * 100).toFixed(1)}%`;
+
+    if (!previousExitGbmSuggestClose) {
+      playExitGbmAlertSound();
+      showExitGbmBrowserNotification(title, body);
+    }
+
+    exitGbmAlertPositionId = positionId;
+    previousExitGbmSuggestClose = true;
+  }
+
+  function showExitGbmBrowserNotification(title, body) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    try {
+      new Notification(title, { body, tag: 'okx-micro-live-exit-gbm' });
+    } catch (_) {
+      // no-op
+    }
   }
 
   function maybeNotifyHorizonAlert(openPos, atTargetHorizon) {
@@ -518,6 +584,83 @@
     return { entryPolicy, entryPredictions };
   }
 
+  function buildExitPolicyPayload(symbol, openPos) {
+    if (!openPos || !openPos.side || !openPos.metrics) return null;
+    if (!lastPredictions || !openPos.entry_predictions || !openPos.entry_policy) return null;
+    if (!lastPolicy || !lastPolicy.probabilities) return null;
+    if (!openPos.entry_policy.probabilities) return null;
+    if (!exitPolicyBySymbol[symbol]) return null;
+
+    const m = openPos.metrics;
+    const linearMetric = (value) => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return 0;
+      return n / 100.0;
+    };
+
+    return {
+      symbol_id: symbol,
+      side: openPos.side,
+      eval_horizon: openPos.eval_horizon,
+      bars_held: m.bars_elapsed,
+      entry_predictions: openPos.entry_predictions,
+      current_predictions: lastPredictions,
+      entry_policy: openPos.entry_policy,
+      current_policy: {
+        action: lastPolicy.action,
+        action_id: lastPolicy.action_id,
+        probabilities: lastPolicy.probabilities,
+      },
+      unrealized_linear: linearMetric(m.unrealized_net_return_pct),
+      mfe_linear: linearMetric(m.mfe_net_return_pct),
+      mae_linear: linearMetric(m.mae_net_return_pct),
+      giveback_linear: linearMetric(m.giveback_net_return_pct),
+    };
+  }
+
+  function refreshExitPolicy(symbol, openPos) {
+    const payload = buildExitPolicyPayload(symbol, openPos);
+    if (!payload) {
+      lastExitPolicy = null;
+      return Promise.resolve(null);
+    }
+    return API.exitPolicy(payload)
+      .then(result => {
+        lastExitPolicy = result;
+        return result;
+      })
+      .catch(() => {
+        lastExitPolicy = null;
+        return null;
+      });
+  }
+
+  function renderExitPolicyCard(exitPolicy) {
+    if (!exitPolicy || exitPolicy.close_probability == null) return '';
+
+    const pClose = Number(exitPolicy.close_probability);
+    const threshold = Number(exitPolicy.close_probability_threshold);
+    const pClosePct = Number.isFinite(pClose) ? (pClose * 100).toFixed(1) : '—';
+    const thresholdPct = Number.isFinite(threshold) ? (threshold * 100).toFixed(1) : '—';
+    const action = String(exitPolicy.action || 'hold').toUpperCase();
+    const runLabel = exitPolicy.run_label || '—';
+    const minHold = exitPolicy.min_hold_steps != null ? exitPolicy.min_hold_steps : '—';
+    const barsHeld = exitPolicy.bars_held != null ? exitPolicy.bars_held : '—';
+    let actionClass = 'exit-policy-hold';
+    if (action === 'CLOSE') actionClass = 'exit-policy-close';
+
+    return `
+      <div class="exit-policy-card ${actionClass}">
+        <div class="exit-policy-action">Exit GBM: ${action}</div>
+        <div class="exit-policy-meta">
+          <span>P(close): <strong>${pClosePct}%</strong> / порог ${thresholdPct}%</span>
+          <span>stack: <strong>${runLabel}</strong></span>
+          <span>бары: <strong>${barsHeld}</strong> (min ${minHold})</span>
+        </div>
+      </div>
+    `;
+  }
+
   function refreshTradeJournal(symbol) {
     if (!symbol) return Promise.resolve();
     return fetchLatestX1Bar(symbol)
@@ -538,6 +681,9 @@
             }
           }
         }
+        return refreshExitPolicy(symbol, state.open_position).then(() => state);
+      })
+      .then(state => {
         renderTradeJournal(state, symbol);
       })
       .catch(e => {
@@ -563,11 +709,17 @@
     if (hasOpen && openPos.metrics) {
       const m = openPos.metrics;
       maybeNotifyHorizonAlert(openPos, m.at_target_horizon);
+      maybeNotifyExitGbmAlert(openPos, lastExitPolicy);
       const progressClass = m.at_target_horizon ? 'at-target' : '';
       const evalHorizonLabel = openPos.eval_horizon || `x${m.eval_horizon_steps}`;
       alertHtml = m.at_target_horizon
         ? `<div class="trade-journal-alert">⚠ Достигнут горизонт ${evalHorizonLabel} — по policy пора выходить</div>`
         : '';
+      if (lastExitPolicy && lastExitPolicy.suggest_close) {
+        const thresholdPct = (Number(lastExitPolicy.close_probability_threshold) * 100).toFixed(1);
+        const pClosePct = (Number(lastExitPolicy.close_probability) * 100).toFixed(1);
+        alertHtml += `<div class="trade-journal-alert">⏹ Exit GBM: P(close)=${pClosePct}% ≥ ${thresholdPct}% — рассмотри ранний выход</div>`;
+      }
       const policySideNow = policyActionToSide(lastPolicy && lastPolicy.action);
       if (policySideNow && policySideNow !== openPos.side) {
         alertHtml += `<div class="trade-journal-alert">↔ Policy flip → ${policySideNow.toUpperCase()}, открыт ${String(openPos.side).toUpperCase()} — рассмотри exit</div>`;
@@ -582,6 +734,7 @@
         ? `<span>Giveback: <strong class="${pnlClass(-m.giveback_pnl_usd)}">${formatPct(m.giveback_net_return_pct)} (${formatUsd(m.giveback_pnl_usd)})</strong></span>`
         : '';
       metricsHtml = `
+        ${renderExitPolicyCard(lastExitPolicy)}
         <div class="trade-journal-metrics">
           <span>Бары: <strong>${m.bars_elapsed}</strong> / ${m.eval_horizon_steps}</span>
           <span>Осталось: <strong>${m.bars_remaining}</strong></span>
@@ -599,6 +752,7 @@
       `;
     } else if (!hasOpen) {
       resetHorizonAlertState();
+      resetExitGbmAlertState();
       metricsHtml = `
         <div class="trade-journal-metrics">
           <span>Policy: <strong>${lastPolicy && lastPolicy.action ? String(lastPolicy.action).toUpperCase() : '—'}</strong></span>
@@ -1400,6 +1554,7 @@
       inferenceMinRows = config.inferenceMinRows != null ? Number(config.inferenceMinRows) : 0;
       inferenceErrorBySymbolAndHorizon = config.inferenceErrorBySymbolAndHorizon || {};
       policyBySymbol = config.policyBySymbol || {};
+      exitPolicyBySymbol = config.exitPolicyBySymbol || {};
       checkpointPathBySymbol = config.checkpointPathBySymbol || {};
       if (config.defaultLimit) {
         limitInput.placeholder = config.defaultLimit;

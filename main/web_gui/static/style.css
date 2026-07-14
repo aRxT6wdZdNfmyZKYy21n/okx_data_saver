@@ -283,6 +283,44 @@ body {
   text-overflow: ellipsis;
 }
 
+.exit-policy-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: #1a1f2b;
+}
+
+.exit-policy-card.exit-policy-close {
+  border-left: 4px solid #ff9800;
+}
+
+.exit-policy-card.exit-policy-hold {
+  border-left: 4px solid #546e7a;
+}
+
+.exit-policy-action {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+.exit-policy-close .exit-policy-action {
+  color: #ff9800;
+}
+
+.exit-policy-hold .exit-policy-action {
+  color: #90a4ae;
+}
+
+.exit-policy-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  font-size: 0.8rem;
+  color: #b2b5be;
+}
+
 .trade-journal-panel {
   padding: 0.75rem 1rem;
   background: #181c24;
