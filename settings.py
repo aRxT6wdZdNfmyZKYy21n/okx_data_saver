@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # Web GUI (okx_data_set_record_data_2 viewer)
     WEB_GUI_RECORDS_LIMIT: int = 1_000_000
+    WEB_GUI_TRADE_RESEARCH_LIMIT: int = 10_000_000
     WEB_GUI_REFRESH_INTERVAL_SEC: int = 30
     WEB_GUI_DOW_SEQUENCE_LENGTH: int = 32
     WEB_GUI_INFERENCE_ENABLED: bool = True

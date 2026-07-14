@@ -82,6 +82,7 @@ def get_config() -> dict:
         'exitPolicyBySymbol': exit_policy_by_symbol,
         'checkpointPathBySymbol': checkpoint_path_by_symbol,
         'chartShowLimit': CHART_SHOW_LIMIT,
+        'tradeResearchLimit': settings.WEB_GUI_TRADE_RESEARCH_LIMIT,
     }
 
 
@@ -152,13 +153,17 @@ def get_inference(
 @app.get('/api/trade-research')
 def get_trade_research(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
-    limit: int | None = Query(None, ge=1, description='x1 bars used for tensor preparation'),
     eval_horizon: str = Query('x2048', description='Eval horizon, e.g. x2048'),
     step_bars: int | None = Query(None, ge=1, description='Non-overlapping step in x1 bars'),
-    visible_bars: int | None = Query(
+    visible_min_start_trade_id: int | None = Query(
         None,
-        ge=1,
-        description='Visible chart bars (tail of loaded window, default CHART_SHOW_LIMIT)',
+        ge=0,
+        description='First start_trade_id on chart (inclusive filter for returned segments)',
+    ),
+    visible_max_start_trade_id: int | None = Query(
+        None,
+        ge=0,
+        description='Last start_trade_id on chart (inclusive filter for returned segments)',
     ),
 ) -> dict:
     try:
@@ -166,7 +171,6 @@ def get_trade_research(
     except KeyError:
         raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
 
-    effective_limit = min(limit or DEFAULT_BARS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
     if step_bars is None:
         if not eval_horizon.startswith('x'):
             raise HTTPException(422, detail=f'Invalid eval_horizon: {eval_horizon}')
@@ -174,18 +178,13 @@ def get_trade_research(
     else:
         effective_step_bars = step_bars
 
-    if visible_bars is None:
-        effective_visible_bars = CHART_SHOW_LIMIT
-    else:
-        effective_visible_bars = min(visible_bars, CHART_SHOW_LIMIT)
-
     return run_in_spawned_process(
         _worker_trade_research,
         symbol_id,
-        effective_limit,
         eval_horizon,
         effective_step_bars,
-        effective_visible_bars,
+        visible_min_start_trade_id,
+        visible_max_start_trade_id,
     )
 
 

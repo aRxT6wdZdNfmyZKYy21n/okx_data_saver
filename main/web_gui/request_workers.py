@@ -73,17 +73,17 @@ def _worker_inference(symbol_id_str: str, limit: int) -> dict[str, object]:
 
 def _worker_trade_research(
     symbol_id_str: str,
-    limit: int,
     eval_horizon: str,
     step_bars: int,
-    visible_bars: int,
+    visible_min_start_trade_id: int | None,
+    visible_max_start_trade_id: int | None,
 ) -> dict[str, object]:
     return run_trade_research(
         symbol_id=symbol_id_str,
-        limit=limit,
         eval_horizon=eval_horizon,
         step_bars=step_bars,
-        visible_bars=visible_bars,
+        visible_min_start_trade_id=visible_min_start_trade_id,
+        visible_max_start_trade_id=visible_max_start_trade_id,
     )
 
 

@@ -147,7 +147,7 @@
   const CVD_WINDOW_DEFAULT = 'x512';
   const JOURNAL_EVAL_HORIZON_OPTIONS = ['x512', 'x1024', 'x1536', 'x2048', 'x3072', 'x4096'];
   const TRADE_RESEARCH_EVAL_HORIZON = 'x2048';
-  const TRADE_RESEARCH_SCALE = 'x1';
+  const TRADE_RESEARCH_SCALE = 'x2048';
   const JOURNAL_SETTINGS_STORAGE_KEY = 'okx_web_gui_journal_settings';
   const JOURNAL_SOUND_ENABLED_STORAGE_KEY = 'okx_web_gui_journal_sound_enabled';
 
@@ -1443,7 +1443,17 @@
     }
   }
 
-  function loadTradeResearch(symbol, limit) {
+  function getVisibleStartTradeIdRange() {
+    if (barsData.length === 0) {
+      return { min: null, max: null };
+    }
+    return {
+      min: Number(barsData[0].start_trade_id),
+      max: Number(barsData[barsData.length - 1].start_trade_id),
+    };
+  }
+
+  function loadTradeResearch(symbol) {
     if (!isTradeResearchEnabled()) {
       tradeResearchSegments = [];
       removeTradeResearchLineSeries();
@@ -1452,42 +1462,39 @@
     if (scaleSelect.value !== TRADE_RESEARCH_SCALE) {
       tradeResearchSegments = [];
       removeTradeResearchLineSeries();
-      setStatus('Trade research: выберите масштаб x1', true);
+      setStatus(`Trade research: выберите масштаб ${TRADE_RESEARCH_SCALE}`, true);
       return Promise.resolve(null);
     }
     const horizonSteps = Number(TRADE_RESEARCH_EVAL_HORIZON.slice(1));
-    const minimumRows = inferenceMinRows + horizonSteps;
-    if (Number(limit) < minimumRows) {
-      tradeResearchSegments = [];
-      removeTradeResearchLineSeries();
-      setStatus(
-        `Trade research: нужно минимум ${minimumRows} x1 баров (сейчас ${limit})`,
-        true,
-      );
-      return Promise.resolve(null);
-    }
-    setStatus('Trade research: онлайн-инференс…');
+    const visibleRange = getVisibleStartTradeIdRange();
+    setStatus('Trade research: онлайн-инференс на полной истории…');
     const requestParams = {
       symbol_id: symbol,
-      limit,
       eval_horizon: TRADE_RESEARCH_EVAL_HORIZON,
       step_bars: horizonSteps,
-      visible_bars: barsData.length > 0 ? barsData.length : chartShowLimit,
     };
+    if (visibleRange.min != null) {
+      requestParams.visible_min_start_trade_id = visibleRange.min;
+    }
+    if (visibleRange.max != null) {
+      requestParams.visible_max_start_trade_id = visibleRange.max;
+    }
     return API.tradeResearch(requestParams)
       .then((payload) => {
         tradeResearchSegments = Array.isArray(payload.segments) ? payload.segments : [];
         addTradeResearchLinesToChart();
         const sampleCount = payload.sample_count != null ? payload.sample_count : '?';
         const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
+        const barsLoaded = payload.bars_loaded != null ? payload.bars_loaded : '?';
         let statusText =
-          `Trade research: ${tradeResearchSegments.length} сегментов ` +
-          `(${sampleCount} точек, ${tradeCount} long/short @ ${TRADE_RESEARCH_EVAL_HORIZON})`;
+          `Trade research: ${tradeResearchSegments.length} на графике ` +
+          `(${tradeCount} long/short из ${sampleCount} точек @ ${TRADE_RESEARCH_EVAL_HORIZON}, ` +
+          `контекст ${barsLoaded} x1)`;
         if (payload.sample_selection_note) {
           statusText = statusText + ` [${payload.sample_selection_note}]`;
         }
         if (tradeResearchSegments.length === 0 && Number(sampleCount) > 0) {
-          statusText = statusText + ' — policy=hold или exit вне графика';
+          statusText = statusText + ' — нет long/short в видимом окне или exit вне графика';
         }
         setStatus(statusText);
         return payload;
@@ -1837,7 +1844,7 @@
         if (!isTradeResearchEnabled()) {
           return null;
         }
-        return loadTradeResearch(symbol, limit);
+        return loadTradeResearch(symbol);
       })
       .then(() => refreshTradeJournal(symbol))
       .catch(e => {
