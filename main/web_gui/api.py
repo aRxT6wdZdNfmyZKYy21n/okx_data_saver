@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from enumerations import SymbolId
-from main.web_gui.constants import DOW_LEVEL_NAMES, SCALE_NAMES
+from main.web_gui.constants import CHART_SHOW_LIMIT, DOW_LEVEL_NAMES, SCALE_NAMES
 from main.web_gui.exit_policy_service import run_remote_exit_policy
 from main.web_gui.inference_service import (
     fetch_inference_metadata,
@@ -81,6 +81,7 @@ def get_config() -> dict:
         'policyBySymbol': policy_by_symbol,
         'exitPolicyBySymbol': exit_policy_by_symbol,
         'checkpointPathBySymbol': checkpoint_path_by_symbol,
+        'chartShowLimit': CHART_SHOW_LIMIT,
     }
 
 
@@ -154,10 +155,10 @@ def get_trade_research(
     limit: int | None = Query(None, ge=1, description='x1 bars used for tensor preparation'),
     eval_horizon: str = Query('x2048', description='Eval horizon, e.g. x2048'),
     step_bars: int | None = Query(None, ge=1, description='Non-overlapping step in x1 bars'),
-    min_entry_start_trade_id: int | None = Query(
+    visible_bars: int | None = Query(
         None,
-        ge=0,
-        description='Only segments with entry_start_trade_id >= this (visible chart window)',
+        ge=1,
+        description='Visible chart bars (tail of loaded window, default CHART_SHOW_LIMIT)',
     ),
 ) -> dict:
     try:
@@ -173,13 +174,18 @@ def get_trade_research(
     else:
         effective_step_bars = step_bars
 
+    if visible_bars is None:
+        effective_visible_bars = CHART_SHOW_LIMIT
+    else:
+        effective_visible_bars = min(visible_bars, CHART_SHOW_LIMIT)
+
     return run_in_spawned_process(
         _worker_trade_research,
         symbol_id,
         effective_limit,
         eval_horizon,
         effective_step_bars,
-        min_entry_start_trade_id,
+        effective_visible_bars,
     )
 
 

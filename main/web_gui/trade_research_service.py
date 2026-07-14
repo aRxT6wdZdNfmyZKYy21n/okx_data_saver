@@ -2,6 +2,7 @@
 Online non-overlapping trade research @ eval horizon for Web GUI overlays.
 
 Runs batched inference every `step_bars` (default x2048) on loaded x1 history.
+Sample points are chosen inside the visible chart window (last CHART_SHOW_LIMIT bars).
 """
 
 from __future__ import annotations
@@ -13,9 +14,9 @@ import traceback
 import httpx
 import polars
 from fastapi import HTTPException
-from omegaconf import OmegaConf
 
 from enumerations import SymbolId
+from main.web_gui.constants import CHART_SHOW_LIMIT
 from main.web_gui.data_service import fetch_last_bars
 from main.web_gui.inference_service import (
     _build_dataset,
@@ -24,7 +25,6 @@ from main.web_gui.inference_service import (
     fetch_inference_metadata,
 )
 from settings import settings
-from trading_bot_dataset.src.dataset import HybridTradeDatasetInference
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,47 @@ def horizon_steps_from_name(horizon_name: str) -> int:
 
 def _prediction_key_for_horizon(horizon_name: str) -> str:
     return f'target_close_return_signed_log2_{horizon_name}'
+
+
+def _sample_indices_for_visible_window(
+    start_index: int,
+    df_height: int,
+    max_sample_index: int,
+    step_bars: int,
+    horizon_steps: int,
+    visible_bars: int,
+    max_segments: int,
+) -> tuple[list[int], int]:
+    visible_rows = min(df_height, visible_bars)
+    chart_first_row_index = max(0, df_height - visible_rows)
+
+    first_entry_row = max(start_index, chart_first_row_index)
+    last_entry_row = df_height - 1 - horizon_steps
+    if first_entry_row > last_entry_row:
+        return [], chart_first_row_index
+
+    offset_to_first_entry = first_entry_row - start_index
+    if offset_to_first_entry < 0:
+        offset_to_first_entry = 0
+    first_sample_index = (
+        (offset_to_first_entry + step_bars - 1) // step_bars
+    ) * step_bars
+
+    offset_to_last_entry = last_entry_row - start_index
+    if offset_to_last_entry < 0:
+        return [], chart_first_row_index
+    last_sample_index = (offset_to_last_entry // step_bars) * step_bars
+    last_sample_index = min(last_sample_index, max_sample_index)
+
+    if first_sample_index > last_sample_index:
+        return [], chart_first_row_index
+
+    sample_indices = list(
+        range(first_sample_index, last_sample_index + 1, step_bars),
+    )
+    if len(sample_indices) > max_segments:
+        sample_indices = sample_indices[-max_segments:]
+    return sample_indices, chart_first_row_index
 
 
 def _call_inference_batch_api(
@@ -97,7 +138,7 @@ def run_trade_research(
     limit: int,
     eval_horizon: str,
     step_bars: int,
-    min_entry_start_trade_id: int | None,
+    visible_bars: int,
 ) -> dict[str, object]:
     if not settings.WEB_GUI_INFERENCE_ENABLED:
         raise HTTPException(status_code=503, detail='Inference is disabled')
@@ -114,6 +155,10 @@ def run_trade_research(
 
     symbol = SymbolId[symbol_id]
     effective_limit = min(limit, settings.WEB_GUI_RECORDS_LIMIT)
+    effective_visible_bars = min(visible_bars, CHART_SHOW_LIMIT)
+    if effective_visible_bars <= 0:
+        raise HTTPException(status_code=422, detail='visible_bars must be positive')
+
     metadata = fetch_inference_metadata()
     required_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
     minimum_rows = required_rows + horizon_steps
@@ -147,20 +192,37 @@ def run_trade_research(
             detail='Trade research: dataset too short for one full horizon segment',
         )
 
-    sample_indices = list(range(0, max_sample_index + 1, step_bars))
-    if len(sample_indices) > MAX_SEGMENTS:
-        sample_indices = sample_indices[-MAX_SEGMENTS:]
+    sample_indices, chart_first_row_index = _sample_indices_for_visible_window(
+        start_index=start_index,
+        df_height=df.height,
+        max_sample_index=max_sample_index,
+        step_bars=step_bars,
+        horizon_steps=horizon_steps,
+        visible_bars=effective_visible_bars,
+        max_segments=MAX_SEGMENTS,
+    )
+    if len(sample_indices) == 0:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                'Trade research: no non-overlapping sample points in visible chart window '
+                f'(visible_bars={effective_visible_bars}, loaded={df.height})'
+            ),
+        )
 
     logger.info(
-        'Trade research: symbol=%s samples=%d step=%d horizon=%s',
+        'Trade research: symbol=%s samples=%d step=%d horizon=%s visible_rows=%d first_row=%d',
         symbol_id,
         len(sample_indices),
         step_bars,
         eval_horizon,
+        effective_visible_bars,
+        chart_first_row_index,
     )
 
     segments: list[dict[str, object]] = []
     inference_results: list[tuple[int, dict[str, object]]] = []
+    trade_inference_count = 0
 
     try:
         for chunk_start in range(0, len(sample_indices), BATCH_CHUNK_SIZE):
@@ -195,9 +257,13 @@ def run_trade_research(
             if action not in ('long', 'short'):
                 continue
 
+            trade_inference_count = trade_inference_count + 1
+
             entry_bar_index = start_index + sample_index
             exit_bar_index = entry_bar_index + horizon_steps
             if exit_bar_index >= df.height:
+                continue
+            if entry_bar_index < chart_first_row_index:
                 continue
 
             entry_row = df.row(entry_bar_index, named=True)
@@ -231,13 +297,6 @@ def run_trade_research(
                     'action': action,
                 },
             )
-
-        if min_entry_start_trade_id is not None:
-            segments = [
-                segment
-                for segment in segments
-                if int(segment['entry_start_trade_id']) >= min_entry_start_trade_id
-            ]
     except HTTPException:
         raise
     except Exception as exception:
@@ -253,7 +312,10 @@ def run_trade_research(
         'step_bars': step_bars,
         'required_rows': required_rows,
         'bars_loaded': int(df.height),
+        'visible_bars': effective_visible_bars,
+        'chart_first_row_index': chart_first_row_index,
         'sample_count': len(sample_indices),
+        'trade_inference_count': trade_inference_count,
         'segment_count': len(segments),
         'segments': segments,
     }

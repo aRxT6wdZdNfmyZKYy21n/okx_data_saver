@@ -123,6 +123,7 @@
   let exitPolicyBySymbol = {};
   let checkpointPathBySymbol = {};
   let inferenceMinRows = 0;
+  let chartShowLimit = 50000;
   let lastPolicy = null;
   let lastEntryHint = null;
   let lastPredictions = null;
@@ -1471,17 +1472,17 @@
       limit,
       eval_horizon: TRADE_RESEARCH_EVAL_HORIZON,
       step_bars: horizonSteps,
+      visible_bars: barsData.length > 0 ? barsData.length : chartShowLimit,
     };
-    if (barsData.length > 0) {
-      requestParams.min_entry_start_trade_id = Number(barsData[0].start_trade_id);
-    }
     return API.tradeResearch(requestParams)
       .then((payload) => {
         tradeResearchSegments = Array.isArray(payload.segments) ? payload.segments : [];
         addTradeResearchLinesToChart();
+        const sampleCount = payload.sample_count != null ? payload.sample_count : '?';
+        const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
         setStatus(
           `Trade research: ${tradeResearchSegments.length} сегментов ` +
-          `(non-overlapping @ ${TRADE_RESEARCH_EVAL_HORIZON})`,
+          `(${sampleCount} точек, ${tradeCount} long/short @ ${TRADE_RESEARCH_EVAL_HORIZON})`,
         );
         return payload;
       })
@@ -1893,6 +1894,7 @@
     try {
       config = await API.config();
       inferenceMinRows = config.inferenceMinRows != null ? Number(config.inferenceMinRows) : 0;
+      chartShowLimit = config.chartShowLimit != null ? Number(config.chartShowLimit) : 50000;
       inferenceErrorBySymbolAndHorizon = config.inferenceErrorBySymbolAndHorizon || {};
       policyBySymbol = config.policyBySymbol || {};
       exitPolicyBySymbol = config.exitPolicyBySymbol || {};

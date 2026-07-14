@@ -25,6 +25,7 @@ from main.web_gui.trade_journal_service import (
     get_journal_state,
     open_position,
 )
+from main.web_gui.constants import CHART_SHOW_LIMIT
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -42,8 +43,6 @@ BAR_COLS = [
     'total_volume', 'buy_volume_percent', 'sell_volume_percent', 'total_volume_log2',
 ]
 
-_SHOW_LIMIT = 50000
-
 
 def _worker_bars(symbol_id_str: str, limit: int, offset: int, scale: str) -> list[dict] | None:
     """Вызывается в дочернем процессе. Возвращает список сериализованных баров или None."""
@@ -54,7 +53,7 @@ def _worker_bars(symbol_id_str: str, limit: int, offset: int, scale: str) -> lis
         return None
     available = [c for c in BAR_COLS if c in df.columns]
     rows = df.select(available).to_dicts()
-    return [serialize_bar_row(r) for r in rows][-_SHOW_LIMIT:]
+    return [serialize_bar_row(r) for r in rows][-CHART_SHOW_LIMIT:]
 
 
 def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None:
@@ -64,7 +63,7 @@ def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None
     bars = get_dow_bars_for_api(symbol_id=symbol, limit=effective_limit, level=level)
     if bars is None:
         return None
-    return [serialize_bar_row(r) for r in bars][-_SHOW_LIMIT:]
+    return [serialize_bar_row(r) for r in bars][-CHART_SHOW_LIMIT:]
 
 
 def _worker_inference(symbol_id_str: str, limit: int) -> dict[str, object]:
@@ -77,14 +76,14 @@ def _worker_trade_research(
     limit: int,
     eval_horizon: str,
     step_bars: int,
-    min_entry_start_trade_id: int | None,
+    visible_bars: int,
 ) -> dict[str, object]:
     return run_trade_research(
         symbol_id=symbol_id_str,
         limit=limit,
         eval_horizon=eval_horizon,
         step_bars=step_bars,
-        min_entry_start_trade_id=min_entry_start_trade_id,
+        visible_bars=visible_bars,
     )
 
 
