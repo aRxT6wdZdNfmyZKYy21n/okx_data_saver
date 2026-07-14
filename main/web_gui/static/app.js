@@ -541,12 +541,33 @@
         : '—';
       const blocked = Boolean(entryHint.entry_blocked);
       const blockReason = entryHint.block_reason ? String(entryHint.block_reason) : '';
+      const hintMode = entryHint.hint_mode ? String(entryHint.hint_mode) : 'snr_only';
+      const isHybrid = hintMode === 'hybrid_gate_snr';
+      const holdProb = entryHint.hold_probability != null
+        ? Number(entryHint.hold_probability).toFixed(2)
+        : null;
+      const holdThreshold = entryHint.hold_probability_threshold != null
+        ? Number(entryHint.hold_probability_threshold).toFixed(2)
+        : null;
+      const gbmBlocks = Boolean(entryHint.gbm_blocks_entry);
+      const snrBlocks = Boolean(entryHint.snr_blocks_entry);
+      const title = isHybrid
+        ? `Entry hint @ ${evalHorizon} (hybrid P(hold)≥${holdThreshold} ∨ SNR≥${snrThreshold}, rmse=${rmsePct}%)`
+        : `Entry hint @ ${evalHorizon} (SNR≥${snrThreshold}, rmse=${rmsePct}%)`;
+      const hybridMeta = isHybrid && holdProb != null
+        ? `<span>P(hold): <strong>${holdProb}</strong>${gbmBlocks ? ' ⛔' : ''}</span>`
+        : '';
+      const blockTags = isHybrid
+        ? `<span>${gbmBlocks ? 'GBM block' : 'GBM ok'} / ${snrBlocks ? 'SNR block' : 'SNR ok'}</span>`
+        : '';
       entryHintHtml = `
         <div class="entry-hint ${blocked ? 'entry-hint-blocked' : 'entry-hint-ok'}">
-          <div class="entry-hint-title">Entry hint @ ${evalHorizon} (SNR≥${snrThreshold}, rmse=${rmsePct}%)</div>
+          <div class="entry-hint-title">${title}</div>
           <div class="entry-hint-meta">
             <span>SNR: <strong>${snr}</strong></span>
+            ${hybridMeta}
             <span>band: [${Number(entryHint.min_pct).toFixed(2)}%, ${Number(entryHint.max_pct).toFixed(2)}%]</span>
+            ${blockTags}
             <span>→ <strong>${recommended}</strong></span>
           </div>
           ${blocked ? `<div class="entry-hint-warning">${blockReason || 'uncertainty — подождать'}</div>` : ''}
@@ -887,7 +908,10 @@
         const blockReason = lastEntryHint.block_reason
           ? String(lastEntryHint.block_reason)
           : 'uncertainty @ eval horizon';
-        alertHtml += `<div class="trade-journal-alert">⏸ SNR gate: ${blockReason}</div>`;
+        const hintLabel = lastEntryHint.hint_mode === 'hybrid_gate_snr'
+          ? 'Hybrid gate'
+          : 'SNR gate';
+        alertHtml += `<div class="trade-journal-alert">⏸ ${hintLabel}: ${blockReason}</div>`;
       }
     }
 
@@ -900,10 +924,10 @@
 
     const actionsHtml = `
       <div class="trade-journal-actions">
-        <button type="button" id="btnJournalEntryLong" class="btn-entry-long" ${canEnterLong || canEnterManual ? '' : 'disabled'} title="${canEnterLong ? '' : (policySide === 'long' && !snrAllowLong ? 'SNR gate: подождать' : '')}">
+        <button type="button" id="btnJournalEntryLong" class="btn-entry-long" ${canEnterLong || canEnterManual ? '' : 'disabled'} title="${canEnterLong ? '' : (policySide === 'long' && !snrAllowLong ? 'Entry hint: подождать' : '')}">
           Вошёл LONG
         </button>
-        <button type="button" id="btnJournalEntryShort" class="btn-entry-short" ${canEnterShort || canEnterManual ? '' : 'disabled'} title="${canEnterShort ? '' : (policySide === 'short' && !snrAllowShort ? 'SNR gate: подождать' : '')}">
+        <button type="button" id="btnJournalEntryShort" class="btn-entry-short" ${canEnterShort || canEnterManual ? '' : 'disabled'} title="${canEnterShort ? '' : (policySide === 'short' && !snrAllowShort ? 'Entry hint: подождать' : '')}">
           Вошёл SHORT
         </button>
         <button type="button" id="btnJournalExit" class="btn-exit" ${hasOpen ? '' : 'disabled'}>
