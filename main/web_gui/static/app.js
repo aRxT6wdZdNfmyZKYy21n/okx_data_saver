@@ -1480,10 +1480,16 @@
         addTradeResearchLinesToChart();
         const sampleCount = payload.sample_count != null ? payload.sample_count : '?';
         const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
-        setStatus(
+        let statusText =
           `Trade research: ${tradeResearchSegments.length} сегментов ` +
-          `(${sampleCount} точек, ${tradeCount} long/short @ ${TRADE_RESEARCH_EVAL_HORIZON})`,
-        );
+          `(${sampleCount} точек, ${tradeCount} long/short @ ${TRADE_RESEARCH_EVAL_HORIZON})`;
+        if (payload.sample_selection_note) {
+          statusText = statusText + ` [${payload.sample_selection_note}]`;
+        }
+        if (tradeResearchSegments.length === 0 && Number(sampleCount) > 0) {
+          statusText = statusText + ' — policy=hold или exit вне графика';
+        }
+        setStatus(statusText);
         return payload;
       })
       .catch((error) => {
