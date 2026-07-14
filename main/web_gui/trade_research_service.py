@@ -147,6 +147,7 @@ def _raw_bar_metadata(
     return {
         'start_trade_id': int(_row_value(row, 'start_trade_id')),
         'start_timestamp_ms': int(_row_value(row, 'start_timestamp_ms')),
+        'open_price': float(_row_value(row, 'open_price')),
         'close_price': float(_row_value(row, 'close_price')),
     }
 
@@ -326,6 +327,7 @@ def run_trade_research(
                 continue
 
             entry_close = float(entry_meta['close_price'])
+            entry_open = float(entry_meta['open_price'])
             exit_close = float(exit_meta['close_price'])
 
             pred_eval_log2 = 0.0
@@ -343,6 +345,7 @@ def run_trade_research(
                     'exit_start_trade_id': int(exit_meta['start_trade_id']),
                     'entry_timestamp_ms': int(entry_meta['start_timestamp_ms']),
                     'exit_timestamp_ms': int(exit_meta['start_timestamp_ms']),
+                    'entry_open': entry_open,
                     'entry_close': entry_close,
                     'exit_close': exit_close,
                     'pred_target_close': _pred_target_close(

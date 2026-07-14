@@ -1511,10 +1511,22 @@
         missingExitCount = missingExitCount + 1;
         continue;
       }
+      const entryOpen = Number(segment.entry_open);
+      const entryBar = findBarForStartTradeId(segment.entry_start_trade_id);
+      let entryStartPrice = entryOpen;
+      if (!Number.isFinite(entryStartPrice) || entryStartPrice <= 0) {
+        if (entryBar && entryBar.open_price != null) {
+          entryStartPrice = Number(entryBar.open_price);
+        }
+      }
+      if (!Number.isFinite(entryStartPrice) || entryStartPrice <= 0) {
+        missingEntryCount = missingEntryCount + 1;
+        continue;
+      }
       const color = segment.action === 'long' ? '#26a69a' : '#ef5350';
       const series = chart.addSeries(LineSeries, { ...opts, color });
       series.setData([
-        { time: entryCandle.time, value: entryCandle.close },
+        { time: entryCandle.time, value: entryStartPrice },
         { time: exitCandle.time, value: predTargetClose },
       ]);
       tradeResearchLineSeries.push(series);
