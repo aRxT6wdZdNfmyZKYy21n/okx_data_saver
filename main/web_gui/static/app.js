@@ -1587,16 +1587,21 @@
         addTradeResearchLinesToChart();
         const sampleCount = payload.sample_count != null ? payload.sample_count : '?';
         const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
+        const entryAllowedCount = payload.entry_allowed_count != null ? payload.entry_allowed_count : '?';
         const barsLoaded = payload.bars_loaded != null ? payload.bars_loaded : '?';
         let statusText =
           `Trade research: ${tradeResearchSegments.length} на графике ` +
-          `(${tradeCount} long/short из ${sampleCount} точек @ ${TRADE_RESEARCH_EVAL_HORIZON}, ` +
+          `(${entryAllowedCount} entry ok / ${tradeCount} policy long/short из ${sampleCount} точек @ ${TRADE_RESEARCH_EVAL_HORIZON}, ` +
           `контекст ${barsLoaded} x1)`;
         if (payload.sample_selection_note) {
           statusText = statusText + ` [${payload.sample_selection_note}]`;
         }
-        if (tradeResearchSegments.length === 0 && Number(sampleCount) > 0) {
-          statusText = statusText + ' — нет long/short в видимом окне или exit вне графика';
+        if (tradeResearchSegments.length === 0 && Number(entryAllowedCount) > 0) {
+          statusText = statusText + ' — entry ok, но линии не привязались к свечам';
+        } else if (tradeResearchSegments.length === 0 && Number(tradeCount) > 0) {
+          statusText = statusText + ' — SNR/gate заблокировали entry или exit вне графика';
+        } else if (tradeResearchSegments.length === 0 && Number(sampleCount) > 0) {
+          statusText = statusText + ' — нет long/short в видимом окне';
         }
         const renderedLines = tradeResearchLineSeries.length;
         if (tradeResearchSegments.length > 0 && renderedLines === 0) {

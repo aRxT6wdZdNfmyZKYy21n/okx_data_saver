@@ -2,8 +2,9 @@
 Online non-overlapping trade research @ eval horizon for Web GUI overlays.
 
 Loads full x1 history (WEB_GUI_TRADE_RESEARCH_LIMIT) for tensor context, runs
-batched inference on the entire non-overlapping grid @ step_bars, then returns
-only segments whose entry falls inside the visible chart window (by start_trade_id).
+batched inference on the entire non-overlapping grid @ step_bars, keeps only
+segments with entry_hint.recommended_action in (long, short) after SNR + hybrid
+gate, then returns those whose entry falls inside the visible chart window.
 """
 
 from __future__ import annotations
@@ -96,6 +97,22 @@ def _call_inference_batch_api(
     if not isinstance(results, list):
         raise RuntimeError('Batch inference results must be a list')
     return results
+
+
+def _recommended_entry_action(
+    inference_result: dict[str, object],
+) -> str | None:
+    if 'entry_hint' not in inference_result:
+        return None
+    entry_hint = inference_result['entry_hint']
+    if not isinstance(entry_hint, dict):
+        return None
+    if 'recommended_action' not in entry_hint:
+        return None
+    recommended_action = str(entry_hint['recommended_action'])
+    if recommended_action not in ('long', 'short'):
+        return None
+    return recommended_action
 
 
 def _pred_target_price(
@@ -238,7 +255,8 @@ def run_trade_research(
 
     segments: list[dict[str, object]] = []
     inference_results: list[tuple[int, dict[str, object]]] = []
-    full_trade_inference_count = 0
+    policy_trade_count = 0
+    entry_allowed_count = 0
 
     if len(sample_indices) == 0:
         return {
@@ -255,6 +273,7 @@ def run_trade_research(
             'visible_max_start_trade_id': visible_max_start_trade_id,
             'sample_count': 0,
             'trade_inference_count': 0,
+            'entry_allowed_count': 0,
             'segment_count': 0,
             'segments': segments,
             'sample_selection_note': sample_selection_note,
@@ -306,7 +325,13 @@ def run_trade_research(
             if action not in ('long', 'short'):
                 continue
 
-            full_trade_inference_count = full_trade_inference_count + 1
+            policy_trade_count = policy_trade_count + 1
+
+            recommended_action = _recommended_entry_action(inference_result)
+            if recommended_action is None:
+                continue
+
+            entry_allowed_count = entry_allowed_count + 1
 
             entry_bar_index = start_index + sample_index
             exit_bar_index = entry_bar_index + horizon_steps
@@ -357,7 +382,8 @@ def run_trade_research(
                         pred_eval_log2=pred_eval_log2,
                     ),
                     'pred_eval_log2': pred_eval_log2,
-                    'action': action,
+                    'policy_action': action,
+                    'action': recommended_action,
                 },
             )
     except HTTPException:
@@ -382,7 +408,8 @@ def run_trade_research(
         'visible_min_start_trade_id': visible_min_start_trade_id,
         'visible_max_start_trade_id': visible_max_start_trade_id,
         'sample_count': len(sample_indices),
-        'trade_inference_count': full_trade_inference_count,
+        'trade_inference_count': policy_trade_count,
+        'entry_allowed_count': entry_allowed_count,
         'segment_count': len(segments),
         'segments': segments,
         'sample_selection_note': sample_selection_note,
