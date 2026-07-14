@@ -97,6 +97,7 @@ def run_trade_research(
     limit: int,
     eval_horizon: str,
     step_bars: int,
+    min_entry_start_trade_id: int | None,
 ) -> dict[str, object]:
     if not settings.WEB_GUI_INFERENCE_ENABLED:
         raise HTTPException(status_code=503, detail='Inference is disabled')
@@ -230,6 +231,13 @@ def run_trade_research(
                     'action': action,
                 },
             )
+
+        if min_entry_start_trade_id is not None:
+            segments = [
+                segment
+                for segment in segments
+                if int(segment['entry_start_trade_id']) >= min_entry_start_trade_id
+            ]
     except HTTPException:
         raise
     except Exception as exception:

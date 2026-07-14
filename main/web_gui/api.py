@@ -154,6 +154,11 @@ def get_trade_research(
     limit: int | None = Query(None, ge=1, description='x1 bars used for tensor preparation'),
     eval_horizon: str = Query('x2048', description='Eval horizon, e.g. x2048'),
     step_bars: int | None = Query(None, ge=1, description='Non-overlapping step in x1 bars'),
+    min_entry_start_trade_id: int | None = Query(
+        None,
+        ge=0,
+        description='Only segments with entry_start_trade_id >= this (visible chart window)',
+    ),
 ) -> dict:
     try:
         SymbolId[symbol_id]
@@ -174,6 +179,7 @@ def get_trade_research(
         effective_limit,
         eval_horizon,
         effective_step_bars,
+        min_entry_start_trade_id,
     )
 
 

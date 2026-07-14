@@ -77,12 +77,14 @@ def _worker_trade_research(
     limit: int,
     eval_horizon: str,
     step_bars: int,
+    min_entry_start_trade_id: int | None,
 ) -> dict[str, object]:
     return run_trade_research(
         symbol_id=symbol_id_str,
         limit=limit,
         eval_horizon=eval_horizon,
         step_bars=step_bars,
+        min_entry_start_trade_id=min_entry_start_trade_id,
     )
 
 

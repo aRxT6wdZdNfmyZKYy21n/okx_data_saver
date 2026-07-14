@@ -1391,12 +1391,33 @@
     tradeResearchLineSeries = [];
   }
 
+  function buildStartTradeIdCandleLookup() {
+    const candleByTime = new Map();
+    for (const candle of candleDataByIndex) {
+      candleByTime.set(candle.time, candle);
+    }
+    const lookup = new Map();
+    for (const bar of barsData) {
+      const startTradeId = Number(bar.start_trade_id);
+      const time = Math.floor(Number(bar.start_timestamp_ms) / 1000);
+      const candle = candleByTime.get(time);
+      if (candle) {
+        lookup.set(startTradeId, candle);
+      }
+    }
+    return lookup;
+  }
+
   function addTradeResearchLinesToChart() {
     if (!chart || !isTradeResearchEnabled()) {
       removeTradeResearchLineSeries();
       return;
     }
     removeTradeResearchLineSeries();
+    if (candleDataByIndex.length === 0 || tradeResearchSegments.length === 0) {
+      return;
+    }
+    const barLookup = buildStartTradeIdCandleLookup();
     const LineSeries = LightweightCharts.LineSeries;
     if (!LineSeries) return;
     const opts = {
@@ -1406,23 +1427,16 @@
       priceLineVisible: false,
     };
     for (const segment of tradeResearchSegments) {
-      const entryTime = Math.floor(Number(segment.entry_timestamp_ms) / 1000);
-      const exitTime = Math.floor(Number(segment.exit_timestamp_ms) / 1000);
-      const entryClose = Number(segment.entry_close);
-      const exitClose = Number(segment.exit_close);
-      if (
-        !Number.isFinite(entryTime) ||
-        !Number.isFinite(exitTime) ||
-        !Number.isFinite(entryClose) ||
-        !Number.isFinite(exitClose)
-      ) {
+      const entryCandle = barLookup.get(Number(segment.entry_start_trade_id));
+      const exitCandle = barLookup.get(Number(segment.exit_start_trade_id));
+      if (!entryCandle || !exitCandle) {
         continue;
       }
       const color = segment.action === 'long' ? '#26a69a' : '#ef5350';
       const series = chart.addSeries(LineSeries, { ...opts, color });
       series.setData([
-        { time: entryTime, value: entryClose },
-        { time: exitTime, value: exitClose },
+        { time: entryCandle.time, value: entryCandle.close },
+        { time: exitCandle.time, value: exitCandle.close },
       ]);
       tradeResearchLineSeries.push(series);
     }
@@ -1452,12 +1466,16 @@
       return Promise.resolve(null);
     }
     setStatus('Trade research: онлайн-инференс…');
-    return API.tradeResearch({
+    const requestParams = {
       symbol_id: symbol,
       limit,
       eval_horizon: TRADE_RESEARCH_EVAL_HORIZON,
       step_bars: horizonSteps,
-    })
+    };
+    if (barsData.length > 0) {
+      requestParams.min_entry_start_trade_id = Number(barsData[0].start_trade_id);
+    }
+    return API.tradeResearch(requestParams)
       .then((payload) => {
         tradeResearchSegments = Array.isArray(payload.segments) ? payload.segments : [];
         addTradeResearchLinesToChart();
@@ -1756,7 +1774,9 @@
     candleSeries.setData(candleData);
     chart.timeScale().fitContent();
     addExtremaLinesToChart();
-    addTradeResearchLinesToChart();
+    if (isTradeResearchEnabled()) {
+      removeTradeResearchLineSeries();
+    }
 
     concentrationPanel.classList.remove('hidden');
     cumulativePanel.classList.remove('hidden');
