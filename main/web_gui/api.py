@@ -83,6 +83,7 @@ def get_config() -> dict:
         'checkpointPathBySymbol': checkpoint_path_by_symbol,
         'chartShowLimit': CHART_SHOW_LIMIT,
         'tradeResearchLimit': settings.WEB_GUI_TRADE_RESEARCH_LIMIT,
+        'tradeResearchPnlStride': settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE,
     }
 
 

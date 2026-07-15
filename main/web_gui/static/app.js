@@ -1681,10 +1681,21 @@
         const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
         const entryAllowedCount = payload.entry_allowed_count != null ? payload.entry_allowed_count : '?';
         const barsLoaded = payload.bars_loaded != null ? payload.bars_loaded : '?';
-        const backtestNetPnl = payload.backtest_net_pnl_sum;
-        const backtestTradeCount = payload.backtest_trade_count;
-        const backtestVisibleNetPnl = payload.backtest_visible_net_pnl_sum;
-        const backtestVisibleTradeCount = payload.backtest_visible_trade_count;
+        const backtestNetPnl = payload.sequential_backtest_net_pnl_sum != null
+          ? payload.sequential_backtest_net_pnl_sum
+          : payload.backtest_net_pnl_sum;
+        const backtestTradeCount = payload.sequential_backtest_trade_count != null
+          ? payload.sequential_backtest_trade_count
+          : payload.backtest_trade_count;
+        const backtestVisibleNetPnl = payload.sequential_backtest_visible_net_pnl_sum != null
+          ? payload.sequential_backtest_visible_net_pnl_sum
+          : payload.backtest_visible_net_pnl_sum;
+        const backtestVisibleTradeCount = payload.sequential_backtest_visible_trade_count != null
+          ? payload.sequential_backtest_visible_trade_count
+          : payload.backtest_visible_trade_count;
+        const gridBacktestNetPnl = payload.grid_backtest_net_pnl_sum;
+        const gridBacktestTradeCount = payload.grid_backtest_trade_count;
+        const pnlStride = payload.pnl_stride != null ? payload.pnl_stride : '?';
         let statusText =
           `Trade research: ${tradeResearchSegments.length} на графике ` +
           `(${entryAllowedCount} entry ok / ${tradeCount} policy long/short из ${sampleCount} точек @ ${TRADE_RESEARCH_EVAL_HORIZON}, ` +
@@ -1692,8 +1703,14 @@
         if (backtestNetPnl != null && backtestTradeCount != null) {
           statusText =
             statusText +
-            `, net PnL ${formatTradeResearchNetPnl(backtestNetPnl)} ` +
-            `(${backtestTradeCount} hybrid bt)`;
+            `, sequential PnL ${formatTradeResearchNetPnl(backtestNetPnl)} ` +
+            `(${backtestTradeCount} trades, stride ${pnlStride})`;
+          if (gridBacktestNetPnl != null && gridBacktestTradeCount != null) {
+            statusText =
+              statusText +
+              `; grid ${formatTradeResearchNetPnl(gridBacktestNetPnl)} ` +
+              `(${gridBacktestTradeCount})`;
+          }
           if (
             backtestVisibleNetPnl != null &&
             backtestVisibleTradeCount != null &&

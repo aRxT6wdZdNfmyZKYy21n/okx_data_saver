@@ -2,9 +2,8 @@
 Online non-overlapping trade research @ eval horizon for Web GUI overlays.
 
 Loads full x1 history (WEB_GUI_TRADE_RESEARCH_LIMIT) for tensor context, runs
-batched inference on the entire non-overlapping grid @ step_bars, keeps only
-segments with entry_hint.recommended_action in (long, short) after SNR + hybrid
-gate, then returns those whose entry falls inside the visible chart window.
+batched inference on grid @ step_bars for line segments plus a denser stride
+for sequential hybrid backtest PnL (capital-constrained re-entry after exit).
 """
 
 from __future__ import annotations
@@ -202,6 +201,286 @@ def _trade_net_pnl_from_linear_return(
     raise RuntimeError(f'Unexpected action for PnL: {action!r}')
 
 
+def _sample_indices_for_pnl_backtest(
+    max_sample_index: int,
+    stride: int,
+) -> list[int]:
+    if stride <= 0:
+        raise ValueError(f'pnl stride must be positive: {stride}')
+    return list(range(0, max_sample_index + 1, stride))
+
+
+def _merge_sorted_sample_indices(
+    first_indices: list[int],
+    second_indices: list[int],
+) -> list[int]:
+    merged: list[int] = []
+    seen: set[int] = set()
+    for sample_index in first_indices + second_indices:
+        if sample_index in seen:
+            continue
+        seen.add(sample_index)
+        merged.append(sample_index)
+    merged.sort()
+    return merged
+
+
+def _map_sample_indices_to_train(
+    sample_indices: list[int],
+    start_index: int,
+    inference_level0_to_raw: list[int],
+    raw_to_train_level0_row: dict[int, int],
+    train_dataset_length: int,
+) -> tuple[list[int], dict[int, int], int]:
+    mapped_sample_indices: list[int] = []
+    train_sample_index_by_inference_sample: dict[int, int] = {}
+    skipped_count = 0
+    for sample_index in sample_indices:
+        train_sample_index = _train_sample_index_for_inference_sample(
+            sample_index=sample_index,
+            start_index=start_index,
+            inference_level0_to_raw=inference_level0_to_raw,
+            raw_to_train_level0_row=raw_to_train_level0_row,
+        )
+        if train_sample_index is None:
+            skipped_count = skipped_count + 1
+            continue
+        if train_sample_index < 0 or train_sample_index >= train_dataset_length:
+            skipped_count = skipped_count + 1
+            continue
+        mapped_sample_indices.append(sample_index)
+        train_sample_index_by_inference_sample[sample_index] = train_sample_index
+    return mapped_sample_indices, train_sample_index_by_inference_sample, skipped_count
+
+
+def _run_inference_for_samples(
+    sample_indices: list[int],
+    train_sample_index_by_inference_sample: dict[int, int],
+    train_dataset: object,
+    symbol_id: str,
+) -> dict[int, dict[str, object]]:
+    inference_by_sample: dict[int, dict[str, object]] = {}
+    if len(sample_indices) == 0:
+        return inference_by_sample
+
+    total_chunks = (len(sample_indices) + BATCH_CHUNK_SIZE - 1) // BATCH_CHUNK_SIZE
+    for chunk_index, chunk_start in enumerate(
+        range(0, len(sample_indices), BATCH_CHUNK_SIZE),
+    ):
+        chunk_sample_indices = sample_indices[
+            chunk_start:chunk_start + BATCH_CHUNK_SIZE
+        ]
+        chunk_payloads = []
+        for sample_index in chunk_sample_indices:
+            train_sample_index = train_sample_index_by_inference_sample[sample_index]
+            chunk_payloads.append(
+                _prepare_payload_dict_from_train_sample(
+                    train_dataset=train_dataset,
+                    train_sample_index=train_sample_index,
+                ),
+            )
+        chunk_results = _call_inference_batch_api(chunk_payloads, symbol_id)
+        if len(chunk_results) != len(chunk_sample_indices):
+            raise RuntimeError(
+                'Batch inference result count mismatch: '
+                f'{len(chunk_results)} != {len(chunk_sample_indices)}',
+            )
+        for sample_index, inference_result in zip(
+            chunk_sample_indices,
+            chunk_results,
+            strict=True,
+        ):
+            inference_by_sample[sample_index] = inference_result
+        if (chunk_index + 1) % 10 == 0 or (chunk_index + 1) == total_chunks:
+            logger.info(
+                'Trade research inference: %d/%d batches, %d/%d samples',
+                chunk_index + 1,
+                total_chunks,
+                len(inference_by_sample),
+                len(sample_indices),
+            )
+    return inference_by_sample
+
+
+def _trade_pnl_for_sample(
+    sample_index: int,
+    inference_result: dict[str, object],
+    horizon_steps: int,
+    start_index: int,
+    inference_level0_to_raw: list[int],
+    train_level0_df: polars.DataFrame,
+    raw_to_train_level0_row: dict[int, int],
+) -> float | None:
+    entry_bar_index = start_index + sample_index
+    exit_bar_index = entry_bar_index + horizon_steps
+    if exit_bar_index >= len(inference_level0_to_raw):
+        return None
+
+    realized_linear_return = _realized_linear_return_train_aligned(
+        inference_entry_bar_index=entry_bar_index,
+        horizon_steps=horizon_steps,
+        inference_level0_to_raw=inference_level0_to_raw,
+        train_level0_df=train_level0_df,
+        raw_to_train_level0_row=raw_to_train_level0_row,
+    )
+    if realized_linear_return is None:
+        return None
+
+    backtest_direction = _direction_action_from_inference(inference_result)
+    return _trade_net_pnl_from_linear_return(
+        action=backtest_direction,
+        realized_linear_return=realized_linear_return,
+        round_trip_fee_rate=OKX_ROUND_TRIP_TAKER_FEE_RATE,
+    )
+
+
+def _next_cached_sample_index(
+    sample_index: int,
+    cached_sample_indices: list[int],
+) -> int | None:
+    left = 0
+    right = len(cached_sample_indices)
+    while left < right:
+        middle = (left + right) // 2
+        if cached_sample_indices[middle] < sample_index:
+            left = middle + 1
+        else:
+            right = middle
+    if left >= len(cached_sample_indices):
+        return None
+    return cached_sample_indices[left]
+
+
+def _compute_grid_hybrid_backtest_sum(
+    inference_by_sample: dict[int, dict[str, object]],
+    grid_sample_indices: list[int],
+    horizon_steps: int,
+    start_index: int,
+    inference_level0_to_raw: list[int],
+    train_level0_df: polars.DataFrame,
+    raw_to_train_level0_row: dict[int, int],
+    visible_min_start_trade_id: int | None,
+    visible_max_start_trade_id: int | None,
+    raw_df: polars.DataFrame,
+) -> tuple[float, int, float, int]:
+    net_pnl_sum = 0.0
+    trade_count = 0
+    visible_net_pnl_sum = 0.0
+    visible_trade_count = 0
+
+    for sample_index in grid_sample_indices:
+        if sample_index not in inference_by_sample:
+            continue
+        inference_result = inference_by_sample[sample_index]
+        if not _hybrid_backtest_allows_entry(inference_result):
+            continue
+
+        trade_pnl = _trade_pnl_for_sample(
+            sample_index=sample_index,
+            inference_result=inference_result,
+            horizon_steps=horizon_steps,
+            start_index=start_index,
+            inference_level0_to_raw=inference_level0_to_raw,
+            train_level0_df=train_level0_df,
+            raw_to_train_level0_row=raw_to_train_level0_row,
+        )
+        if trade_pnl is None:
+            continue
+
+        net_pnl_sum = net_pnl_sum + trade_pnl
+        trade_count = trade_count + 1
+
+        entry_bar_index = start_index + sample_index
+        entry_raw_index = inference_level0_to_raw[entry_bar_index]
+        entry_meta = _raw_bar_metadata(raw_df, entry_raw_index)
+        entry_start_trade_id = int(entry_meta['start_trade_id'])
+        if _segment_visible_by_start_trade_id(
+            entry_start_trade_id=entry_start_trade_id,
+            visible_min_start_trade_id=visible_min_start_trade_id,
+            visible_max_start_trade_id=visible_max_start_trade_id,
+        ):
+            visible_net_pnl_sum = visible_net_pnl_sum + trade_pnl
+            visible_trade_count = visible_trade_count + 1
+
+    return net_pnl_sum, trade_count, visible_net_pnl_sum, visible_trade_count
+
+
+def _compute_sequential_hybrid_backtest(
+    inference_by_sample: dict[int, dict[str, object]],
+    pnl_sample_indices: list[int],
+    max_sample_index: int,
+    horizon_steps: int,
+    start_index: int,
+    inference_level0_to_raw: list[int],
+    train_level0_df: polars.DataFrame,
+    raw_to_train_level0_row: dict[int, int],
+    visible_min_start_trade_id: int | None,
+    visible_max_start_trade_id: int | None,
+    raw_df: polars.DataFrame,
+) -> tuple[float, int, float, int]:
+    cached_sample_indices = sorted(
+        sample_index
+        for sample_index in pnl_sample_indices
+        if sample_index in inference_by_sample
+    )
+
+    net_pnl_sum = 0.0
+    trade_count = 0
+    visible_net_pnl_sum = 0.0
+    visible_trade_count = 0
+
+    sample_index = 0
+    while sample_index <= max_sample_index:
+        if sample_index not in inference_by_sample:
+            next_cached = _next_cached_sample_index(
+                sample_index=sample_index,
+                cached_sample_indices=cached_sample_indices,
+            )
+            if next_cached is None:
+                break
+            sample_index = next_cached
+
+        inference_result = inference_by_sample[sample_index]
+        if not _hybrid_backtest_allows_entry(inference_result):
+            sample_index = sample_index + 1
+            continue
+
+        if sample_index + horizon_steps > max_sample_index:
+            break
+
+        trade_pnl = _trade_pnl_for_sample(
+            sample_index=sample_index,
+            inference_result=inference_result,
+            horizon_steps=horizon_steps,
+            start_index=start_index,
+            inference_level0_to_raw=inference_level0_to_raw,
+            train_level0_df=train_level0_df,
+            raw_to_train_level0_row=raw_to_train_level0_row,
+        )
+        if trade_pnl is None:
+            sample_index = sample_index + 1
+            continue
+
+        net_pnl_sum = net_pnl_sum + trade_pnl
+        trade_count = trade_count + 1
+
+        entry_bar_index = start_index + sample_index
+        entry_raw_index = inference_level0_to_raw[entry_bar_index]
+        entry_meta = _raw_bar_metadata(raw_df, entry_raw_index)
+        entry_start_trade_id = int(entry_meta['start_trade_id'])
+        if _segment_visible_by_start_trade_id(
+            entry_start_trade_id=entry_start_trade_id,
+            visible_min_start_trade_id=visible_min_start_trade_id,
+            visible_max_start_trade_id=visible_max_start_trade_id,
+        ):
+            visible_net_pnl_sum = visible_net_pnl_sum + trade_pnl
+            visible_trade_count = visible_trade_count + 1
+
+        sample_index = sample_index + horizon_steps
+
+    return net_pnl_sum, trade_count, visible_net_pnl_sum, visible_trade_count
+
+
 def _row_value(row: dict[str, object], column_name: str) -> object:
     if column_name not in row:
         raise RuntimeError(f'Dataframe row missing column {column_name!r}')
@@ -292,26 +571,38 @@ def run_trade_research(
         horizon_steps=horizon_steps,
     )
 
-    train_sample_index_by_inference_sample: dict[int, int] = {}
-    mapped_sample_indices: list[int] = []
-    for sample_index in sample_indices:
-        train_sample_index = _train_sample_index_for_inference_sample(
-            sample_index=sample_index,
+    pnl_stride = settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE
+    pnl_sample_indices = _sample_indices_for_pnl_backtest(
+        max_sample_index=max_sample_index,
+        stride=pnl_stride,
+    )
+    inference_sample_indices = _merge_sorted_sample_indices(
+        first_indices=sample_indices,
+        second_indices=pnl_sample_indices,
+    )
+
+    mapped_inference_indices, train_sample_index_by_inference_sample, skipped_unmapped_samples = (
+        _map_sample_indices_to_train(
+            sample_indices=inference_sample_indices,
             start_index=start_index,
             inference_level0_to_raw=level0_to_raw_row_indices,
             raw_to_train_level0_row=raw_to_train_level0_row,
+            train_dataset_length=len(train_dataset),
         )
-        if train_sample_index is None:
-            continue
-        if train_sample_index < 0 or train_sample_index >= len(train_dataset):
-            continue
-        mapped_sample_indices.append(sample_index)
-        train_sample_index_by_inference_sample[sample_index] = train_sample_index
-    skipped_unmapped_samples = len(sample_indices) - len(mapped_sample_indices)
-    sample_indices = mapped_sample_indices
+    )
+    mapped_grid_indices = [
+        sample_index
+        for sample_index in sample_indices
+        if sample_index in train_sample_index_by_inference_sample
+    ]
+    mapped_pnl_indices = [
+        sample_index
+        for sample_index in pnl_sample_indices
+        if sample_index in train_sample_index_by_inference_sample
+    ]
     if skipped_unmapped_samples > 0:
         unmapped_note = (
-            f'skipped {skipped_unmapped_samples} grid samples without train-mode alignment'
+            f'skipped {skipped_unmapped_samples} samples without train-mode alignment'
         )
         if sample_selection_note is None:
             sample_selection_note = unmapped_note
@@ -319,12 +610,15 @@ def run_trade_research(
             sample_selection_note = f'{sample_selection_note}; {unmapped_note}'
 
     logger.info(
-        'Trade research: symbol=%s samples=%d step=%d horizon=%s '
-        'research_limit=%d level0=%d raw_df=%d start=%d '
+        'Trade research: symbol=%s grid_samples=%d pnl_samples=%d infer_samples=%d '
+        'step=%d pnl_stride=%d horizon=%s research_limit=%d level0=%d raw_df=%d start=%d '
         'visible_trade_id=[%s,%s] note=%s',
         symbol_id,
-        len(sample_indices),
+        len(mapped_grid_indices),
+        len(mapped_pnl_indices),
+        len(mapped_inference_indices),
         step_bars,
+        pnl_stride,
         eval_horizon,
         research_limit,
         level0_height,
@@ -336,20 +630,24 @@ def run_trade_research(
     )
 
     segments: list[dict[str, object]] = []
-    inference_results: list[tuple[int, dict[str, object]]] = []
     policy_trade_count = 0
     entry_allowed_count = 0
-    backtest_net_pnl_sum = 0.0
-    backtest_trade_count = 0
-    backtest_visible_net_pnl_sum = 0.0
-    backtest_visible_trade_count = 0
+    grid_backtest_net_pnl_sum = 0.0
+    grid_backtest_trade_count = 0
+    grid_backtest_visible_net_pnl_sum = 0.0
+    grid_backtest_visible_trade_count = 0
+    sequential_backtest_net_pnl_sum = 0.0
+    sequential_backtest_trade_count = 0
+    sequential_backtest_visible_net_pnl_sum = 0.0
+    sequential_backtest_visible_trade_count = 0
 
-    if len(sample_indices) == 0:
+    if len(mapped_inference_indices) == 0:
         return {
             'symbol_id': symbol_id,
             'eval_horizon': eval_horizon,
             'step_bars': step_bars,
             'research_limit': research_limit,
+            'pnl_stride': pnl_stride,
             'required_rows': required_rows,
             'bars_loaded': int(df.height),
             'level0_rows': level0_height,
@@ -358,8 +656,17 @@ def run_trade_research(
             'visible_min_start_trade_id': visible_min_start_trade_id,
             'visible_max_start_trade_id': visible_max_start_trade_id,
             'sample_count': 0,
+            'pnl_sample_count': 0,
             'trade_inference_count': 0,
             'entry_allowed_count': 0,
+            'grid_backtest_net_pnl_sum': 0.0,
+            'grid_backtest_trade_count': 0,
+            'grid_backtest_visible_net_pnl_sum': 0.0,
+            'grid_backtest_visible_trade_count': 0,
+            'sequential_backtest_net_pnl_sum': 0.0,
+            'sequential_backtest_trade_count': 0,
+            'sequential_backtest_visible_net_pnl_sum': 0.0,
+            'sequential_backtest_visible_trade_count': 0,
             'backtest_net_pnl_sum': 0.0,
             'backtest_trade_count': 0,
             'backtest_visible_net_pnl_sum': 0.0,
@@ -371,47 +678,53 @@ def run_trade_research(
         }
 
     try:
-        total_chunks = (
-            (len(sample_indices) + BATCH_CHUNK_SIZE - 1) // BATCH_CHUNK_SIZE
+        inference_by_sample = _run_inference_for_samples(
+            sample_indices=mapped_inference_indices,
+            train_sample_index_by_inference_sample=train_sample_index_by_inference_sample,
+            train_dataset=train_dataset,
+            symbol_id=symbol_id,
         )
-        for chunk_index, chunk_start in enumerate(
-            range(0, len(sample_indices), BATCH_CHUNK_SIZE),
-        ):
-            chunk_sample_indices = sample_indices[
-                chunk_start:chunk_start + BATCH_CHUNK_SIZE
-            ]
-            chunk_payloads = []
-            for sample_index in chunk_sample_indices:
-                train_sample_index = train_sample_index_by_inference_sample[sample_index]
-                chunk_payloads.append(
-                    _prepare_payload_dict_from_train_sample(
-                        train_dataset=train_dataset,
-                        train_sample_index=train_sample_index,
-                    ),
-                )
-            chunk_results = _call_inference_batch_api(chunk_payloads, symbol_id)
-            if len(chunk_results) != len(chunk_sample_indices):
-                raise RuntimeError(
-                    'Batch inference result count mismatch: '
-                    f'{len(chunk_results)} != {len(chunk_sample_indices)}',
-                )
-            for sample_index, inference_result in zip(
-                chunk_sample_indices,
-                chunk_results,
-                strict=True,
-            ):
-                inference_results.append((sample_index, inference_result))
-            if (chunk_index + 1) % 10 == 0 or (chunk_index + 1) == total_chunks:
-                logger.info(
-                    'Trade research inference: %d/%d batches, %d/%d samples',
-                    chunk_index + 1,
-                    total_chunks,
-                    len(inference_results),
-                    len(sample_indices),
-                )
+
+        (
+            grid_backtest_net_pnl_sum,
+            grid_backtest_trade_count,
+            grid_backtest_visible_net_pnl_sum,
+            grid_backtest_visible_trade_count,
+        ) = _compute_grid_hybrid_backtest_sum(
+            inference_by_sample=inference_by_sample,
+            grid_sample_indices=mapped_grid_indices,
+            horizon_steps=horizon_steps,
+            start_index=start_index,
+            inference_level0_to_raw=level0_to_raw_row_indices,
+            train_level0_df=train_level0_df,
+            raw_to_train_level0_row=raw_to_train_level0_row,
+            visible_min_start_trade_id=visible_min_start_trade_id,
+            visible_max_start_trade_id=visible_max_start_trade_id,
+            raw_df=df,
+        )
+
+        (
+            sequential_backtest_net_pnl_sum,
+            sequential_backtest_trade_count,
+            sequential_backtest_visible_net_pnl_sum,
+            sequential_backtest_visible_trade_count,
+        ) = _compute_sequential_hybrid_backtest(
+            inference_by_sample=inference_by_sample,
+            pnl_sample_indices=mapped_pnl_indices,
+            max_sample_index=max_sample_index,
+            horizon_steps=horizon_steps,
+            start_index=start_index,
+            inference_level0_to_raw=level0_to_raw_row_indices,
+            train_level0_df=train_level0_df,
+            raw_to_train_level0_row=raw_to_train_level0_row,
+            visible_min_start_trade_id=visible_min_start_trade_id,
+            visible_max_start_trade_id=visible_max_start_trade_id,
+            raw_df=df,
+        )
 
         prediction_key = _prediction_key_for_horizon(eval_horizon)
-        for sample_index, inference_result in inference_results:
+        for sample_index in mapped_grid_indices:
+            inference_result = inference_by_sample[sample_index]
             if 'policy' not in inference_result:
                 continue
             policy = inference_result['policy']
@@ -421,51 +734,16 @@ def run_trade_research(
             if action in ('long', 'short'):
                 policy_trade_count = policy_trade_count + 1
 
-            entry_bar_index = start_index + sample_index
-            exit_bar_index = entry_bar_index + horizon_steps
-            if exit_bar_index >= level0_height:
-                continue
-
-            realized_linear_return = _realized_linear_return_train_aligned(
-                inference_entry_bar_index=entry_bar_index,
-                horizon_steps=horizon_steps,
-                inference_level0_to_raw=level0_to_raw_row_indices,
-                train_level0_df=train_level0_df,
-                raw_to_train_level0_row=raw_to_train_level0_row,
-            )
-            if realized_linear_return is None:
-                continue
-
-            if _hybrid_backtest_allows_entry(inference_result):
-                backtest_direction = _direction_action_from_inference(
-                    inference_result,
-                )
-                backtest_trade_pnl = _trade_net_pnl_from_linear_return(
-                    action=backtest_direction,
-                    realized_linear_return=realized_linear_return,
-                    round_trip_fee_rate=OKX_ROUND_TRIP_TAKER_FEE_RATE,
-                )
-                backtest_net_pnl_sum = backtest_net_pnl_sum + backtest_trade_pnl
-                backtest_trade_count = backtest_trade_count + 1
-
-                entry_raw_index = level0_to_raw_row_indices[entry_bar_index]
-                entry_meta = _raw_bar_metadata(df, entry_raw_index)
-                entry_start_trade_id = int(entry_meta['start_trade_id'])
-                if _segment_visible_by_start_trade_id(
-                    entry_start_trade_id=entry_start_trade_id,
-                    visible_min_start_trade_id=visible_min_start_trade_id,
-                    visible_max_start_trade_id=visible_max_start_trade_id,
-                ):
-                    backtest_visible_net_pnl_sum = (
-                        backtest_visible_net_pnl_sum + backtest_trade_pnl
-                    )
-                    backtest_visible_trade_count = backtest_visible_trade_count + 1
-
             recommended_action = _recommended_entry_action(inference_result)
             if recommended_action is None:
                 continue
 
             entry_allowed_count = entry_allowed_count + 1
+
+            entry_bar_index = start_index + sample_index
+            exit_bar_index = entry_bar_index + horizon_steps
+            if exit_bar_index >= level0_height:
+                continue
 
             entry_raw_index = level0_to_raw_row_indices[entry_bar_index]
             exit_raw_index = level0_to_raw_row_indices[exit_bar_index]
@@ -530,6 +808,7 @@ def run_trade_research(
         'eval_horizon': eval_horizon,
         'step_bars': step_bars,
         'research_limit': research_limit,
+        'pnl_stride': pnl_stride,
         'required_rows': required_rows,
         'bars_loaded': int(df.height),
         'level0_rows': level0_height,
@@ -537,13 +816,22 @@ def run_trade_research(
         'start_index': start_index,
         'visible_min_start_trade_id': visible_min_start_trade_id,
         'visible_max_start_trade_id': visible_max_start_trade_id,
-        'sample_count': len(sample_indices),
+        'sample_count': len(mapped_grid_indices),
+        'pnl_sample_count': len(mapped_pnl_indices),
         'trade_inference_count': policy_trade_count,
         'entry_allowed_count': entry_allowed_count,
-        'backtest_net_pnl_sum': backtest_net_pnl_sum,
-        'backtest_trade_count': backtest_trade_count,
-        'backtest_visible_net_pnl_sum': backtest_visible_net_pnl_sum,
-        'backtest_visible_trade_count': backtest_visible_trade_count,
+        'grid_backtest_net_pnl_sum': grid_backtest_net_pnl_sum,
+        'grid_backtest_trade_count': grid_backtest_trade_count,
+        'grid_backtest_visible_net_pnl_sum': grid_backtest_visible_net_pnl_sum,
+        'grid_backtest_visible_trade_count': grid_backtest_visible_trade_count,
+        'sequential_backtest_net_pnl_sum': sequential_backtest_net_pnl_sum,
+        'sequential_backtest_trade_count': sequential_backtest_trade_count,
+        'sequential_backtest_visible_net_pnl_sum': sequential_backtest_visible_net_pnl_sum,
+        'sequential_backtest_visible_trade_count': sequential_backtest_visible_trade_count,
+        'backtest_net_pnl_sum': sequential_backtest_net_pnl_sum,
+        'backtest_trade_count': sequential_backtest_trade_count,
+        'backtest_visible_net_pnl_sum': sequential_backtest_visible_net_pnl_sum,
+        'backtest_visible_trade_count': sequential_backtest_visible_trade_count,
         'round_trip_fee_rate': OKX_ROUND_TRIP_TAKER_FEE_RATE,
         'segment_count': len(segments),
         'segments': segments,
