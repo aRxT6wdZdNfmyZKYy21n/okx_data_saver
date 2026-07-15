@@ -124,17 +124,69 @@ def _pred_target_price(
     return float(entry_price * math.pow(2.0, pred_eval_log2))
 
 
-def _trade_net_pnl(
+def _realized_linear_return_level0(
+    level0_df: polars.DataFrame,
+    entry_bar_index: int,
+    exit_bar_index: int,
+) -> float:
+    entry_log2 = float(level0_df['close_price_log2'][entry_bar_index])
+    exit_log2 = float(level0_df['close_price_log2'][exit_bar_index])
+    return math.pow(2.0, exit_log2 - entry_log2) - 1.0
+
+
+def _direction_action_from_inference(
+    inference_result: dict[str, object],
+) -> str:
+    policy = inference_result['policy']
+    if not isinstance(policy, dict):
+        raise RuntimeError('inference policy must be a dict')
+    if 'probabilities' not in policy:
+        raise RuntimeError('inference policy missing probabilities')
+    probabilities = policy['probabilities']
+    if not isinstance(probabilities, dict):
+        raise RuntimeError('inference policy probabilities must be a dict')
+    if 'long' not in probabilities:
+        raise RuntimeError('inference policy probabilities missing long')
+    if 'short' not in probabilities:
+        raise RuntimeError('inference policy probabilities missing short')
+    long_probability = float(probabilities['long'])
+    short_probability = float(probabilities['short'])
+    if long_probability >= short_probability:
+        return 'long'
+    return 'short'
+
+
+def _hybrid_backtest_allows_entry(
+    inference_result: dict[str, object],
+) -> bool:
+    if 'entry_hint' not in inference_result:
+        return False
+    entry_hint = inference_result['entry_hint']
+    if not isinstance(entry_hint, dict):
+        return False
+    if 'hint_mode' not in entry_hint:
+        return False
+    hint_mode = str(entry_hint['hint_mode'])
+    if hint_mode == 'snr_only':
+        if 'snr_blocks_entry' not in entry_hint:
+            return False
+        return not bool(entry_hint['snr_blocks_entry'])
+    if hint_mode == 'hybrid_gate_snr':
+        if 'hybrid_blocks_entry' not in entry_hint:
+            return False
+        return not bool(entry_hint['hybrid_blocks_entry'])
+    raise RuntimeError(f'Unknown entry_hint hint_mode: {hint_mode!r}')
+
+
+def _trade_net_pnl_from_linear_return(
     action: str,
-    entry_close: float,
-    exit_close: float,
+    realized_linear_return: float,
     round_trip_fee_rate: float,
 ) -> float:
-    realized_return = exit_close / entry_close - 1.0
     if action == 'long':
-        return realized_return - round_trip_fee_rate
+        return realized_linear_return - round_trip_fee_rate
     if action == 'short':
-        return -realized_return - round_trip_fee_rate
+        return -realized_linear_return - round_trip_fee_rate
     raise RuntimeError(f'Unexpected action for PnL: {action!r}')
 
 
@@ -273,9 +325,10 @@ def run_trade_research(
     inference_results: list[tuple[int, dict[str, object]]] = []
     policy_trade_count = 0
     entry_allowed_count = 0
-    entry_allowed_net_pnl_sum = 0.0
-    entry_allowed_pnl_trade_count = 0
-    visible_net_pnl_sum = 0.0
+    backtest_net_pnl_sum = 0.0
+    backtest_trade_count = 0
+    backtest_visible_net_pnl_sum = 0.0
+    backtest_visible_trade_count = 0
 
     if len(sample_indices) == 0:
         return {
@@ -293,9 +346,10 @@ def run_trade_research(
             'sample_count': 0,
             'trade_inference_count': 0,
             'entry_allowed_count': 0,
-            'entry_allowed_net_pnl_sum': 0.0,
-            'entry_allowed_pnl_trade_count': 0,
-            'visible_net_pnl_sum': 0.0,
+            'backtest_net_pnl_sum': 0.0,
+            'backtest_trade_count': 0,
+            'backtest_visible_net_pnl_sum': 0.0,
+            'backtest_visible_trade_count': 0,
             'round_trip_fee_rate': OKX_ROUND_TRIP_TAKER_FEE_RATE,
             'segment_count': 0,
             'segments': segments,
@@ -345,10 +399,44 @@ def run_trade_research(
             if 'action' not in policy:
                 continue
             action = str(policy['action'])
-            if action not in ('long', 'short'):
+            if action in ('long', 'short'):
+                policy_trade_count = policy_trade_count + 1
+
+            entry_bar_index = start_index + sample_index
+            exit_bar_index = entry_bar_index + horizon_steps
+            if exit_bar_index >= level0_height:
                 continue
 
-            policy_trade_count = policy_trade_count + 1
+            realized_linear_return = _realized_linear_return_level0(
+                level0_df=level0_df,
+                entry_bar_index=entry_bar_index,
+                exit_bar_index=exit_bar_index,
+            )
+
+            if _hybrid_backtest_allows_entry(inference_result):
+                backtest_direction = _direction_action_from_inference(
+                    inference_result,
+                )
+                backtest_trade_pnl = _trade_net_pnl_from_linear_return(
+                    action=backtest_direction,
+                    realized_linear_return=realized_linear_return,
+                    round_trip_fee_rate=OKX_ROUND_TRIP_TAKER_FEE_RATE,
+                )
+                backtest_net_pnl_sum = backtest_net_pnl_sum + backtest_trade_pnl
+                backtest_trade_count = backtest_trade_count + 1
+
+                entry_raw_index = level0_to_raw_row_indices[entry_bar_index]
+                entry_meta = _raw_bar_metadata(df, entry_raw_index)
+                entry_start_trade_id = int(entry_meta['start_trade_id'])
+                if _segment_visible_by_start_trade_id(
+                    entry_start_trade_id=entry_start_trade_id,
+                    visible_min_start_trade_id=visible_min_start_trade_id,
+                    visible_max_start_trade_id=visible_max_start_trade_id,
+                ):
+                    backtest_visible_net_pnl_sum = (
+                        backtest_visible_net_pnl_sum + backtest_trade_pnl
+                    )
+                    backtest_visible_trade_count = backtest_visible_trade_count + 1
 
             recommended_action = _recommended_entry_action(inference_result)
             if recommended_action is None:
@@ -356,29 +444,11 @@ def run_trade_research(
 
             entry_allowed_count = entry_allowed_count + 1
 
-            entry_bar_index = start_index + sample_index
-            exit_bar_index = entry_bar_index + horizon_steps
-            if exit_bar_index >= level0_height:
-                continue
-
             entry_raw_index = level0_to_raw_row_indices[entry_bar_index]
             exit_raw_index = level0_to_raw_row_indices[exit_bar_index]
             entry_meta = _raw_bar_metadata(df, entry_raw_index)
             exit_meta = _raw_bar_metadata(df, exit_raw_index)
             entry_start_trade_id = int(entry_meta['start_trade_id'])
-
-            entry_close = float(entry_meta['close_price'])
-            entry_open = float(entry_meta['open_price'])
-            exit_close = float(exit_meta['close_price'])
-
-            trade_net_pnl = _trade_net_pnl(
-                action=recommended_action,
-                entry_close=entry_close,
-                exit_close=exit_close,
-                round_trip_fee_rate=OKX_ROUND_TRIP_TAKER_FEE_RATE,
-            )
-            entry_allowed_net_pnl_sum = entry_allowed_net_pnl_sum + trade_net_pnl
-            entry_allowed_pnl_trade_count = entry_allowed_pnl_trade_count + 1
 
             segment_visible = _segment_visible_by_start_trade_id(
                 entry_start_trade_id=entry_start_trade_id,
@@ -388,7 +458,9 @@ def run_trade_research(
             if not segment_visible:
                 continue
 
-            visible_net_pnl_sum = visible_net_pnl_sum + trade_net_pnl
+            entry_close = float(entry_meta['close_price'])
+            entry_open = float(entry_meta['open_price'])
+            exit_close = float(exit_meta['close_price'])
 
             pred_eval_log2 = 0.0
             if 'predictions' in inference_result:
@@ -445,9 +517,10 @@ def run_trade_research(
         'sample_count': len(sample_indices),
         'trade_inference_count': policy_trade_count,
         'entry_allowed_count': entry_allowed_count,
-        'entry_allowed_net_pnl_sum': entry_allowed_net_pnl_sum,
-        'entry_allowed_pnl_trade_count': entry_allowed_pnl_trade_count,
-        'visible_net_pnl_sum': visible_net_pnl_sum,
+        'backtest_net_pnl_sum': backtest_net_pnl_sum,
+        'backtest_trade_count': backtest_trade_count,
+        'backtest_visible_net_pnl_sum': backtest_visible_net_pnl_sum,
+        'backtest_visible_trade_count': backtest_visible_trade_count,
         'round_trip_fee_rate': OKX_ROUND_TRIP_TAKER_FEE_RATE,
         'segment_count': len(segments),
         'segments': segments,

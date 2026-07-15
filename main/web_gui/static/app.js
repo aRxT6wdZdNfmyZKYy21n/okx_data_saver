@@ -1681,20 +1681,29 @@
         const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
         const entryAllowedCount = payload.entry_allowed_count != null ? payload.entry_allowed_count : '?';
         const barsLoaded = payload.bars_loaded != null ? payload.bars_loaded : '?';
-        const entryAllowedNetPnl = payload.entry_allowed_net_pnl_sum;
-        const visibleNetPnl = payload.visible_net_pnl_sum;
+        const backtestNetPnl = payload.backtest_net_pnl_sum;
+        const backtestTradeCount = payload.backtest_trade_count;
+        const backtestVisibleNetPnl = payload.backtest_visible_net_pnl_sum;
+        const backtestVisibleTradeCount = payload.backtest_visible_trade_count;
         let statusText =
           `Trade research: ${tradeResearchSegments.length} на графике ` +
           `(${entryAllowedCount} entry ok / ${tradeCount} policy long/short из ${sampleCount} точек @ ${TRADE_RESEARCH_EVAL_HORIZON}, ` +
           `контекст ${barsLoaded} x1)`;
-        if (entryAllowedNetPnl != null) {
+        if (backtestNetPnl != null && backtestTradeCount != null) {
           statusText =
             statusText +
-            `, net PnL ${formatTradeResearchNetPnl(entryAllowedNetPnl)} (entry ok)`;
-          if (visibleNetPnl != null && tradeResearchSegments.length > 0) {
+            `, net PnL ${formatTradeResearchNetPnl(backtestNetPnl)} ` +
+            `(${backtestTradeCount} hybrid bt)`;
+          if (
+            backtestVisibleNetPnl != null &&
+            backtestVisibleTradeCount != null &&
+            tradeResearchSegments.length > 0 &&
+            Number(backtestVisibleTradeCount) !== Number(backtestTradeCount)
+          ) {
             statusText =
               statusText +
-              ` / ${formatTradeResearchNetPnl(visibleNetPnl)} на графике`;
+              ` / ${formatTradeResearchNetPnl(backtestVisibleNetPnl)} ` +
+              `(${backtestVisibleTradeCount} на графике)`;
           }
         }
         if (payload.sample_selection_note) {
