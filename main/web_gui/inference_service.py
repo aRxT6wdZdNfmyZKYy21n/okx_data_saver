@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars
 from settings import settings
-from trading_bot_dataset.src.dataset import HybridTradeDatasetInference
+from trading_bot_dataset.src.dataset import HybridTradeDataset, HybridTradeDatasetInference
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,89 @@ def _build_dataset(
     )
 
 
+def _build_train_dataset(
+    df: polars.DataFrame,
+    metadata: dict,
+) -> HybridTradeDataset:
+    sequence_length = int(metadata['sequence_length'])
+    dataset_cfg = metadata['dataset_config']
+    model_cfg = metadata['model_config']
+    model_cfg_omega = OmegaConf.create(
+        {
+            'params': {
+                'scale_features': model_cfg['scale_features'],
+            },
+        },
+    )
+    return HybridTradeDataset(
+        dataframe=df,
+        sequence_length=sequence_length,
+        raw_columns=list(dataset_cfg['raw_cols']),
+        static_columns=list(dataset_cfg['static_cols']),
+        target_cols=list(dataset_cfg['target_cols']),
+        aggregation_levels=list(dataset_cfg['aggregation_levels']),
+        use_indicators=bool(dataset_cfg['use_indicators']),
+        indicator_cols=list(dataset_cfg['indicator_cols']),
+        model_config=model_cfg_omega,
+        inference_mode=False,
+    )
+
+
+def _build_level0_to_raw_row_indices(
+    raw_df: polars.DataFrame,
+    level0_df: polars.DataFrame,
+) -> list[int]:
+    level0_log2 = level0_df['close_price_log2'].to_numpy()
+    raw_log2 = raw_df['close_price'].log(base=2).to_numpy()
+
+    raw_indices: list[int] = []
+    raw_pos = 0
+    raw_len = len(raw_log2)
+
+    for level0_pos, target_log2 in enumerate(level0_log2):
+        found = False
+        while raw_pos < raw_len:
+            if abs(raw_log2[raw_pos] - target_log2) <= 1e-4:
+                raw_indices.append(raw_pos)
+                raw_pos = raw_pos + 1
+                found = True
+                break
+            raw_pos = raw_pos + 1
+        if not found:
+            raise RuntimeError(
+                f'Failed to align level0 row {level0_pos} to raw dataframe',
+            )
+
+    return raw_indices
+
+
+def _build_train_level0_context(
+    df: polars.DataFrame,
+    metadata: dict,
+) -> tuple[HybridTradeDataset, polars.DataFrame, dict[int, int]]:
+    train_dataset = _build_train_dataset(df=df, metadata=metadata)
+    train_level0_df = train_dataset.aggregated_data[0]
+    train_level0_to_raw = _build_level0_to_raw_row_indices(df, train_level0_df)
+    raw_to_train_level0_row: dict[int, int] = {}
+    for train_row, raw_row in enumerate(train_level0_to_raw):
+        raw_to_train_level0_row[raw_row] = train_row
+    return train_dataset, train_level0_df, raw_to_train_level0_row
+
+
+def _train_sample_index_for_inference_sample(
+    sample_index: int,
+    start_index: int,
+    inference_level0_to_raw: list[int],
+    raw_to_train_level0_row: dict[int, int],
+) -> int | None:
+    inference_entry_bar_index = start_index + sample_index
+    raw_entry_row = inference_level0_to_raw[inference_entry_bar_index]
+    if raw_entry_row not in raw_to_train_level0_row:
+        return None
+    train_entry_row = raw_to_train_level0_row[raw_entry_row]
+    return train_entry_row - start_index
+
+
 def _prepare_payload_dict_from_sample(
     dataset: HybridTradeDatasetInference,
     sample_index: int,
@@ -72,16 +155,75 @@ def _prepare_payload_dict_from_sample(
     }
 
 
+def _prepare_payload_dict_from_train_sample(
+    train_dataset: HybridTradeDataset,
+    train_sample_index: int,
+) -> dict[str, object]:
+    x_seq, x_static, _targets = train_dataset[train_sample_index]
+    normalized_x_seq: dict[str, object] = {}
+    for scale_name, scale_tensor in x_seq.items():
+        normalized_x_seq[scale_name] = scale_tensor.unsqueeze(0).clone()
+    return {
+        'x_seq': normalized_x_seq,
+        'x_static': x_static.unsqueeze(0).clone(),
+    }
+
+
+def _prepare_train_aligned_payload_dict(
+    df: polars.DataFrame,
+    metadata: dict,
+    inference_dataset: HybridTradeDatasetInference,
+    sample_index: int,
+) -> dict[str, object]:
+    train_dataset, _train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
+        df=df,
+        metadata=metadata,
+    )
+    start_index = int(inference_dataset.dataset.start_index)
+    level0_df = inference_dataset.dataset.aggregated_data[0]
+    inference_level0_to_raw = _build_level0_to_raw_row_indices(df, level0_df)
+    train_sample_index = _train_sample_index_for_inference_sample(
+        sample_index=sample_index,
+        start_index=start_index,
+        inference_level0_to_raw=inference_level0_to_raw,
+        raw_to_train_level0_row=raw_to_train_level0_row,
+    )
+    if train_sample_index is not None:
+        if train_sample_index >= 0 and train_sample_index < len(train_dataset):
+            logger.info(
+                'Train-mode payload: inference sample %d -> train sample %d',
+                sample_index,
+                train_sample_index,
+            )
+            return _prepare_payload_dict_from_train_sample(
+                train_dataset=train_dataset,
+                train_sample_index=train_sample_index,
+            )
+    logger.warning(
+        'No train-mode alignment for inference sample %d; using inference-mode tensors',
+        sample_index,
+    )
+    return _prepare_payload_dict_from_sample(
+        dataset=inference_dataset,
+        sample_index=sample_index,
+    )
+
+
 def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     metadata = fetch_inference_metadata()
-    dataset = _build_dataset(df, metadata)
+    inference_dataset = _build_dataset(df, metadata)
 
-    last_index = len(dataset) - 1
+    last_index = len(inference_dataset) - 1
     if last_index < 0:
         raise RuntimeError('No samples available after dataset preparation')
 
-    logger.info(f'Last index: {last_index}')
-    return _prepare_payload_dict_from_sample(dataset, last_index)
+    logger.info('Last index: %d', last_index)
+    return _prepare_train_aligned_payload_dict(
+        df=df,
+        metadata=metadata,
+        inference_dataset=inference_dataset,
+        sample_index=last_index,
+    )
 
 
 def _encode_payload(payload_dict: dict) -> bytes:
@@ -113,7 +255,7 @@ def run_remote_inference(symbol_id: str, limit: int) -> dict[str, object]:
         payload_dict = _prepare_payload_dict_from_df(df)
         encoded_payload = _encode_payload(payload_dict)
 
-        logger.info(f'Payload size: {len(encoded_payload)}')
+        logger.info('Payload size: %d', len(encoded_payload))
 
         response = httpx.post(
             f'{settings.WEB_GUI_INFERENCE_API_BASE_URL}/inference',

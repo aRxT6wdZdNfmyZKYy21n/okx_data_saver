@@ -16,16 +16,18 @@ import traceback
 import httpx
 import polars
 from fastapi import HTTPException
-from omegaconf import OmegaConf
 
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars
 from main.web_gui.inference_service import (
     _build_dataset,
+    _build_level0_to_raw_row_indices,
+    _build_train_level0_context,
     _encode_payload,
+    _prepare_payload_dict_from_train_sample,
+    _train_sample_index_for_inference_sample,
     fetch_inference_metadata,
 )
-from trading_bot_dataset.src.dataset import HybridTradeDataset
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -125,68 +127,6 @@ def _pred_target_price(
     return float(entry_price * math.pow(2.0, pred_eval_log2))
 
 
-def _build_train_level0_context(
-    df: polars.DataFrame,
-    metadata: dict[str, object],
-) -> tuple[HybridTradeDataset, polars.DataFrame, dict[int, int]]:
-    sequence_length = int(metadata['sequence_length'])
-    dataset_cfg = metadata['dataset_config']
-    model_cfg = metadata['model_config']
-    model_cfg_omega = OmegaConf.create(
-        {
-            'params': {
-                'scale_features': model_cfg['scale_features'],
-            },
-        },
-    )
-    train_dataset = HybridTradeDataset(
-        dataframe=df,
-        sequence_length=sequence_length,
-        raw_columns=list(dataset_cfg['raw_cols']),
-        static_columns=list(dataset_cfg['static_cols']),
-        target_cols=list(dataset_cfg['target_cols']),
-        aggregation_levels=list(dataset_cfg['aggregation_levels']),
-        use_indicators=bool(dataset_cfg['use_indicators']),
-        indicator_cols=list(dataset_cfg['indicator_cols']),
-        model_config=model_cfg_omega,
-        inference_mode=False,
-    )
-    train_level0_df = train_dataset.aggregated_data[0]
-    train_level0_to_raw = _build_level0_to_raw_row_indices(df, train_level0_df)
-    raw_to_train_level0_row: dict[int, int] = {}
-    for train_row, raw_row in enumerate(train_level0_to_raw):
-        raw_to_train_level0_row[raw_row] = train_row
-    return train_dataset, train_level0_df, raw_to_train_level0_row
-
-
-def _train_sample_index_for_inference_sample(
-    sample_index: int,
-    start_index: int,
-    inference_level0_to_raw: list[int],
-    raw_to_train_level0_row: dict[int, int],
-) -> int | None:
-    inference_entry_bar_index = start_index + sample_index
-    raw_entry_row = inference_level0_to_raw[inference_entry_bar_index]
-    if raw_entry_row not in raw_to_train_level0_row:
-        return None
-    train_entry_row = raw_to_train_level0_row[raw_entry_row]
-    return train_entry_row - start_index
-
-
-def _prepare_payload_dict_from_train_sample(
-    train_dataset: HybridTradeDataset,
-    train_sample_index: int,
-) -> dict[str, object]:
-    x_seq, x_static, _targets = train_dataset[train_sample_index]
-    normalized_x_seq: dict[str, object] = {}
-    for scale_name, scale_tensor in x_seq.items():
-        normalized_x_seq[scale_name] = scale_tensor.unsqueeze(0).clone()
-    return {
-        'x_seq': normalized_x_seq,
-        'x_static': x_static.unsqueeze(0).clone(),
-    }
-
-
 def _realized_linear_return_train_aligned(
     inference_entry_bar_index: int,
     horizon_steps: int,
@@ -266,34 +206,6 @@ def _row_value(row: dict[str, object], column_name: str) -> object:
     if column_name not in row:
         raise RuntimeError(f'Dataframe row missing column {column_name!r}')
     return row[column_name]
-
-
-def _build_level0_to_raw_row_indices(
-    raw_df: polars.DataFrame,
-    level0_df: polars.DataFrame,
-) -> list[int]:
-    level0_log2 = level0_df['close_price_log2'].to_numpy()
-    raw_log2 = raw_df['close_price'].log(base=2).to_numpy()
-
-    raw_indices: list[int] = []
-    raw_pos = 0
-    raw_len = len(raw_log2)
-
-    for level0_pos, target_log2 in enumerate(level0_log2):
-        found = False
-        while raw_pos < raw_len:
-            if abs(raw_log2[raw_pos] - target_log2) <= 1e-4:
-                raw_indices.append(raw_pos)
-                raw_pos = raw_pos + 1
-                found = True
-                break
-            raw_pos = raw_pos + 1
-        if not found:
-            raise RuntimeError(
-                f'Failed to align level0 row {level0_pos} to raw dataframe',
-            )
-
-    return raw_indices
 
 
 def _raw_bar_metadata(
