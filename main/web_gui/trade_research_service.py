@@ -33,6 +33,8 @@ DEFAULT_EVAL_HORIZON = 'x2048'
 DEFAULT_STEP_BARS = 2048
 BATCH_CHUNK_SIZE = 32
 BATCH_HTTP_TIMEOUT_SEC = 600.0
+# OKX USDT-margined perpetual, regular tier (taker 0.05% per side) — как в trading_bot backtest
+OKX_ROUND_TRIP_TAKER_FEE_RATE = 0.0005 * 2.0
 
 
 def horizon_steps_from_name(horizon_name: str) -> int:
@@ -120,6 +122,20 @@ def _pred_target_price(
     pred_eval_log2: float,
 ) -> float:
     return float(entry_price * math.pow(2.0, pred_eval_log2))
+
+
+def _trade_net_pnl(
+    action: str,
+    entry_close: float,
+    exit_close: float,
+    round_trip_fee_rate: float,
+) -> float:
+    realized_return = exit_close / entry_close - 1.0
+    if action == 'long':
+        return realized_return - round_trip_fee_rate
+    if action == 'short':
+        return -realized_return - round_trip_fee_rate
+    raise RuntimeError(f'Unexpected action for PnL: {action!r}')
 
 
 def _row_value(row: dict[str, object], column_name: str) -> object:
@@ -257,6 +273,9 @@ def run_trade_research(
     inference_results: list[tuple[int, dict[str, object]]] = []
     policy_trade_count = 0
     entry_allowed_count = 0
+    entry_allowed_net_pnl_sum = 0.0
+    entry_allowed_pnl_trade_count = 0
+    visible_net_pnl_sum = 0.0
 
     if len(sample_indices) == 0:
         return {
@@ -274,6 +293,10 @@ def run_trade_research(
             'sample_count': 0,
             'trade_inference_count': 0,
             'entry_allowed_count': 0,
+            'entry_allowed_net_pnl_sum': 0.0,
+            'entry_allowed_pnl_trade_count': 0,
+            'visible_net_pnl_sum': 0.0,
+            'round_trip_fee_rate': OKX_ROUND_TRIP_TAKER_FEE_RATE,
             'segment_count': 0,
             'segments': segments,
             'sample_selection_note': sample_selection_note,
@@ -344,16 +367,28 @@ def run_trade_research(
             exit_meta = _raw_bar_metadata(df, exit_raw_index)
             entry_start_trade_id = int(entry_meta['start_trade_id'])
 
-            if not _segment_visible_by_start_trade_id(
-                entry_start_trade_id=entry_start_trade_id,
-                visible_min_start_trade_id=visible_min_start_trade_id,
-                visible_max_start_trade_id=visible_max_start_trade_id,
-            ):
-                continue
-
             entry_close = float(entry_meta['close_price'])
             entry_open = float(entry_meta['open_price'])
             exit_close = float(exit_meta['close_price'])
+
+            trade_net_pnl = _trade_net_pnl(
+                action=recommended_action,
+                entry_close=entry_close,
+                exit_close=exit_close,
+                round_trip_fee_rate=OKX_ROUND_TRIP_TAKER_FEE_RATE,
+            )
+            entry_allowed_net_pnl_sum = entry_allowed_net_pnl_sum + trade_net_pnl
+            entry_allowed_pnl_trade_count = entry_allowed_pnl_trade_count + 1
+
+            segment_visible = _segment_visible_by_start_trade_id(
+                entry_start_trade_id=entry_start_trade_id,
+                visible_min_start_trade_id=visible_min_start_trade_id,
+                visible_max_start_trade_id=visible_max_start_trade_id,
+            )
+            if not segment_visible:
+                continue
+
+            visible_net_pnl_sum = visible_net_pnl_sum + trade_net_pnl
 
             pred_eval_log2 = 0.0
             if 'predictions' in inference_result:
@@ -410,6 +445,10 @@ def run_trade_research(
         'sample_count': len(sample_indices),
         'trade_inference_count': policy_trade_count,
         'entry_allowed_count': entry_allowed_count,
+        'entry_allowed_net_pnl_sum': entry_allowed_net_pnl_sum,
+        'entry_allowed_pnl_trade_count': entry_allowed_pnl_trade_count,
+        'visible_net_pnl_sum': visible_net_pnl_sum,
+        'round_trip_fee_rate': OKX_ROUND_TRIP_TAKER_FEE_RATE,
         'segment_count': len(segments),
         'segments': segments,
         'sample_selection_note': sample_selection_note,

@@ -1638,6 +1638,15 @@
     };
   }
 
+  function formatTradeResearchNetPnl(linearSum) {
+    const pct = Number(linearSum) * 100.0;
+    if (!Number.isFinite(pct)) {
+      return '?';
+    }
+    const sign = pct >= 0.0 ? '+' : '';
+    return sign + pct.toFixed(2) + '%';
+  }
+
   function loadTradeResearch(symbol) {
     if (!isTradeResearchEnabled()) {
       tradeResearchSegments = [];
@@ -1672,10 +1681,22 @@
         const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
         const entryAllowedCount = payload.entry_allowed_count != null ? payload.entry_allowed_count : '?';
         const barsLoaded = payload.bars_loaded != null ? payload.bars_loaded : '?';
+        const entryAllowedNetPnl = payload.entry_allowed_net_pnl_sum;
+        const visibleNetPnl = payload.visible_net_pnl_sum;
         let statusText =
           `Trade research: ${tradeResearchSegments.length} на графике ` +
           `(${entryAllowedCount} entry ok / ${tradeCount} policy long/short из ${sampleCount} точек @ ${TRADE_RESEARCH_EVAL_HORIZON}, ` +
           `контекст ${barsLoaded} x1)`;
+        if (entryAllowedNetPnl != null) {
+          statusText =
+            statusText +
+            `, net PnL ${formatTradeResearchNetPnl(entryAllowedNetPnl)} (entry ok)`;
+          if (visibleNetPnl != null && tradeResearchSegments.length > 0) {
+            statusText =
+              statusText +
+              ` / ${formatTradeResearchNetPnl(visibleNetPnl)} на графике`;
+          }
+        }
         if (payload.sample_selection_note) {
           statusText = statusText + ` [${payload.sample_selection_note}]`;
         }
