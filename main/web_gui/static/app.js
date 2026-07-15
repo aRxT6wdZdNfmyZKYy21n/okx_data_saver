@@ -139,6 +139,9 @@
   let horizonAlertPositionId = null;
   let previousExitGbmSuggestClose = false;
   let exitGbmAlertPositionId = null;
+  let previousEntryAllowedAction = null;
+  let isFirstEntryHintSample = true;
+  let journalHasOpenPosition = false;
   let audioContext = null;
   let audioUnlocked = false;
 
@@ -297,6 +300,81 @@
     previousExitGbmSuggestClose = false;
     exitGbmAlertPositionId = null;
     lastExitPolicy = null;
+  }
+
+  function resetEntryAllowedAlertState() {
+    previousEntryAllowedAction = null;
+  }
+
+  function playEntryLongSound() {
+    if (!isJournalSoundEnabled()) return;
+    unlockAudio();
+    playTone(523, 0.1, 0, 0.09);
+    playTone(659, 0.1, 0.12, 0.09);
+    playTone(784, 0.16, 0.24, 0.09);
+  }
+
+  function playEntryShortSound() {
+    if (!isJournalSoundEnabled()) return;
+    unlockAudio();
+    playTone(784, 0.1, 0, 0.09);
+    playTone(659, 0.1, 0.12, 0.09);
+    playTone(523, 0.16, 0.24, 0.09);
+  }
+
+  function entryAllowedActionFromHint(entryHint) {
+    if (!entryHint || !entryHint.recommended_action) {
+      return null;
+    }
+    const recommended = String(entryHint.recommended_action).toLowerCase();
+    if (recommended === 'long' || recommended === 'short') {
+      return recommended;
+    }
+    return null;
+  }
+
+  function showEntryAllowedBrowserNotification(title, body) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    try {
+      new Notification(title, { body, tag: 'okx-micro-live-entry' });
+    } catch (_) {
+      // no-op
+    }
+  }
+
+  function maybeNotifyEntryAllowedAlert(entryHint) {
+    if (journalHasOpenPosition) {
+      resetEntryAllowedAlertState();
+      return;
+    }
+
+    const currentAction = entryAllowedActionFromHint(entryHint);
+    const previousAction = previousEntryAllowedAction;
+
+    if (isFirstEntryHintSample) {
+      isFirstEntryHintSample = false;
+      previousEntryAllowedAction = currentAction;
+      return;
+    }
+
+    const becameAllowed = currentAction != null && previousAction !== currentAction;
+    if (becameAllowed) {
+      if (currentAction === 'long') {
+        playEntryLongSound();
+      } else if (currentAction === 'short') {
+        playEntryShortSound();
+      }
+      const policyAction = lastPolicy && lastPolicy.action
+        ? String(lastPolicy.action).toUpperCase()
+        : currentAction.toUpperCase();
+      const snr = entryHint.snr != null ? Number(entryHint.snr).toFixed(2) : '—';
+      const title = `Micro live: вход ${currentAction.toUpperCase()}`;
+      const body = `Policy ${policyAction}, SNR=${snr} — SNR/gate ok @ ${entryHint.eval_horizon || 'eval'}`;
+      showEntryAllowedBrowserNotification(title, body);
+    }
+
+    previousEntryAllowedAction = currentAction;
   }
 
   function playExitGbmAlertSound() {
@@ -653,6 +731,7 @@
     inferencePanel.classList.remove('hidden');
     renderPolicy(policy, symbol, entryHint);
     inferenceContent.innerHTML = rows.join('');
+    maybeNotifyEntryAllowedAlert(entryHint);
   }
 
   function loadInference(symbol, limit) {
@@ -844,6 +923,10 @@
 
   function renderTradeJournal(state, symbol) {
     const openPos = state.open_position;
+    journalHasOpenPosition = Boolean(openPos);
+    if (openPos) {
+      resetEntryAllowedAlertState();
+    }
     const closedTrades = state.closed_trades || [];
     const totalPnl = state.total_realized_pnl_usd;
     const closedCount = state.closed_trades_count || 0;
