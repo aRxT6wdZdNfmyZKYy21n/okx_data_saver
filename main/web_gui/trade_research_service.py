@@ -16,15 +16,16 @@ import traceback
 import httpx
 import polars
 from fastapi import HTTPException
+from omegaconf import OmegaConf
 
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars
 from main.web_gui.inference_service import (
     _build_dataset,
     _encode_payload,
-    _prepare_payload_dict_from_sample,
     fetch_inference_metadata,
 )
+from trading_bot_dataset.src.dataset import HybridTradeDataset
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -124,13 +125,84 @@ def _pred_target_price(
     return float(entry_price * math.pow(2.0, pred_eval_log2))
 
 
-def _realized_linear_return_level0(
-    level0_df: polars.DataFrame,
-    entry_bar_index: int,
-    exit_bar_index: int,
-) -> float:
-    entry_log2 = float(level0_df['close_price_log2'][entry_bar_index])
-    exit_log2 = float(level0_df['close_price_log2'][exit_bar_index])
+def _build_train_level0_context(
+    df: polars.DataFrame,
+    metadata: dict[str, object],
+) -> tuple[HybridTradeDataset, polars.DataFrame, dict[int, int]]:
+    sequence_length = int(metadata['sequence_length'])
+    dataset_cfg = metadata['dataset_config']
+    model_cfg = metadata['model_config']
+    model_cfg_omega = OmegaConf.create(
+        {
+            'params': {
+                'scale_features': model_cfg['scale_features'],
+            },
+        },
+    )
+    train_dataset = HybridTradeDataset(
+        dataframe=df,
+        sequence_length=sequence_length,
+        raw_columns=list(dataset_cfg['raw_cols']),
+        static_columns=list(dataset_cfg['static_cols']),
+        target_cols=list(dataset_cfg['target_cols']),
+        aggregation_levels=list(dataset_cfg['aggregation_levels']),
+        use_indicators=bool(dataset_cfg['use_indicators']),
+        indicator_cols=list(dataset_cfg['indicator_cols']),
+        model_config=model_cfg_omega,
+        inference_mode=False,
+    )
+    train_level0_df = train_dataset.aggregated_data[0]
+    train_level0_to_raw = _build_level0_to_raw_row_indices(df, train_level0_df)
+    raw_to_train_level0_row: dict[int, int] = {}
+    for train_row, raw_row in enumerate(train_level0_to_raw):
+        raw_to_train_level0_row[raw_row] = train_row
+    return train_dataset, train_level0_df, raw_to_train_level0_row
+
+
+def _train_sample_index_for_inference_sample(
+    sample_index: int,
+    start_index: int,
+    inference_level0_to_raw: list[int],
+    raw_to_train_level0_row: dict[int, int],
+) -> int | None:
+    inference_entry_bar_index = start_index + sample_index
+    raw_entry_row = inference_level0_to_raw[inference_entry_bar_index]
+    if raw_entry_row not in raw_to_train_level0_row:
+        return None
+    train_entry_row = raw_to_train_level0_row[raw_entry_row]
+    return train_entry_row - start_index
+
+
+def _prepare_payload_dict_from_train_sample(
+    train_dataset: HybridTradeDataset,
+    train_sample_index: int,
+) -> dict[str, object]:
+    x_seq, x_static, _targets = train_dataset[train_sample_index]
+    normalized_x_seq: dict[str, object] = {}
+    for scale_name, scale_tensor in x_seq.items():
+        normalized_x_seq[scale_name] = scale_tensor.unsqueeze(0).clone()
+    return {
+        'x_seq': normalized_x_seq,
+        'x_static': x_static.unsqueeze(0).clone(),
+    }
+
+
+def _realized_linear_return_train_aligned(
+    inference_entry_bar_index: int,
+    horizon_steps: int,
+    inference_level0_to_raw: list[int],
+    train_level0_df: polars.DataFrame,
+    raw_to_train_level0_row: dict[int, int],
+) -> float | None:
+    raw_entry_row = inference_level0_to_raw[inference_entry_bar_index]
+    if raw_entry_row not in raw_to_train_level0_row:
+        return None
+    train_entry_row = raw_to_train_level0_row[raw_entry_row]
+    train_exit_row = train_entry_row + horizon_steps
+    if train_exit_row >= int(train_level0_df.height):
+        return None
+    entry_log2 = float(train_level0_df['close_price_log2'][train_entry_row])
+    exit_log2 = float(train_level0_df['close_price_log2'][train_exit_row])
     return math.pow(2.0, exit_log2 - entry_log2) - 1.0
 
 
@@ -285,6 +357,10 @@ def run_trade_research(
         )
 
     dataset = _build_dataset(df, metadata)
+    train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
+        df=df,
+        metadata=metadata,
+    )
     start_index = int(dataset.dataset.start_index)
     dataset_length = len(dataset)
     level0_df = dataset.dataset.aggregated_data[0]
@@ -303,6 +379,32 @@ def run_trade_research(
         step_bars=step_bars,
         horizon_steps=horizon_steps,
     )
+
+    train_sample_index_by_inference_sample: dict[int, int] = {}
+    mapped_sample_indices: list[int] = []
+    for sample_index in sample_indices:
+        train_sample_index = _train_sample_index_for_inference_sample(
+            sample_index=sample_index,
+            start_index=start_index,
+            inference_level0_to_raw=level0_to_raw_row_indices,
+            raw_to_train_level0_row=raw_to_train_level0_row,
+        )
+        if train_sample_index is None:
+            continue
+        if train_sample_index < 0 or train_sample_index >= len(train_dataset):
+            continue
+        mapped_sample_indices.append(sample_index)
+        train_sample_index_by_inference_sample[sample_index] = train_sample_index
+    skipped_unmapped_samples = len(sample_indices) - len(mapped_sample_indices)
+    sample_indices = mapped_sample_indices
+    if skipped_unmapped_samples > 0:
+        unmapped_note = (
+            f'skipped {skipped_unmapped_samples} grid samples without train-mode alignment'
+        )
+        if sample_selection_note is None:
+            sample_selection_note = unmapped_note
+        else:
+            sample_selection_note = f'{sample_selection_note}; {unmapped_note}'
 
     logger.info(
         'Trade research: symbol=%s samples=%d step=%d horizon=%s '
@@ -366,10 +468,15 @@ def run_trade_research(
             chunk_sample_indices = sample_indices[
                 chunk_start:chunk_start + BATCH_CHUNK_SIZE
             ]
-            chunk_payloads = [
-                _prepare_payload_dict_from_sample(dataset, sample_index)
-                for sample_index in chunk_sample_indices
-            ]
+            chunk_payloads = []
+            for sample_index in chunk_sample_indices:
+                train_sample_index = train_sample_index_by_inference_sample[sample_index]
+                chunk_payloads.append(
+                    _prepare_payload_dict_from_train_sample(
+                        train_dataset=train_dataset,
+                        train_sample_index=train_sample_index,
+                    ),
+                )
             chunk_results = _call_inference_batch_api(chunk_payloads, symbol_id)
             if len(chunk_results) != len(chunk_sample_indices):
                 raise RuntimeError(
@@ -407,11 +514,15 @@ def run_trade_research(
             if exit_bar_index >= level0_height:
                 continue
 
-            realized_linear_return = _realized_linear_return_level0(
-                level0_df=level0_df,
-                entry_bar_index=entry_bar_index,
-                exit_bar_index=exit_bar_index,
+            realized_linear_return = _realized_linear_return_train_aligned(
+                inference_entry_bar_index=entry_bar_index,
+                horizon_steps=horizon_steps,
+                inference_level0_to_raw=level0_to_raw_row_indices,
+                train_level0_df=train_level0_df,
+                raw_to_train_level0_row=raw_to_train_level0_row,
             )
+            if realized_linear_return is None:
+                continue
 
             if _hybrid_backtest_allows_entry(inference_result):
                 backtest_direction = _direction_action_from_inference(
