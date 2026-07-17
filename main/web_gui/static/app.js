@@ -121,6 +121,7 @@
   let inferenceErrorBySymbolAndHorizon = {};
   let policyBySymbol = {};
   let exitPolicyBySymbol = {};
+  let exitGbmEnabled = false;
   let checkpointPathBySymbol = {};
   let inferenceMinRows = 0;
   let chartShowLimit = 50000;
@@ -385,6 +386,10 @@
   }
 
   function maybeNotifyExitGbmAlert(openPos, exitPolicy) {
+    if (!exitGbmEnabled) {
+      previousExitGbmSuggestClose = false;
+      return;
+    }
     if (!openPos || !exitPolicy) {
       previousExitGbmSuggestClose = false;
       return;
@@ -849,6 +854,10 @@
   }
 
   function refreshExitPolicy(symbol, openPos) {
+    if (!exitGbmEnabled) {
+      lastExitPolicy = null;
+      return Promise.resolve(null);
+    }
     const payload = buildExitPolicyPayload(symbol, openPos);
     if (!payload) {
       lastExitPolicy = null;
@@ -949,7 +958,7 @@
       alertHtml = m.at_target_horizon
         ? `<div class="trade-journal-alert">⚠ Достигнут горизонт ${evalHorizonLabel} — по policy пора выходить</div>`
         : '';
-      if (lastExitPolicy && lastExitPolicy.suggest_close) {
+      if (exitGbmEnabled && lastExitPolicy && lastExitPolicy.suggest_close) {
         const thresholdPct = (Number(lastExitPolicy.close_probability_threshold) * 100).toFixed(1);
         const pClosePct = (Number(lastExitPolicy.close_probability) * 100).toFixed(1);
         alertHtml += `<div class="trade-journal-alert">⏹ Exit GBM: P(close)=${pClosePct}% ≥ ${thresholdPct}% — рассмотри ранний выход</div>`;
@@ -2158,6 +2167,7 @@
       inferenceErrorBySymbolAndHorizon = config.inferenceErrorBySymbolAndHorizon || {};
       policyBySymbol = config.policyBySymbol || {};
       exitPolicyBySymbol = config.exitPolicyBySymbol || {};
+      exitGbmEnabled = Boolean(config.exitGbmEnabled);
       checkpointPathBySymbol = config.checkpointPathBySymbol || {};
       if (config.defaultLimit) {
         limitInput.placeholder = config.defaultLimit;

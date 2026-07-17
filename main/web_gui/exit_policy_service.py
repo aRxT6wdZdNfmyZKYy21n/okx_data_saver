@@ -9,7 +9,24 @@ from settings import settings
 logger = logging.getLogger(__name__)
 
 
+def build_exit_policy_disabled_response() -> dict[str, object]:
+    return {
+        'enabled': False,
+        'action': 'hold',
+        'suggest_close': False,
+        'close_probability': None,
+        'close_probability_threshold': None,
+        'min_hold_steps': None,
+        'bars_held': None,
+        'run_label': None,
+        'policy_path': None,
+        'eval_horizon': None,
+    }
+
+
 def run_remote_exit_policy(payload: dict[str, object]) -> dict[str, object]:
+    if not settings.WEB_GUI_EXIT_GBM_ENABLED:
+        return build_exit_policy_disabled_response()
     if not settings.WEB_GUI_INFERENCE_ENABLED:
         raise HTTPException(status_code=503, detail='Inference is disabled')
 

@@ -12,7 +12,10 @@ from pydantic import BaseModel, Field
 
 from enumerations import SymbolId
 from main.web_gui.constants import CHART_SHOW_LIMIT, DOW_LEVEL_NAMES, SCALE_NAMES
-from main.web_gui.exit_policy_service import run_remote_exit_policy
+from main.web_gui.exit_policy_service import (
+    build_exit_policy_disabled_response,
+    run_remote_exit_policy,
+)
 from main.web_gui.inference_service import (
     fetch_inference_metadata,
 )
@@ -84,6 +87,7 @@ def get_config() -> dict:
         'chartShowLimit': CHART_SHOW_LIMIT,
         'tradeResearchLimit': settings.WEB_GUI_TRADE_RESEARCH_LIMIT,
         'tradeResearchPnlStride': settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE,
+        'exitGbmEnabled': settings.WEB_GUI_EXIT_GBM_ENABLED,
     }
 
 
@@ -231,6 +235,9 @@ def post_exit_policy(body: ExitPolicyRequest) -> dict:
         SymbolId[body.symbol_id]
     except KeyError:
         raise HTTPException(422, detail=f'Unknown symbol_id: {body.symbol_id}')
+
+    if not settings.WEB_GUI_EXIT_GBM_ENABLED:
+        return build_exit_policy_disabled_response()
 
     return run_in_spawned_process(
         _worker_exit_policy,
