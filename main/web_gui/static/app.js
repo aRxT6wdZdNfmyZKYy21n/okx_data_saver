@@ -157,6 +157,7 @@
   let exitGbmAlertPositionId = null;
   let previousExitTransformerSuggestClose = false;
   let exitTransformerAlertPositionId = null;
+  let exitOverlaySession = null;
   let previousEntryAllowedAction = null;
   let isFirstEntryHintSample = true;
   let journalHasOpenPosition = false;
@@ -309,6 +310,123 @@
     playTone(988, 0.22, 0.44, 0.1);
   }
 
+  function emptyExitOverlaySession() {
+    return {
+      exit_gbm_enabled: false,
+      exit_transformer_enabled: false,
+      exit_policy_at_close: null,
+      exit_transformer_at_close: null,
+      exit_gbm_alert_fired: false,
+      exit_transformer_alert_fired: false,
+      first_exit_gbm_alert: null,
+      first_exit_transformer_alert: null,
+    };
+  }
+
+  function resetExitOverlaySession() {
+    exitOverlaySession = emptyExitOverlaySession();
+    exitOverlaySession.exit_gbm_enabled = exitGbmEnabled;
+    exitOverlaySession.exit_transformer_enabled = exitTransformerEnabled;
+  }
+
+  function sanitizeExitPolicyForJournal(exitPolicy) {
+    if (!exitPolicy || exitPolicy.close_probability == null) {
+      return null;
+    }
+    return {
+      enabled: exitPolicy.enabled !== false,
+      action: exitPolicy.action,
+      suggest_close: Boolean(exitPolicy.suggest_close),
+      close_probability: Number(exitPolicy.close_probability),
+      close_probability_threshold: Number(exitPolicy.close_probability_threshold),
+      min_hold_steps: exitPolicy.min_hold_steps,
+      bars_held: exitPolicy.bars_held,
+      run_label: exitPolicy.run_label,
+      eval_horizon: exitPolicy.eval_horizon,
+    };
+  }
+
+  function sanitizeExitTransformerForJournal(exitTransformer) {
+    if (!exitTransformer || exitTransformer.predicted_delta_pnl == null) {
+      return null;
+    }
+    return {
+      enabled: exitTransformer.enabled !== false,
+      action: exitTransformer.action,
+      suggest_close: Boolean(exitTransformer.suggest_close),
+      predicted_delta_pnl: Number(exitTransformer.predicted_delta_pnl),
+      delta_pnl_threshold: Number(exitTransformer.delta_pnl_threshold),
+      min_hold_steps: exitTransformer.min_hold_steps,
+      bars_held: exitTransformer.bars_held,
+      run_label: exitTransformer.run_label,
+      eval_horizon: exitTransformer.eval_horizon,
+    };
+  }
+
+  function buildPositionMetricsSnapshot(openPos) {
+    if (!openPos || !openPos.metrics) {
+      return null;
+    }
+    const metrics = openPos.metrics;
+    return {
+      bars_elapsed: metrics.bars_elapsed,
+      unrealized_net_return_pct: metrics.unrealized_net_return_pct,
+      mfe_net_return_pct: metrics.mfe_net_return_pct,
+      mae_net_return_pct: metrics.mae_net_return_pct,
+      giveback_net_return_pct: metrics.giveback_net_return_pct,
+      mark_price: metrics.mark_price,
+    };
+  }
+
+  function updateExitOverlaySession(openPos) {
+    if (!exitOverlaySession) {
+      resetExitOverlaySession();
+    }
+    exitOverlaySession.exit_gbm_enabled = exitGbmEnabled;
+    exitOverlaySession.exit_transformer_enabled = exitTransformerEnabled;
+    const metricsSnapshot = buildPositionMetricsSnapshot(openPos);
+
+    if (exitGbmEnabled && lastExitPolicy) {
+      const sanitized = sanitizeExitPolicyForJournal(lastExitPolicy);
+      exitOverlaySession.exit_policy_at_close = sanitized;
+      if (sanitized && sanitized.suggest_close && !exitOverlaySession.exit_gbm_alert_fired) {
+        exitOverlaySession.exit_gbm_alert_fired = true;
+        exitOverlaySession.first_exit_gbm_alert = {
+          overlay: sanitized,
+          position_metrics: metricsSnapshot,
+        };
+      }
+    }
+
+    if (exitTransformerEnabled && lastExitTransformer) {
+      const sanitized = sanitizeExitTransformerForJournal(lastExitTransformer);
+      exitOverlaySession.exit_transformer_at_close = sanitized;
+      if (sanitized && sanitized.suggest_close && !exitOverlaySession.exit_transformer_alert_fired) {
+        exitOverlaySession.exit_transformer_alert_fired = true;
+        exitOverlaySession.first_exit_transformer_alert = {
+          overlay: sanitized,
+          position_metrics: metricsSnapshot,
+        };
+      }
+    }
+  }
+
+  function buildExitOverlayPayloadForClose() {
+    if (!exitOverlaySession) {
+      resetExitOverlaySession();
+    }
+    return {
+      exit_gbm_enabled: exitOverlaySession.exit_gbm_enabled,
+      exit_transformer_enabled: exitOverlaySession.exit_transformer_enabled,
+      exit_policy_at_close: exitOverlaySession.exit_policy_at_close,
+      exit_transformer_at_close: exitOverlaySession.exit_transformer_at_close,
+      exit_gbm_alert_fired: exitOverlaySession.exit_gbm_alert_fired,
+      exit_transformer_alert_fired: exitOverlaySession.exit_transformer_alert_fired,
+      first_exit_gbm_alert: exitOverlaySession.first_exit_gbm_alert,
+      first_exit_transformer_alert: exitOverlaySession.first_exit_transformer_alert,
+    };
+  }
+
   function resetHorizonAlertState() {
     previousAtTargetHorizon = false;
     horizonAlertPositionId = null;
@@ -325,6 +443,8 @@
     exitTransformerAlertPositionId = null;
     lastExitTransformer = null;
   }
+
+  resetExitOverlaySession();
 
   function resetEntryAllowedAlertState() {
     previousEntryAllowedAction = null;
@@ -1107,6 +1227,7 @@
       maybeNotifyHorizonAlert(openPos, m.at_target_horizon);
       maybeNotifyExitGbmAlert(openPos, lastExitPolicy);
       maybeNotifyExitTransformerAlert(openPos, lastExitTransformer);
+      updateExitOverlaySession(openPos);
       const progressClass = m.at_target_horizon ? 'at-target' : '';
       const evalHorizonLabel = openPos.eval_horizon || `x${m.eval_horizon_steps}`;
       alertHtml = m.at_target_horizon
@@ -1290,6 +1411,9 @@
     })
       .then(() => {
         resetHorizonAlertState();
+        resetExitGbmAlertState();
+        resetExitTransformerAlertState();
+        resetExitOverlaySession();
         return refreshTradeJournal(symbol);
       })
       .catch(e => setStatus('Entry: ' + parseErrorDetail(e.message), true));
@@ -1305,9 +1429,13 @@
       exit_start_trade_id: Number(latestX1Bar.start_trade_id),
       exit_timestamp_ms: Number(latestX1Bar.end_timestamp_ms || latestX1Bar.start_timestamp_ms),
       notes: '',
+      exit_overlay: buildExitOverlayPayloadForClose(),
     })
       .then(() => {
         resetHorizonAlertState();
+        resetExitGbmAlertState();
+        resetExitTransformerAlertState();
+        resetExitOverlaySession();
         return refreshTradeJournal(symbol);
       })
       .catch(e => setStatus('Exit: ' + parseErrorDetail(e.message), true));
@@ -1318,6 +1446,9 @@
     API.tradeJournalDiscardOpen()
       .then(() => {
         resetHorizonAlertState();
+        resetExitGbmAlertState();
+        resetExitTransformerAlertState();
+        resetExitOverlaySession();
         return refreshTradeJournal(symbol);
       })
       .catch(e => setStatus('Discard: ' + parseErrorDetail(e.message), true));

@@ -140,11 +140,15 @@ def _worker_trade_journal_entry(payload: dict) -> dict:
 
 
 def _worker_trade_journal_exit(payload: dict) -> dict:
+    exit_overlay = None
+    if 'exit_overlay' in payload:
+        exit_overlay = payload['exit_overlay']
     return close_position(
         exit_price=float(payload['exit_price']),
         exit_start_trade_id=int(payload['exit_start_trade_id']),
         exit_timestamp_ms=int(payload['exit_timestamp_ms']),
         notes=payload['notes'],
+        exit_overlay=exit_overlay,
     )
 
 

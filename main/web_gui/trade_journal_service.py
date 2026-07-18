@@ -255,6 +255,7 @@ def close_position(
     exit_start_trade_id: int,
     exit_timestamp_ms: int,
     notes: str,
+    exit_overlay: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if exit_price <= 0:
         raise ValueError(f'exit_price must be positive, got: {exit_price}')
@@ -317,6 +318,8 @@ def close_position(
             'giveback_net_return_pct': excursion_summary['giveback_net_return_pct'],
             'giveback_pnl_usd': excursion_summary['giveback_pnl_usd'],
         }
+        if exit_overlay is not None:
+            closed_trade['exit_overlay'] = exit_overlay
         journal['closed_trades'].append(closed_trade)
         journal['open_position'] = None
         _save_journal_unlocked(journal)

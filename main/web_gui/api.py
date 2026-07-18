@@ -224,6 +224,7 @@ class TradeJournalExitRequest(BaseModel):
     exit_start_trade_id: int = Field(..., ge=0)
     exit_timestamp_ms: int = Field(..., ge=0)
     notes: str = ''
+    exit_overlay: dict | None = None
 
 
 class ExitPolicyRequest(BaseModel):
