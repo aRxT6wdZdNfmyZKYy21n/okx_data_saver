@@ -36,6 +36,11 @@ def read_json(path: str) -> dict[str, Any]:
 
 def atomic_write_npz(path: str, **arrays: Any) -> None:
     ensure_parent_dir(path)
-    temporary_path = f'{path}.tmp'
+    base_path, extension = os.path.splitext(path)
+    if extension != '.npz':
+        raise RuntimeError(f'NPZ path must end with .npz: {path}')
+    temporary_path = f'{base_path}.tmp{extension}'
     np.savez_compressed(temporary_path, **arrays)
+    if not os.path.isfile(temporary_path):
+        raise RuntimeError(f'NPZ temp file was not created: {temporary_path}')
     os.replace(temporary_path, path)
