@@ -3,6 +3,7 @@ import logging
 import sys
 
 import main.spawn_process as spawn_process
+from main.runtime_limits import apply_runtime_limits
 from main.offline_inference.paths import DEFAULT_SYMBOL_ID
 from main.spawn_process import run_in_spawned_process
 from main.web_gui.request_workers import _worker_trade_research_export_safe
@@ -31,6 +32,8 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main() -> None:
+    apply_runtime_limits()
+
     arguments = parse_arguments()
     spawn_process.VERBOSE = arguments.verbose
 

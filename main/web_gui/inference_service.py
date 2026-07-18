@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from omegaconf import OmegaConf
 
 from enumerations import SymbolId
-from main.web_gui.data_service import fetch_last_bars
+from main.web_gui.data_service import fetch_last_bars_sync
 from settings import settings
 from trading_bot_dataset.src.dataset import HybridTradeDataset, HybridTradeDatasetInference
 
@@ -258,7 +258,7 @@ def run_remote_inference(symbol_id: str, limit: int) -> dict[str, object]:
         raise HTTPException(status_code=503, detail='Inference is disabled')
 
     symbol = SymbolId[symbol_id]
-    df = fetch_last_bars(symbol_id=symbol, limit=limit, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol, limit=limit, offset=0)
     if df is None:
         raise HTTPException(status_code=422, detail='Недостаточно данных для инференса')
 

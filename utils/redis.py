@@ -374,6 +374,44 @@ class RedisManager:
             ttl=METADATA_TTL,
         )
 
+    async def try_acquire_lock(
+        self,
+        lock_key: str,
+        lock_token: str,
+        ttl_sec: int,
+    ) -> bool:
+        redis_ = self.__redis
+        if not redis_:
+            raise RuntimeError('Redis not connected')
+
+        acquired = await redis_.set(
+            lock_key,
+            lock_token,
+            nx=True,
+            ex=ttl_sec,
+        )
+        return bool(acquired)
+
+    async def release_lock(
+        self,
+        lock_key: str,
+        lock_token: str,
+    ) -> None:
+        redis_ = self.__redis
+        if not redis_:
+            raise RuntimeError('Redis not connected')
+
+        release_script = (
+            'if redis.call("get", KEYS[1]) == ARGV[1] then '
+            'return redis.call("del", KEYS[1]) else return 0 end'
+        )
+        await redis_.eval(
+            release_script,
+            1,
+            lock_key,
+            lock_token,
+        )
+
 
 # Глобальный экземпляр менеджера Redis
 g_redis_manager = RedisManager()

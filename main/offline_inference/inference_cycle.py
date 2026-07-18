@@ -6,7 +6,7 @@ from main.offline_inference.artifacts import (
     write_latest_inference_error,
     write_latest_inference_ok,
 )
-from main.web_gui.data_service import count_x1_bars_since_entry, fetch_last_bars
+from main.web_gui.data_service import count_x1_bars_since_entry_sync, fetch_last_bars_sync
 from main.web_gui.exit_policy_service import (
     build_exit_policy_disabled_response,
     run_remote_exit_policy,
@@ -137,7 +137,7 @@ def _build_exit_payloads(
 def run_inference_cycle(symbol_id: str) -> None:
     bars_limit = settings.INFERENCE_DAEMON_BARS_LIMIT
     symbol = SymbolId[symbol_id]
-    df = fetch_last_bars(symbol_id=symbol, limit=bars_limit, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol, limit=bars_limit, offset=0)
     if df is None:
         raise RuntimeError('Недостаточно данных для инференса')
 
@@ -169,7 +169,7 @@ def run_inference_cycle(symbol_id: str) -> None:
         if open_position_data is None:
             raise RuntimeError('Open journal position disappeared after mark price update')
         entry_start_trade_id = int(open_position_data['entry_start_trade_id'])
-        bars_elapsed = count_x1_bars_since_entry(
+        bars_elapsed = count_x1_bars_since_entry_sync(
             symbol_id=symbol,
             entry_start_trade_id=entry_start_trade_id,
         )

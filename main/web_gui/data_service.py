@@ -2,6 +2,9 @@
 Сервис данных для веб-GUI: загрузка последних N баров из БД, вычисляемые поля, агрегация по масштабу.
 """
 
+from __future__ import annotations
+
+import asyncio
 import logging
 import traceback
 
@@ -10,6 +13,8 @@ import polars
 from enumerations import SymbolId
 from main.save_final_data_set_3.schemas import OKXDataSetRecordData_3
 from main.web_gui.aggregation import aggregate_bars
+from main.web_gui.async_data_runtime import run_async_data
+from main.web_gui.bars_cache_service import fetch_last_bars_with_redis_cache
 from main.web_gui.constants import scale_to_multiplier
 from settings import settings
 
@@ -32,16 +37,22 @@ def _db_uri() -> str:
     )
 
 
-def fetch_last_bars(
+def _cast_bars_dataframe_types(df: polars.DataFrame) -> polars.DataFrame:
+    return df.with_columns([
+        polars.col('open_price').cast(polars.Float64),
+        polars.col('high_price').cast(polars.Float64),
+        polars.col('low_price').cast(polars.Float64),
+        polars.col('close_price').cast(polars.Float64),
+        polars.col('total_volume').cast(polars.Float64),
+        polars.col('buy_volume').cast(polars.Float64),
+    ])
+
+
+def _fetch_last_bars_from_db_sync(
     symbol_id: SymbolId,
     limit: int,
-    offset: int = 0,
+    offset: int,
 ) -> polars.DataFrame | None:
-    """
-    Загружает последние `limit` баров для символа (по start_trade_id DESC), возвращает в порядке ASC.
-    Пагинация: offset — сколько последних баров пропустить (0 = самые свежие).
-    """
-    # Подзапрос: последние (offset+limit) баров DESC; внешний запрос — ASC, пропуск offset, взять limit
     total = limit + offset
     logger.info(
         'DB read start: fetch_last_bars symbol=%s limit=%d offset=%d',
@@ -88,17 +99,55 @@ def fetch_last_bars(
         symbol_id.name,
         int(df.height),
     )
+    return _cast_bars_dataframe_types(df)
 
-    # Приводим типы
-    df = df.with_columns([
-        polars.col('open_price').cast(polars.Float64),
-        polars.col('high_price').cast(polars.Float64),
-        polars.col('low_price').cast(polars.Float64),
-        polars.col('close_price').cast(polars.Float64),
-        polars.col('total_volume').cast(polars.Float64),
-        polars.col('buy_volume').cast(polars.Float64),
-    ])
-    return df
+
+async def _fetch_last_bars_from_db(
+    symbol_id: SymbolId,
+    limit: int,
+    offset: int,
+) -> polars.DataFrame | None:
+    return await asyncio.to_thread(
+        _fetch_last_bars_from_db_sync,
+        symbol_id,
+        limit,
+        offset,
+    )
+
+
+async def fetch_last_bars(
+    symbol_id: SymbolId,
+    limit: int,
+    offset: int,
+) -> polars.DataFrame | None:
+    """
+    Загружает последние `limit` баров для символа (по start_trade_id DESC), возвращает в порядке ASC.
+    Пагинация: offset — сколько последних баров пропустить (0 = самые свежие).
+    """
+    return await fetch_last_bars_with_redis_cache(
+        symbol_id=symbol_id,
+        limit=limit,
+        offset=offset,
+        load_from_db=lambda: _fetch_last_bars_from_db(
+            symbol_id=symbol_id,
+            limit=limit,
+            offset=offset,
+        ),
+    )
+
+
+def fetch_last_bars_sync(
+    symbol_id: SymbolId,
+    limit: int,
+    offset: int,
+) -> polars.DataFrame | None:
+    return run_async_data(
+        lambda: fetch_last_bars(
+            symbol_id=symbol_id,
+            limit=limit,
+            offset=offset,
+        ),
+    )
 
 
 def add_computed_columns(df: polars.DataFrame) -> polars.DataFrame:
@@ -113,8 +162,21 @@ def add_computed_columns(df: polars.DataFrame) -> polars.DataFrame:
     ])
 
 
-def count_x1_bars_since_entry(symbol_id: SymbolId, entry_start_trade_id: int) -> int | None:
-    """Число x1-баров с start_trade_id >= entry_start_trade_id (включая entry bar)."""
+async def _count_x1_bars_since_entry_from_db(
+    symbol_id: SymbolId,
+    entry_start_trade_id: int,
+) -> int | None:
+    return await asyncio.to_thread(
+        _count_x1_bars_since_entry_from_db_sync,
+        symbol_id,
+        entry_start_trade_id,
+    )
+
+
+def _count_x1_bars_since_entry_from_db_sync(
+    symbol_id: SymbolId,
+    entry_start_trade_id: int,
+) -> int | None:
     logger.info(
         'DB read start: count_x1_bars_since_entry symbol=%s entry_start_trade_id=%d',
         symbol_id.name,
@@ -149,16 +211,38 @@ def count_x1_bars_since_entry(symbol_id: SymbolId, entry_start_trade_id: int) ->
     return bar_count
 
 
-def get_bars_for_api(
+async def count_x1_bars_since_entry(
+    symbol_id: SymbolId,
+    entry_start_trade_id: int,
+) -> int | None:
+    return await _count_x1_bars_since_entry_from_db(
+        symbol_id=symbol_id,
+        entry_start_trade_id=entry_start_trade_id,
+    )
+
+
+def count_x1_bars_since_entry_sync(
+    symbol_id: SymbolId,
+    entry_start_trade_id: int,
+) -> int | None:
+    return run_async_data(
+        lambda: count_x1_bars_since_entry(
+            symbol_id=symbol_id,
+            entry_start_trade_id=entry_start_trade_id,
+        ),
+    )
+
+
+async def get_bars_for_api(
     symbol_id: SymbolId,
     limit: int,
-    offset: int = 0,
-    scale: str = 'x1',
+    offset: int,
+    scale: str,
 ) -> polars.DataFrame | None:
     """
     Возвращает DataFrame для сериализации в API: последние бары с вычисляемыми полями и агрегацией.
     """
-    raw = fetch_last_bars(symbol_id=symbol_id, limit=limit, offset=offset)
+    raw = await fetch_last_bars(symbol_id=symbol_id, limit=limit, offset=offset)
     if raw is None:
         return None
 
@@ -167,3 +251,19 @@ def get_bars_for_api(
         raw = aggregate_bars(raw, mult)
 
     return add_computed_columns(raw)
+
+
+def get_bars_for_api_sync(
+    symbol_id: SymbolId,
+    limit: int,
+    offset: int,
+    scale: str,
+) -> polars.DataFrame | None:
+    return run_async_data(
+        lambda: get_bars_for_api(
+            symbol_id=symbol_id,
+            limit=limit,
+            offset=offset,
+            scale=scale,
+        ),
+    )

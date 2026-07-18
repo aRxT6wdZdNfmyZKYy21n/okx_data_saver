@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     # Path to trading_bot repo for trade research NPZ post-processing (policy/gate)
     TRADING_BOT_ROOT: str = '/home/debian/Repositories/trading_bot'
 
+    # Polars thread pool (leave headroom on 16-core host)
+    POLARS_MAX_THREADS: int = 14
+
+    # Redis-backed x1 bars cache for Web GUI / offline inference
+    WEB_GUI_BARS_REDIS_CACHE_ENABLED: bool = True
+    BARS_REDIS_CACHE_TTL_SEC: int = 3600
+    BARS_REDIS_REFRESH_LOCK_TTL_SEC: int = 600
+    BARS_REDIS_LOCK_WAIT_SEC: int = 300
+    BARS_REDIS_LOCK_POLL_INTERVAL_SEC: float = 0.5
+
     model_config = SettingsConfigDict(
         env_file='.env',
         extra='forbid',

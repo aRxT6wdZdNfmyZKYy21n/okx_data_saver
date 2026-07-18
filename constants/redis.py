@@ -19,6 +19,8 @@ EXTREME_LINES_PREFIX: Final[str] = 'extreme_lines'
 ORDER_BOOK_VOLUMES_PREFIX: Final[str] = 'order_book_volumes'
 VELOCITY_PREFIX: Final[str] = 'velocity'
 METADATA_PREFIX: Final[str] = 'metadata'
+WEB_GUI_X1_BARS_PREFIX: Final[str] = 'web_gui:x1_bars'
+BARS_REFRESH_LOCK_KEY: Final[str] = 'web_gui:x1_bars:refresh_lock'
 
 # Максимальный размер части данных (500 МБ для безопасности)
 MAX_PART_SIZE_BYTES: Final[int] = 500_000_000
@@ -86,3 +88,19 @@ def get_metadata_key(symbol_id: SymbolId) -> str:
 def get_available_symbols_key() -> str:
     """Получение ключа для списка доступных символов."""
     return 'available_symbols'
+
+
+def get_web_gui_x1_bars_key(
+    symbol_id: SymbolId,
+    limit: int,
+    offset: int,
+) -> str:
+    return f'{WEB_GUI_X1_BARS_PREFIX}:{symbol_id.name}:limit:{limit}:offset:{offset}'
+
+
+def get_web_gui_x1_bars_meta_key(
+    symbol_id: SymbolId,
+    limit: int,
+    offset: int,
+) -> str:
+    return f'{get_web_gui_x1_bars_key(symbol_id, limit, offset)}:bars_meta'

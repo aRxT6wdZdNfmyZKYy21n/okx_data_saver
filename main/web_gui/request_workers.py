@@ -8,7 +8,7 @@ import logging
 from enumerations import SymbolId
 
 from main.spawn_process import run_in_spawned_process
-from main.web_gui.data_service import count_x1_bars_since_entry, get_bars_for_api
+from main.web_gui.data_service import get_bars_for_api_sync, count_x1_bars_since_entry_sync
 from main.web_gui.dow_service import get_dow_bars_for_api
 from main.web_gui.exit_policy_service import run_remote_exit_policy
 from main.web_gui.exit_transformer_service import run_remote_exit_transformer
@@ -40,7 +40,7 @@ def _worker_bars(symbol_id_str: str, limit: int, offset: int, scale: str) -> lis
     """Вызывается в дочернем процессе. Возвращает список сериализованных баров или None."""
     symbol = SymbolId[symbol_id_str]
     effective_limit = min(limit, settings.WEB_GUI_RECORDS_LIMIT)
-    df = get_bars_for_api(symbol_id=symbol, limit=effective_limit, offset=offset, scale=scale)
+    df = get_bars_for_api_sync(symbol_id=symbol, limit=effective_limit, offset=offset, scale=scale)
     if df is None:
         return None
     available = [c for c in BAR_COLS if c in df.columns]
@@ -117,7 +117,7 @@ def _worker_trade_journal_state(
         open_position_data = journal['open_position']
         symbol = SymbolId[symbol_id_str]
         entry_start_trade_id = int(open_position_data['entry_start_trade_id'])
-        bars_elapsed = count_x1_bars_since_entry(
+        bars_elapsed = count_x1_bars_since_entry_sync(
             symbol_id=symbol,
             entry_start_trade_id=entry_start_trade_id,
         )

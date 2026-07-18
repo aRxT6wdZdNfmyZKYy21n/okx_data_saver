@@ -13,6 +13,10 @@ import threading
 import time
 from collections.abc import Callable
 
+from main.runtime_limits import apply_runtime_limits
+
+apply_runtime_limits()
+
 logger = logging.getLogger(__name__)
 
 VERBOSE = False

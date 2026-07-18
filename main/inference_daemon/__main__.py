@@ -4,6 +4,7 @@ import logging
 import sys
 
 import main.spawn_process as spawn_process
+from main.runtime_limits import apply_runtime_limits
 from main.offline_inference.artifacts import (
     write_latest_inference_computing,
     write_latest_inference_error,
@@ -42,6 +43,8 @@ async def _daemon_loop(symbol_id: str) -> None:
 
 
 def main() -> None:
+    apply_runtime_limits()
+
     parser = argparse.ArgumentParser(description='Offline inference daemon')
     parser.add_argument(
         '-v',

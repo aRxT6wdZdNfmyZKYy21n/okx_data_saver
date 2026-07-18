@@ -10,8 +10,12 @@ import argparse
 import logging
 import sys
 
+from main.runtime_limits import apply_runtime_limits
+
 
 def main() -> None:
+    apply_runtime_limits()
+
     parser = argparse.ArgumentParser(description='OKX Data Set Web GUI')
     parser.add_argument('--host', default='127.0.0.1', help='Host to bind')
     parser.add_argument('--port', type=int, default=8000, help='Port to bind')

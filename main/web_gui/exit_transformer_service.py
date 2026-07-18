@@ -6,7 +6,7 @@ import httpx
 from fastapi import HTTPException
 
 from enumerations import SymbolId
-from main.web_gui.data_service import fetch_last_bars
+from main.web_gui.data_service import fetch_last_bars_sync
 from main.web_gui.inference_service import (
     fetch_inference_metadata,
     prepare_x_seq_2d_from_df,
@@ -40,7 +40,7 @@ def run_remote_exit_transformer(payload: dict[str, object]) -> dict[str, object]
     symbol_id = str(payload['symbol_id'])
     bars_limit = int(payload['bars_limit'])
     symbol = SymbolId[symbol_id]
-    df = fetch_last_bars(symbol_id=symbol, limit=bars_limit, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol, limit=bars_limit, offset=0)
     if df is None:
         raise HTTPException(status_code=422, detail='Недостаточно данных для exit transformer')
 

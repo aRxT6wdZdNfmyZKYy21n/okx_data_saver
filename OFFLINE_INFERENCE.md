@@ -48,12 +48,30 @@ See `.env.example`:
 - `TRADING_BOT_ROOT` — for NPZ loader policy/gate post-processing (one-way import, no cycle)
 - `INFERENCE_DAEMON_*` — symbol, interval (default 60s), bars limit (default 10M)
 - `WEB_GUI_INFERENCE_API_BASE_URL` — still used by daemon/export to call `inference_api`
+- `POLARS_MAX_THREADS` — Polars thread pool cap (default 14)
+- `WEB_GUI_BARS_REDIS_CACHE_ENABLED`, `BARS_REDIS_*` — x1 bars Redis cache and refresh lock
 
 ## Memory / Polars
 
 Heavy Polars loads (inference daemon cycle, trade research export, Web GUI bars/trade-research) run in **spawn subprocesses** via `main.spawn_process.run_in_spawned_process`. Memory is released when the child exits.
 
+Polars thread pool is capped via `POLARS_MAX_THREADS` (default **14** on a 16-core host). Applied in process entry points and spawn workers via `main.runtime_limits.apply_runtime_limits()`.
+
 Use `-v` / `--verbose` on `main.inference_daemon`, `main.trade_research_export`, and `main.web_gui` for INFO logs: DB reads, dataset preparation, inference batch progress.
+
+## Redis x1 bars cache
+
+Raw x1 Polars DataFrames (not HybridTradeDataset tensors) are cached in Redis with LZ4 IPC serialization (`utils.redis.save_dataframe` / `load_dataframe`).
+
+| Key pattern | Purpose |
+|-------------|---------|
+| `web_gui:x1_bars:{symbol}:limit:{N}:offset:{O}` | Cached bars DataFrame (chunked) |
+| `web_gui:x1_bars:{symbol}:limit:{N}:offset:{O}:bars_meta` | JSON metadata (`last_start_trade_id`, `updated_at_ms`, …) |
+| `web_gui:x1_bars:refresh_lock` | Global exclusive lock — only one DB refresh at a time |
+
+Waiters poll the cache until hit or acquire the lock. Toggle with `WEB_GUI_BARS_REDIS_CACHE_ENABLED` (default `true`). Redis `maxmemory` should be sized for ~10M-bar frames (24 GB is sufficient).
+
+Sync callers (spawn workers, legacy services) use `fetch_last_bars_sync` / `get_bars_for_api_sync`, which run the async Redis path via `asyncio.run`.
 
 ## Deploy notes
 

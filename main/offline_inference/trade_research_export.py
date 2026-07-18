@@ -11,7 +11,7 @@ from enumerations import SymbolId
 from main.offline_inference.artifacts import write_trade_research_meta
 from main.offline_inference.atomic_io import atomic_write_npz
 from main.offline_inference.paths import trade_research_npz_path
-from main.web_gui.data_service import fetch_last_bars
+from main.web_gui.data_service import fetch_last_bars_sync
 from main.web_gui.inference_service import (
     _build_dataset,
     _build_level0_to_raw_row_indices,
@@ -324,7 +324,7 @@ def run_trade_research_export(symbol_id: str) -> None:
     run_label = str(policy_by_symbol[symbol_id]['run_label'])
 
     symbol = SymbolId[symbol_id]
-    df = fetch_last_bars(symbol_id=symbol, limit=research_limit, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol, limit=research_limit, offset=0)
     if df is None:
         raise RuntimeError('Недостаточно данных для trade research export')
     if df.height < minimum_rows:

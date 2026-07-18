@@ -13,7 +13,7 @@ from dow_theory_aggregator.src.trend_calculator_cpp_wrapper import (
     TrendCalculator,
 )
 from enumerations import SymbolId
-from main.web_gui.data_service import fetch_last_bars
+from main.web_gui.data_service import fetch_last_bars_sync
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ def run_dow_pipeline(
     Загружает последние limit баров, прогоняет через калькулятор Доу с max_trend_levels=level,
     возвращает get_final_tensors(). Логирует каждую 1000-ю обработанную строку.
     """
-    df = fetch_last_bars(symbol_id=symbol_id, limit=limit, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol_id, limit=limit, offset=0)
     if df is None or df.height == 0:
         return None
 
