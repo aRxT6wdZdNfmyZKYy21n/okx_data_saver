@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     # Exit Transformer v2 overlay (043: delta_pnl vs fixed-H)
     WEB_GUI_EXIT_TRANSFORMER_ENABLED: bool = False
 
+    # Offline inference daemon (writes data/inference/{symbol}/latest_inference.json)
+    INFERENCE_DAEMON_SYMBOL: str = 'BTC_USDT'
+    INFERENCE_DAEMON_INTERVAL_SEC: int = 60
+    INFERENCE_DAEMON_BARS_LIMIT: int = 10_000_000
+
+    # Path to trading_bot repo for trade research NPZ post-processing (policy/gate)
+    TRADING_BOT_ROOT: str = '/home/debian/Repositories/trading_bot'
+
     model_config = SettingsConfigDict(
         env_file='.env',
         extra='forbid',

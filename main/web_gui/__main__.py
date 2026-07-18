@@ -25,8 +25,8 @@ def main() -> None:
         stream=sys.stdout,
     )
 
-    import main.web_gui.request_workers as _request_workers
-    _request_workers.VERBOSE = args.verbose
+    import main.spawn_process as spawn_process
+    spawn_process.VERBOSE = args.verbose
 
     from main.web_gui import api  # noqa: F401 — монтирование static при импорте
 

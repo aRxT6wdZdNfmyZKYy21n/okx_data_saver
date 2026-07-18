@@ -3,6 +3,7 @@
 """
 
 import logging
+import traceback
 
 import polars
 
@@ -42,6 +43,12 @@ def fetch_last_bars(
     """
     # Подзапрос: последние (offset+limit) баров DESC; внешний запрос — ASC, пропуск offset, взять limit
     total = limit + offset
+    logger.info(
+        'DB read start: fetch_last_bars symbol=%s limit=%d offset=%d',
+        symbol_id.name,
+        limit,
+        offset,
+    )
     query = f"""
     SELECT
         symbol_id, start_trade_id, end_trade_id,
@@ -65,12 +72,22 @@ def fetch_last_bars(
     except Exception as exception:
         logger.error(
             'Failed to fetch bars: %s',
-            ''.join(__import__('traceback').format_exception(exception)),
+            ''.join(traceback.format_exception(exception)),
         )
         return None
 
     if df.height == 0:
+        logger.info(
+            'DB read done: fetch_last_bars symbol=%s rows=0',
+            symbol_id.name,
+        )
         return None
+
+    logger.info(
+        'DB read done: fetch_last_bars symbol=%s rows=%d',
+        symbol_id.name,
+        int(df.height),
+    )
 
     # Приводим типы
     df = df.with_columns([
@@ -98,6 +115,11 @@ def add_computed_columns(df: polars.DataFrame) -> polars.DataFrame:
 
 def count_x1_bars_since_entry(symbol_id: SymbolId, entry_start_trade_id: int) -> int | None:
     """Число x1-баров с start_trade_id >= entry_start_trade_id (включая entry bar)."""
+    logger.info(
+        'DB read start: count_x1_bars_since_entry symbol=%s entry_start_trade_id=%d',
+        symbol_id.name,
+        entry_start_trade_id,
+    )
     query = f"""
     SELECT COUNT(*) AS bar_count
     FROM {OKXDataSetRecordData_3.__tablename__}
@@ -109,12 +131,22 @@ def count_x1_bars_since_entry(symbol_id: SymbolId, entry_start_trade_id: int) ->
     except Exception as exception:
         logger.error(
             'Failed to count bars since entry: %s',
-            ''.join(__import__('traceback').format_exception(exception)),
+            ''.join(traceback.format_exception(exception)),
         )
         return None
     if df.height == 0:
+        logger.info(
+            'DB read done: count_x1_bars_since_entry symbol=%s bar_count=0',
+            symbol_id.name,
+        )
         return None
-    return int(df['bar_count'][0])
+    bar_count = int(df['bar_count'][0])
+    logger.info(
+        'DB read done: count_x1_bars_since_entry symbol=%s bar_count=%d',
+        symbol_id.name,
+        bar_count,
+    )
+    return bar_count
 
 
 def get_bars_for_api(

@@ -4,19 +4,16 @@
 """
 
 import logging
-import multiprocessing
-import sys
-import threading
-from collections.abc import Callable
 
 from enumerations import SymbolId
 
+from main.spawn_process import run_in_spawned_process
 from main.web_gui.data_service import count_x1_bars_since_entry, get_bars_for_api
 from main.web_gui.dow_service import get_dow_bars_for_api
 from main.web_gui.exit_policy_service import run_remote_exit_policy
 from main.web_gui.exit_transformer_service import run_remote_exit_transformer
 from main.web_gui.inference_service import run_remote_inference
-from main.web_gui.trade_research_service import run_trade_research
+from main.web_gui.trade_research_artifact_service import run_trade_research_from_artifact
 from main.web_gui.serialization import serialize_bar_row
 from main.web_gui.trade_journal_service import (
     apply_mark_price_to_open_position,
@@ -30,12 +27,6 @@ from main.web_gui.constants import CHART_SHOW_LIMIT
 from settings import settings
 
 logger = logging.getLogger(__name__)
-
-# Уровень логирования в spawn-процессах: выставляется из __main__ при старте с -v/--verbose.
-VERBOSE = False
-
-# Один тяжёлый процесс (бары / Доу) одновременно — чтобы не съедать ресурсы при миллионах сделок.
-_process_lock = threading.Lock()
 
 BAR_COLS = [
     'start_trade_id', 'end_trade_id',
@@ -72,20 +63,32 @@ def _worker_inference(symbol_id_str: str, limit: int) -> dict[str, object]:
     return run_remote_inference(symbol_id=symbol_id_str, limit=limit)
 
 
-def _worker_trade_research(
+def _worker_trade_research_from_artifact(
     symbol_id_str: str,
     eval_horizon: str,
     step_bars: int,
     visible_min_start_trade_id: int | None,
     visible_max_start_trade_id: int | None,
 ) -> dict[str, object]:
-    return run_trade_research(
+    return run_trade_research_from_artifact(
         symbol_id=symbol_id_str,
         eval_horizon=eval_horizon,
         step_bars=step_bars,
         visible_min_start_trade_id=visible_min_start_trade_id,
         visible_max_start_trade_id=visible_max_start_trade_id,
     )
+
+
+def _worker_inference_cycle_safe(symbol_id_str: str) -> None:
+    from main.offline_inference.inference_cycle import run_inference_cycle_safe
+
+    run_inference_cycle_safe(symbol_id=symbol_id_str)
+
+
+def _worker_trade_research_export_safe(symbol_id_str: str) -> None:
+    from main.offline_inference.trade_research_export import run_trade_research_export_safe
+
+    run_trade_research_export_safe(symbol_id=symbol_id_str)
 
 
 def _worker_exit_policy(payload: dict) -> dict[str, object]:
@@ -154,45 +157,3 @@ def _worker_trade_journal_exit(payload: dict) -> dict:
 
 def _worker_trade_journal_discard() -> None:
     discard_open_position()
-
-
-def _run_worker(
-    result_queue: multiprocessing.Queue,
-    fn: Callable[..., object],
-    verbose: bool,
-    *args,
-) -> None:
-    """
-    Точка входа в дочерний процесс (должна быть на уровне модуля, чтобы pickle при spawn).
-    """
-    logging.basicConfig(
-        level=logging.INFO if verbose else logging.WARNING,
-        format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
-        stream=sys.stdout,
-    )
-    try:
-        result = fn(*args)
-        result_queue.put(('ok', result))
-    except Exception as e:
-        logger.exception('Worker failed')
-        result_queue.put(('error', str(e)))
-
-
-def run_in_spawned_process(fn: Callable[..., object], *args) -> object:
-    """
-    Запускает fn(*args) в отдельном процессе (spawn). Возвращает результат из дочернего процесса.
-    Используется для запросов с Polars, чтобы после завершения процесса память освобождалась.
-    Одновременно выполняется не более одного вызова (ограничение по _process_lock).
-    """
-    with _process_lock:
-        ctx = multiprocessing.get_context('spawn')
-        result_queue = ctx.Queue()
-        p = ctx.Process(target=_run_worker, args=(result_queue, fn, VERBOSE) + args)
-        p.start()
-        # Сначала читаем результат, затем join: при большом ответе дочерний процесс
-        # блокируется на put(), пока родитель не прочитает очередь — иначе дедлок.
-        kind, payload = result_queue.get()
-        p.join()
-    if kind == 'error':
-        raise RuntimeError(f'Worker error: {payload}')
-    return payload

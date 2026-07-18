@@ -931,14 +931,39 @@
   }
 
   function loadInference(symbol, limit) {
-    if (inferenceMinRows > 0 && Number(limit) < inferenceMinRows) {
-      setInferenceWarning(`Инференс невозможен при таком количестве свечей x1 (требуется минимум ${inferenceMinRows})`);
-      return Promise.resolve();
-    }
     return API.inference({ symbol_id: symbol, limit })
       .then(response => {
-        const predictions = response.predictions || response;
-        renderInference(predictions, symbol, response.policy || null, response.entry_hint || null);
+        const status = response.status != null ? String(response.status) : 'ok';
+        if (status === 'computing') {
+          setInferenceWarning('Offline inference: computing…');
+          lastExitPolicy = null;
+          lastExitTransformer = null;
+          return;
+        }
+        if (status === 'error') {
+          const errorMessage = response.error_message != null
+            ? String(response.error_message)
+            : 'unknown error';
+          setInferenceWarning(`Offline inference error: ${errorMessage}`);
+          lastPredictions = null;
+          lastPolicy = null;
+          lastEntryHint = null;
+          lastExitPolicy = null;
+          lastExitTransformer = null;
+          return;
+        }
+        if (!response.predictions) {
+          setInferenceWarning('Offline inference artifact missing predictions');
+          return;
+        }
+        lastExitPolicy = response.exit_policy || null;
+        lastExitTransformer = response.exit_transformer || null;
+        renderInference(
+          response.predictions,
+          symbol,
+          response.policy || null,
+          response.entry_hint || null,
+        );
       })
       .catch(e => {
         setInferenceWarning(parseErrorDetail(e.message));
@@ -1190,10 +1215,7 @@
             }
           }
         }
-        return Promise.all([
-          refreshExitPolicy(symbol, state.open_position),
-          refreshExitTransformer(symbol, state.open_position, getBarsLimit()),
-        ]).then(() => state);
+        return state;
       })
       .then(state => {
         renderTradeJournal(state, symbol);

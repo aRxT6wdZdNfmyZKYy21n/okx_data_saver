@@ -55,8 +55,24 @@ def run_remote_exit_transformer(payload: dict[str, object]) -> dict[str, object]
             ),
         )
 
+    x_seq = prepare_x_seq_2d_from_df(df)
+    return run_remote_exit_transformer_with_x_seq(
+        payload=payload,
+        x_seq=x_seq,
+    )
+
+
+def run_remote_exit_transformer_with_x_seq(
+    payload: dict[str, object],
+    x_seq: dict[str, object],
+) -> dict[str, object]:
+    if not settings.WEB_GUI_EXIT_TRANSFORMER_ENABLED:
+        return build_exit_transformer_disabled_response()
+    if not settings.WEB_GUI_INFERENCE_ENABLED:
+        raise RuntimeError('Inference is disabled')
+
+    symbol_id = str(payload['symbol_id'])
     try:
-        x_seq = prepare_x_seq_2d_from_df(df)
         request_payload: dict[str, object] = {
             'side': payload['side'],
             'eval_horizon': payload['eval_horizon'],
@@ -80,9 +96,9 @@ def run_remote_exit_transformer(payload: dict[str, object]) -> dict[str, object]
             timeout=60.0,
         )
         if response.status_code == 404:
-            raise HTTPException(status_code=404, detail=response.text)
+            raise RuntimeError(response.text)
         if response.status_code >= 400:
-            raise HTTPException(status_code=response.status_code, detail=response.text)
+            raise RuntimeError(response.text)
         result = response.json()
         result['enabled'] = True
         return result
@@ -93,7 +109,4 @@ def run_remote_exit_transformer(payload: dict[str, object]) -> dict[str, object]
             'Exit transformer request failed: %s',
             ''.join(traceback.format_exception(exception)),
         )
-        raise HTTPException(
-            status_code=500,
-            detail='Exit transformer request failed',
-        ) from exception
+        raise RuntimeError('Exit transformer request failed') from exception

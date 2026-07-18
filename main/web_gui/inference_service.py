@@ -211,7 +211,17 @@ def _prepare_train_aligned_payload_dict(
 
 def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     metadata = fetch_inference_metadata()
+    logger.info(
+        'Dataset preparation start: inference rows=%d sequence_length=%d',
+        int(df.height),
+        int(metadata['sequence_length']),
+    )
     inference_dataset = _build_dataset(df, metadata)
+    logger.info(
+        'Dataset preparation done: samples=%d start_index=%d',
+        len(inference_dataset),
+        int(inference_dataset.dataset.start_index),
+    )
 
     last_index = len(inference_dataset) - 1
     if last_index < 0:
@@ -252,40 +262,49 @@ def run_remote_inference(symbol_id: str, limit: int) -> dict[str, object]:
     if df is None:
         raise HTTPException(status_code=422, detail='Недостаточно данных для инференса')
 
-    metadata = fetch_inference_metadata()
-    required_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
-    if df.height < required_rows:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                'Инференс невозможен при таком количестве свечей x1 '
-                f'(требуется минимум {required_rows}, получено {df.height})'
-            ),
-        )
-
     try:
-        payload_dict = _prepare_payload_dict_from_df(df)
-        encoded_payload = _encode_payload(payload_dict)
-
-        logger.info('Payload size: %d', len(encoded_payload))
-
-        response = httpx.post(
-            f'{settings.WEB_GUI_INFERENCE_API_BASE_URL}/inference',
-            content=encoded_payload,
-            params={'symbol': symbol_id},
-            headers={'Content-Type': 'application/octet-stream'},
-            timeout=60.0,
-        )
-        if response.status_code == 404:
-            raise HTTPException(status_code=404, detail=response.text)
-        if response.status_code >= 400:
-            raise HTTPException(status_code=response.status_code, detail=response.text)
-        return response.json()
+        return run_remote_inference_from_df(symbol_id=symbol_id, df=df)
     except HTTPException:
         raise
+    except RuntimeError as exception:
+        raise HTTPException(status_code=422, detail=str(exception)) from exception
     except Exception as exception:
         logger.error(
             'Inference request failed: %s',
             ''.join(traceback.format_exception(exception)),
         )
         raise HTTPException(status_code=500, detail='Inference request failed') from exception
+
+
+def run_remote_inference_from_df(
+    symbol_id: str,
+    df: polars.DataFrame,
+) -> dict[str, object]:
+    if not settings.WEB_GUI_INFERENCE_ENABLED:
+        raise RuntimeError('Inference is disabled')
+
+    metadata = fetch_inference_metadata()
+    required_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
+    if df.height < required_rows:
+        raise RuntimeError(
+            'Инференс невозможен при таком количестве свечей x1 '
+            f'(требуется минимум {required_rows}, получено {df.height})',
+        )
+
+    payload_dict = _prepare_payload_dict_from_df(df)
+    encoded_payload = _encode_payload(payload_dict)
+
+    logger.info('Payload size: %d', len(encoded_payload))
+
+    response = httpx.post(
+        f'{settings.WEB_GUI_INFERENCE_API_BASE_URL}/inference',
+        content=encoded_payload,
+        params={'symbol': symbol_id},
+        headers={'Content-Type': 'application/octet-stream'},
+        timeout=60.0,
+    )
+    if response.status_code == 404:
+        raise RuntimeError(response.text)
+    if response.status_code >= 400:
+        raise RuntimeError(response.text)
+    return response.json()

@@ -20,21 +20,19 @@ from main.web_gui.exit_transformer_service import (
     build_exit_transformer_disabled_response,
     run_remote_exit_transformer,
 )
+from main.web_gui.inference_artifact_service import get_inference_artifact
 from main.web_gui.inference_service import (
     fetch_inference_metadata,
 )
+from main.spawn_process import run_in_spawned_process
 from main.web_gui.request_workers import (
     _worker_bars,
     _worker_dow,
-    _worker_exit_policy,
-    _worker_exit_transformer,
-    _worker_inference,
     _worker_trade_journal_discard,
     _worker_trade_journal_entry,
     _worker_trade_journal_exit,
     _worker_trade_journal_state,
-    _worker_trade_research,
-    run_in_spawned_process,
+    _worker_trade_research_from_artifact,
 )
 from settings import settings
 
@@ -155,16 +153,19 @@ def get_dow(
 @app.get('/api/inference')
 def get_inference(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
-    limit: int | None = Query(None, ge=1, description='x1 bars used for tensor preparation'),
+    limit: int | None = Query(
+        None,
+        ge=1,
+        description='Deprecated: inference is read from offline artifact',
+    ),
 ) -> dict:
     try:
         SymbolId[symbol_id]
     except KeyError:
         raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
 
-    effective_limit = min(limit or DEFAULT_BARS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
-    predictions = run_in_spawned_process(_worker_inference, symbol_id, effective_limit)
-    return predictions
+    del limit
+    return get_inference_artifact(symbol_id=symbol_id)
 
 
 @app.get('/api/trade-research')
@@ -196,7 +197,7 @@ def get_trade_research(
         effective_step_bars = step_bars
 
     return run_in_spawned_process(
-        _worker_trade_research,
+        _worker_trade_research_from_artifact,
         symbol_id,
         eval_horizon,
         effective_step_bars,
