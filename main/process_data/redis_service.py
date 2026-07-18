@@ -11,6 +11,7 @@ import numpy
 import polars
 
 from constants.redis import (
+    DEFAULT_TTL,
     MAX_PART_SIZE_BYTES,
     get_available_symbols_key,
     get_bollinger_key,
@@ -69,6 +70,7 @@ class RedisDataService:
             dataframe=trades_df,
             compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
+            ttl_sec=DEFAULT_TTL,
         )
 
         # Создаем полные метаданные
@@ -147,6 +149,7 @@ class RedisDataService:
             dataframe=bollinger_df,
             compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
+            ttl_sec=DEFAULT_TTL,
         )
 
         # Создаем полные метаданные
@@ -196,6 +199,7 @@ class RedisDataService:
             dataframe=candles_df,
             compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
+            ttl_sec=DEFAULT_TTL,
         )
 
         # Создаем полные метаданные
@@ -255,6 +259,7 @@ class RedisDataService:
             dataframe=rsi_df,
             compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
+            ttl_sec=DEFAULT_TTL,
         )
 
         # Создаем полные метаданные
@@ -305,6 +310,7 @@ class RedisDataService:
             dataframe=smoothed_df,
             compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
+            ttl_sec=DEFAULT_TTL,
         )
 
         # Создаем полные метаданные
@@ -354,6 +360,7 @@ class RedisDataService:
             dataframe=lines_df,
             compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
+            ttl_sec=DEFAULT_TTL,
         )
 
         # Создаем полные метаданные
@@ -414,6 +421,7 @@ class RedisDataService:
             dataframe=extreme_lines_df,
             compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
+            ttl_sec=DEFAULT_TTL,
         )
 
         # Создаем полные метаданные
@@ -495,6 +503,7 @@ class RedisDataService:
             dataframe=order_book_df,
             compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
+            ttl_sec=DEFAULT_TTL,
         )
 
         # Создаем полные метаданные
@@ -567,6 +576,7 @@ class RedisDataService:
             dataframe=velocity_df,
             compression=CompressionAlgorithm.LZ4,
             max_size_bytes=MAX_PART_SIZE_BYTES,
+            ttl_sec=DEFAULT_TTL,
         )
 
         # Создаем полные метаданные

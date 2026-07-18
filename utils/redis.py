@@ -12,7 +12,7 @@ import polars
 import redis.asyncio as redis
 from redis.asyncio import Redis
 
-from constants.redis import DEFAULT_TTL, METADATA_TTL
+from constants.redis import METADATA_TTL
 from enumerations import CompressionAlgorithm
 from settings import settings
 from utils.serialization import (
@@ -103,6 +103,7 @@ class RedisManager:
         dataframe: polars.DataFrame,
         compression: CompressionAlgorithm,
         max_size_bytes: int,
+        ttl_sec: int,
     ) -> dict[str, Any]:
         """
         Сохранение DataFrame в Redis с разбивкой на части при необходимости.
@@ -117,6 +118,7 @@ class RedisManager:
             dataframe: Polars DataFrame
             compression: Алгоритм сжатия
             max_size_bytes: Максимальный размер части
+            ttl_sec: TTL ключей DataFrame и metadata в Redis (секунды)
 
         Returns:
             Метаданные о сохранении
@@ -154,12 +156,12 @@ class RedisManager:
         # Шаг 3: Сохраняем чанки с TTL
         if parts_count == 1:
             # Сохраняем как единое целое
-            await redis_.setex(key, DEFAULT_TTL, compressed_data)
+            await redis_.setex(key, ttl_sec, compressed_data)
         else:
             # Сохраняем каждый чанк
             for i, chunk in enumerate(data_chunks):
                 chunk_key = f'{key}:part_{i}'
-                await redis_.setex(chunk_key, DEFAULT_TTL, chunk)
+                await redis_.setex(chunk_key, ttl_sec, chunk)
 
         # Вычисляем метаданные
         original_size = estimate_dataframe_size(
@@ -180,7 +182,7 @@ class RedisManager:
         # Сохраняем метаданные с TTL
         await redis_.setex(
             f'{key}:metadata',
-            METADATA_TTL,
+            ttl_sec,
             json.dumps(metadata),
         )
 

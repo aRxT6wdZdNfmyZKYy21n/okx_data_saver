@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # Redis-backed x1 bars cache for Web GUI / offline inference
     WEB_GUI_BARS_REDIS_CACHE_ENABLED: bool = True
-    BARS_REDIS_CACHE_TTL_SEC: int = 3600
+    BARS_REDIS_CACHE_TTL_SEC: int = 60
     BARS_REDIS_REFRESH_LOCK_TTL_SEC: int = 600
     BARS_REDIS_LOCK_WAIT_SEC: int = 300
     BARS_REDIS_LOCK_POLL_INTERVAL_SEC: float = 0.5

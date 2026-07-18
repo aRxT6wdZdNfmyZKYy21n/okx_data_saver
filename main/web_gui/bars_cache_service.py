@@ -78,6 +78,7 @@ async def _save_cached_bars(
         dataframe=dataframe,
         compression=CompressionAlgorithm.LZ4,
         max_size_bytes=MAX_PART_SIZE_BYTES,
+        ttl_sec=settings.BARS_REDIS_CACHE_TTL_SEC,
     )
     await g_redis_manager.set(
         key=bars_meta_key,

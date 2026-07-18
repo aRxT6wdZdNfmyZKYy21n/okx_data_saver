@@ -69,7 +69,7 @@ Raw x1 Polars DataFrames (not HybridTradeDataset tensors) are cached in Redis wi
 | `web_gui:x1_bars:{symbol}:limit:{N}:offset:{O}:bars_meta` | JSON metadata (`last_start_trade_id`, `updated_at_ms`, …) |
 | `web_gui:x1_bars:refresh_lock` | Global exclusive lock — only one DB refresh at a time |
 
-Waiters poll the cache until hit or acquire the lock. Toggle with `WEB_GUI_BARS_REDIS_CACHE_ENABLED` (default `true`). Redis `maxmemory` should be sized for ~10M-bar frames (24 GB is sufficient).
+Waiters poll the cache until hit or acquire the lock. Toggle with `WEB_GUI_BARS_REDIS_CACHE_ENABLED` (default `true`). Default TTL is **60 seconds** (`BARS_REDIS_CACHE_TTL_SEC`), aligned with `INFERENCE_DAEMON_INTERVAL_SEC`. Redis `maxmemory` should be sized for ~10M-bar frames (24 GB is sufficient).
 
 Sync callers (spawn workers, legacy services) use `fetch_last_bars_sync` / `get_bars_for_api_sync`, which run the async Redis path via `asyncio.run`.
 
