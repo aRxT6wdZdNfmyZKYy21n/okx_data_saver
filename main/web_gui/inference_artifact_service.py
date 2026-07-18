@@ -2,7 +2,11 @@ import os
 
 from fastapi import HTTPException
 
-from main.offline_inference.artifacts import read_latest_inference
+from main.offline_inference.artifacts import (
+    enrich_inference_artifact,
+    ensure_last_inference_ok_sidecar,
+    read_latest_inference,
+)
 from settings import settings
 
 
@@ -19,4 +23,6 @@ def get_inference_artifact(symbol_id: str) -> dict[str, object]:
                 'Start main.inference_daemon first.'
             ),
         )
-    return artifact
+    if artifact['status'] == 'ok':
+        ensure_last_inference_ok_sidecar(symbol_id=symbol_id, artifact=artifact)
+    return enrich_inference_artifact(artifact)

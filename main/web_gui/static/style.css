@@ -225,6 +225,43 @@ body {
   color: #c4a535;
 }
 
+.inference-status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  margin-bottom: 0.65rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #1a1e28;
+  font-size: 0.85rem;
+  color: #b2b5be;
+}
+
+.inference-status-bar.inference-status-computing {
+  border-color: #6a5a20;
+  background: #2a2618;
+}
+
+.inference-status-age {
+  color: #d1d4dc;
+}
+
+.inference-status-computing-label {
+  color: #c4a535;
+  font-weight: 600;
+}
+
+.inference-panel-stale .policy-summary,
+.inference-panel-stale #inferenceContent {
+  opacity: 0.72;
+}
+
+.inference-panel-stale .policy-card {
+  border-style: dashed;
+}
+
 .policy-summary {
   margin-bottom: 0.75rem;
 }

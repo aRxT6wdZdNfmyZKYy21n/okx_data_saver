@@ -122,6 +122,7 @@
   const cvdWindowSelect = document.getElementById('cvdWindow');
   const dowStub = document.getElementById('dowStub');
   const inferencePanel = document.getElementById('inferencePanel');
+  const inferenceStatusBar = document.getElementById('inferenceStatusBar');
   const policySummary = document.getElementById('policySummary');
   const inferenceContent = document.getElementById('inferenceContent');
   const tradeJournalPanel = document.getElementById('tradeJournalPanel');
@@ -144,6 +145,10 @@
   let lastPredictions = null;
   let lastExitPolicy = null;
   let lastExitTransformer = null;
+  let lastInferenceStatus = null;
+  let lastInferenceCompletedAtMs = null;
+  let lastComputingStartedAtMs = null;
+  let inferenceStatusTickTimer = null;
   let latestX1Bar = null;
   let journalDefaults = {
     notional_usd: 7,
@@ -789,7 +794,93 @@
 
   function setInferenceWarning(message) {
     inferencePanel.classList.remove('hidden');
+    inferencePanel.classList.remove('inference-panel-stale');
+    inferenceStatusBar.classList.add('hidden');
+    inferenceStatusBar.innerHTML = '';
+    policySummary.classList.add('hidden');
+    policySummary.innerHTML = '';
     inferenceContent.innerHTML = `<div class="inference-warning">${message}</div>`;
+  }
+
+  function stopInferenceStatusTick() {
+    if (inferenceStatusTickTimer) {
+      clearInterval(inferenceStatusTickTimer);
+      inferenceStatusTickTimer = null;
+    }
+  }
+
+  function formatRelativeTimeAgo(timestampMs) {
+    if (!Number.isFinite(timestampMs)) return '—';
+    const deltaSec = Math.max(0, Math.floor((Date.now() - timestampMs) / 1000));
+    if (deltaSec < 5) return 'только что';
+    if (deltaSec < 60) return `${deltaSec} сек назад`;
+    const minutes = Math.floor(deltaSec / 60);
+    if (minutes === 1) return 'минуту назад';
+    if (minutes < 60) return `${minutes} мин назад`;
+    const hours = Math.floor(minutes / 60);
+    if (hours === 1) return 'час назад';
+    return `${hours} ч назад`;
+  }
+
+  function formatDurationSince(timestampMs) {
+    if (!Number.isFinite(timestampMs)) return '—';
+    const deltaSec = Math.max(0, Math.floor((Date.now() - timestampMs) / 1000));
+    if (deltaSec < 60) return `${deltaSec} сек`;
+    const minutes = Math.floor(deltaSec / 60);
+    const seconds = deltaSec % 60;
+    if (minutes < 60) {
+      return seconds > 0 ? `${minutes} мин ${seconds} сек` : `${minutes} мин`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remMin = minutes % 60;
+    return remMin > 0 ? `${hours} ч ${remMin} мин` : `${hours} ч`;
+  }
+
+  function setInferencePanelStale(isStale) {
+    inferencePanel.classList.toggle('inference-panel-stale', Boolean(isStale));
+  }
+
+  function renderInferenceStatusBar() {
+    if (lastInferenceStatus == null) {
+      inferenceStatusBar.classList.add('hidden');
+      inferenceStatusBar.innerHTML = '';
+      return;
+    }
+
+    inferenceStatusBar.classList.remove('hidden');
+    inferenceStatusBar.classList.toggle(
+      'inference-status-computing',
+      lastInferenceStatus === 'computing',
+    );
+
+    if (lastInferenceStatus === 'ok') {
+      const ageLabel = formatRelativeTimeAgo(lastInferenceCompletedAtMs);
+      inferenceStatusBar.innerHTML = `
+        <span class="inference-status-age">Обновлено: <strong>${ageLabel}</strong></span>
+      `;
+      return;
+    }
+
+    if (lastInferenceStatus === 'computing') {
+      const ageLabel = formatRelativeTimeAgo(lastInferenceCompletedAtMs);
+      const refreshDuration = formatDurationSince(lastComputingStartedAtMs);
+      const hasSnapshot = Number.isFinite(lastInferenceCompletedAtMs);
+      const snapshotLine = hasSnapshot
+        ? `<span class="inference-status-age">Предсказания от <strong>${ageLabel}</strong></span>`
+        : '<span class="inference-status-age">Первый offline-инференс ещё не готов</span>';
+      inferenceStatusBar.innerHTML = `
+        ${snapshotLine}
+        <span class="inference-status-computing-label">Обновление… (${refreshDuration})</span>
+      `;
+    }
+  }
+
+  function startInferenceStatusTick() {
+    stopInferenceStatusTick();
+    inferenceStatusTickTimer = setInterval(() => {
+      if (inferencePanel.classList.contains('hidden')) return;
+      renderInferenceStatusBar();
+    }, 10000);
   }
 
   function renderPolicy(policy, symbol, entryHint) {
@@ -878,8 +969,10 @@
     `;
   }
 
-  function renderInference(predictions, symbol, policy, entryHint) {
+  function renderInference(predictions, symbol, policy, entryHint, isStale) {
     lastPredictions = predictions || null;
+    const stale = Boolean(isStale);
+    setInferencePanelStale(stale);
     const keys = Object.keys(predictions || {});
     if (keys.length === 0) {
       setInferenceWarning('Нет предсказаний для отображения');
@@ -935,12 +1028,55 @@
       .then(response => {
         const status = response.status != null ? String(response.status) : 'ok';
         if (status === 'computing') {
-          setInferenceWarning('Offline inference: computing…');
-          lastExitPolicy = null;
-          lastExitTransformer = null;
+          lastInferenceStatus = 'computing';
+          lastComputingStartedAtMs = response.computing_started_at_ms != null
+            ? Number(response.computing_started_at_ms)
+            : (response.updated_at_ms != null ? Number(response.updated_at_ms) : null);
+          lastInferenceCompletedAtMs = response.inference_completed_at_ms != null
+            ? Number(response.inference_completed_at_ms)
+            : null;
+
+          let predictions = response.predictions || null;
+          let policy = response.policy || null;
+          let entryHint = response.entry_hint || null;
+          if (!predictions && lastPredictions) {
+            predictions = lastPredictions;
+            policy = lastPolicy;
+            entryHint = lastEntryHint;
+          }
+
+          if (predictions) {
+            lastExitPolicy = response.exit_policy || lastExitPolicy;
+            lastExitTransformer = response.exit_transformer || lastExitTransformer;
+            renderInference(
+              predictions,
+              symbol,
+              policy,
+              entryHint,
+              true,
+            );
+            renderInferenceStatusBar();
+            startInferenceStatusTick();
+            return;
+          }
+
+          stopInferenceStatusTick();
+          lastInferenceStatus = 'computing';
+          lastInferenceCompletedAtMs = null;
+          inferencePanel.classList.remove('hidden');
+          inferencePanel.classList.remove('inference-panel-stale');
+          policySummary.classList.add('hidden');
+          policySummary.innerHTML = '';
+          inferenceContent.innerHTML = '<div class="inference-warning">Ожидание первого offline-инференса…</div>';
+          renderInferenceStatusBar();
+          startInferenceStatusTick();
           return;
         }
         if (status === 'error') {
+          stopInferenceStatusTick();
+          lastInferenceStatus = null;
+          lastInferenceCompletedAtMs = null;
+          lastComputingStartedAtMs = null;
           const errorMessage = response.error_message != null
             ? String(response.error_message)
             : 'unknown error';
@@ -953,9 +1089,16 @@
           return;
         }
         if (!response.predictions) {
+          stopInferenceStatusTick();
+          lastInferenceStatus = null;
           setInferenceWarning('Offline inference artifact missing predictions');
           return;
         }
+        lastInferenceStatus = 'ok';
+        lastInferenceCompletedAtMs = response.inference_completed_at_ms != null
+          ? Number(response.inference_completed_at_ms)
+          : (response.updated_at_ms != null ? Number(response.updated_at_ms) : null);
+        lastComputingStartedAtMs = null;
         lastExitPolicy = response.exit_policy || null;
         lastExitTransformer = response.exit_transformer || null;
         renderInference(
@@ -963,7 +1106,10 @@
           symbol,
           response.policy || null,
           response.entry_hint || null,
+          false,
         );
+        renderInferenceStatusBar();
+        startInferenceStatusTick();
       })
       .catch(e => {
         setInferenceWarning(parseErrorDetail(e.message));

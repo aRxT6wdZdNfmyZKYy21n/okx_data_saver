@@ -7,12 +7,16 @@ Web GUI no longer calls `inference_api` on each refresh. Predictions are written
 | Path | Writer | Reader |
 |------|--------|--------|
 | `data/inference/BTC_USDT/latest_inference.json` | `main.inference_daemon` | `GET /api/inference` |
+| `data/inference/BTC_USDT/last_inference_ok.json` | daemon (on each ok) | API enriches `computing` responses |
 | `data/trade_research/BTC_USDT/predictions.npz` | `main.trade_research_export` | `GET /api/trade-research` |
 | `data/trade_research/BTC_USDT/meta.json` | export script | trade research loader / UI status |
 
 ### `latest_inference.json`
 
 - `status`: `computing` | `ok` | `error`
+- On `computing`, previous `ok` snapshot (`predictions`, `policy`, …) is preserved; UI shows age + refresh in progress
+- `inference_completed_at_ms` — timestamp of last successful inference
+- `computing_started_at_ms` — present while `status=computing`
 - On `error`, inference fields are cleared (only `error_message` + metadata)
 - On `ok`: `predictions`, `policy`, `entry_hint`, optional `exit_policy` / `exit_transformer` when journal has an open BTC position
 

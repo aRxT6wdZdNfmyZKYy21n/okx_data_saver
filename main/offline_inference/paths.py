@@ -17,6 +17,10 @@ def inference_artifact_path(symbol_id: str) -> str:
     return os.path.join(inference_artifact_dir(symbol_id), 'latest_inference.json')
 
 
+def last_inference_ok_path(symbol_id: str) -> str:
+    return os.path.join(inference_artifact_dir(symbol_id), 'last_inference_ok.json')
+
+
 def trade_research_dir(symbol_id: str) -> str:
     return os.path.join(repo_root(), 'data', 'trade_research', symbol_id)
 
