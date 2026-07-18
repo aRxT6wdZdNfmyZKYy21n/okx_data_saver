@@ -355,6 +355,14 @@ body {
   color: #90a4ae;
 }
 
+.exit-policy-card.exit-policy-transformer.exit-policy-close {
+  border-left-color: #ab47bc;
+}
+
+.exit-policy-transformer.exit-policy-close .exit-policy-action {
+  color: #ce93d8;
+}
+
 .exit-policy-meta {
   display: flex;
   flex-wrap: wrap;

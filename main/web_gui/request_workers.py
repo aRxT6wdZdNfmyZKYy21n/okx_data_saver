@@ -14,6 +14,7 @@ from enumerations import SymbolId
 from main.web_gui.data_service import count_x1_bars_since_entry, get_bars_for_api
 from main.web_gui.dow_service import get_dow_bars_for_api
 from main.web_gui.exit_policy_service import run_remote_exit_policy
+from main.web_gui.exit_transformer_service import run_remote_exit_transformer
 from main.web_gui.inference_service import run_remote_inference
 from main.web_gui.trade_research_service import run_trade_research
 from main.web_gui.serialization import serialize_bar_row
@@ -89,6 +90,10 @@ def _worker_trade_research(
 
 def _worker_exit_policy(payload: dict) -> dict[str, object]:
     return run_remote_exit_policy(payload)
+
+
+def _worker_exit_transformer(payload: dict) -> dict[str, object]:
+    return run_remote_exit_transformer(payload)
 
 
 def _worker_trade_journal_state(

@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     WEB_GUI_INFERENCE_API_BASE_URL: str = 'http://127.0.0.1:8010'
     # Exit GBM overlay in micro-live journal (037i: L27 exit hurts L37 stack @ prod threshold)
     WEB_GUI_EXIT_GBM_ENABLED: bool = False
+    # Exit Transformer v2 overlay (043: delta_pnl vs fixed-H)
+    WEB_GUI_EXIT_TRANSFORMER_ENABLED: bool = False
 
     model_config = SettingsConfigDict(
         env_file='.env',

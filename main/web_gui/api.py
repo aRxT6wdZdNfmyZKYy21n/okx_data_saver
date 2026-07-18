@@ -16,6 +16,10 @@ from main.web_gui.exit_policy_service import (
     build_exit_policy_disabled_response,
     run_remote_exit_policy,
 )
+from main.web_gui.exit_transformer_service import (
+    build_exit_transformer_disabled_response,
+    run_remote_exit_transformer,
+)
 from main.web_gui.inference_service import (
     fetch_inference_metadata,
 )
@@ -23,6 +27,7 @@ from main.web_gui.request_workers import (
     _worker_bars,
     _worker_dow,
     _worker_exit_policy,
+    _worker_exit_transformer,
     _worker_inference,
     _worker_trade_journal_discard,
     _worker_trade_journal_entry,
@@ -76,6 +81,11 @@ def get_config() -> dict:
         if 'exit_policy_by_symbol' in metadata
         else {}
     )
+    exit_transformer_by_symbol = (
+        metadata['exit_transformer_by_symbol']
+        if 'exit_transformer_by_symbol' in metadata
+        else {}
+    )
     return {
         'defaultLimit': DEFAULT_BARS_LIMIT,
         'refreshIntervalSec': settings.WEB_GUI_REFRESH_INTERVAL_SEC,
@@ -83,11 +93,13 @@ def get_config() -> dict:
         'inferenceErrorBySymbolAndHorizon': metadata['error_by_symbol_and_horizon'],
         'policyBySymbol': policy_by_symbol,
         'exitPolicyBySymbol': exit_policy_by_symbol,
+        'exitTransformerBySymbol': exit_transformer_by_symbol,
         'checkpointPathBySymbol': checkpoint_path_by_symbol,
         'chartShowLimit': CHART_SHOW_LIMIT,
         'tradeResearchLimit': settings.WEB_GUI_TRADE_RESEARCH_LIMIT,
         'tradeResearchPnlStride': settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE,
         'exitGbmEnabled': settings.WEB_GUI_EXIT_GBM_ENABLED,
+        'exitTransformerEnabled': settings.WEB_GUI_EXIT_TRANSFORMER_ENABLED,
     }
 
 
@@ -229,6 +241,20 @@ class ExitPolicyRequest(BaseModel):
     giveback_linear: float
 
 
+class ExitTransformerRequest(BaseModel):
+    symbol_id: str
+    side: str
+    eval_horizon: str
+    bars_held: int = Field(..., ge=0)
+    bars_limit: int = Field(..., ge=1)
+    entry_predictions: dict[str, float]
+    current_predictions: dict[str, float]
+    unrealized_linear: float
+    mfe_linear: float
+    mae_linear: float
+    giveback_linear: float
+
+
 @app.post('/api/exit-policy')
 def post_exit_policy(body: ExitPolicyRequest) -> dict:
     try:
@@ -241,6 +267,22 @@ def post_exit_policy(body: ExitPolicyRequest) -> dict:
 
     return run_in_spawned_process(
         _worker_exit_policy,
+        body.model_dump(),
+    )
+
+
+@app.post('/api/exit-transformer')
+def post_exit_transformer(body: ExitTransformerRequest) -> dict:
+    try:
+        SymbolId[body.symbol_id]
+    except KeyError:
+        raise HTTPException(422, detail=f'Unknown symbol_id: {body.symbol_id}')
+
+    if not settings.WEB_GUI_EXIT_TRANSFORMER_ENABLED:
+        return build_exit_transformer_disabled_response()
+
+    return run_in_spawned_process(
+        _worker_exit_transformer,
         body.model_dump(),
     )
 

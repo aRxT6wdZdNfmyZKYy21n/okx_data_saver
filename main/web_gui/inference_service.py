@@ -226,6 +226,18 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     )
 
 
+def prepare_x_seq_2d_from_df(df: polars.DataFrame) -> dict[str, object]:
+    payload_dict = _prepare_payload_dict_from_df(df)
+    x_seq_raw = payload_dict['x_seq']
+    if not isinstance(x_seq_raw, dict):
+        raise RuntimeError('Prepared payload x_seq must be a dict')
+    x_seq_2d: dict[str, object] = {}
+    for scale_name, scale_tensor in x_seq_raw.items():
+        tensor_2d = scale_tensor.squeeze(0).clone()
+        x_seq_2d[str(scale_name)] = tensor_2d
+    return x_seq_2d
+
+
 def _encode_payload(payload_dict: dict) -> bytes:
     logger.info('Encoding payload to Pickle...')
     return pickle.dumps(payload_dict)

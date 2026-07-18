@@ -75,6 +75,18 @@
       }
       return r.json();
     },
+    async exitTransformer(body) {
+      const r = await fetch('./api/exit-transformer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(text);
+      }
+      return r.json();
+    },
   };
 
   let config = { defaultLimit: 100000, refreshIntervalSec: 30 };
@@ -121,7 +133,9 @@
   let inferenceErrorBySymbolAndHorizon = {};
   let policyBySymbol = {};
   let exitPolicyBySymbol = {};
+  let exitTransformerBySymbol = {};
   let exitGbmEnabled = false;
+  let exitTransformerEnabled = false;
   let checkpointPathBySymbol = {};
   let inferenceMinRows = 0;
   let chartShowLimit = 50000;
@@ -129,6 +143,7 @@
   let lastEntryHint = null;
   let lastPredictions = null;
   let lastExitPolicy = null;
+  let lastExitTransformer = null;
   let latestX1Bar = null;
   let journalDefaults = {
     notional_usd: 7,
@@ -140,6 +155,8 @@
   let horizonAlertPositionId = null;
   let previousExitGbmSuggestClose = false;
   let exitGbmAlertPositionId = null;
+  let previousExitTransformerSuggestClose = false;
+  let exitTransformerAlertPositionId = null;
   let previousEntryAllowedAction = null;
   let isFirstEntryHintSample = true;
   let journalHasOpenPosition = false;
@@ -303,6 +320,12 @@
     lastExitPolicy = null;
   }
 
+  function resetExitTransformerAlertState() {
+    previousExitTransformerSuggestClose = false;
+    exitTransformerAlertPositionId = null;
+    lastExitTransformer = null;
+  }
+
   function resetEntryAllowedAlertState() {
     previousEntryAllowedAction = null;
   }
@@ -421,6 +444,54 @@
     if (Notification.permission !== 'granted') return;
     try {
       new Notification(title, { body, tag: 'okx-micro-live-exit-gbm' });
+    } catch (_) {
+      // no-op
+    }
+  }
+
+  function playExitTransformerAlertSound() {
+    if (!isJournalSoundEnabled()) return;
+    unlockAudio();
+    playTone(880, 0.12, 0, 0.09);
+    playTone(1175, 0.2, 0.16, 0.09);
+  }
+
+  function maybeNotifyExitTransformerAlert(openPos, exitTransformer) {
+    if (!exitTransformerEnabled) {
+      previousExitTransformerSuggestClose = false;
+      return;
+    }
+    if (!openPos || !exitTransformer) {
+      previousExitTransformerSuggestClose = false;
+      return;
+    }
+    const suggestClose = Boolean(exitTransformer.suggest_close);
+    if (!suggestClose) {
+      previousExitTransformerSuggestClose = false;
+      return;
+    }
+
+    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
+    const sideLabel = String(openPos.side || '').toUpperCase();
+    const threshold = exitTransformer.delta_pnl_threshold;
+    const deltaPnl = exitTransformer.predicted_delta_pnl;
+    const title = 'Micro live: Exit Transformer v2 → CLOSE';
+    const body = `${sideLabel} ${openPos.symbol_id} — Δpnl=${formatPct(Number(deltaPnl) * 100)} > ${formatPct(Number(threshold) * 100)}`;
+
+    if (!previousExitTransformerSuggestClose) {
+      playExitTransformerAlertSound();
+      showExitTransformerBrowserNotification(title, body);
+    }
+
+    exitTransformerAlertPositionId = positionId;
+    previousExitTransformerSuggestClose = true;
+  }
+
+  function showExitTransformerBrowserNotification(title, body) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    try {
+      new Notification(title, { body, tag: 'okx-micro-live-exit-transformer' });
     } catch (_) {
       // no-op
     }
@@ -819,6 +890,10 @@
     return { entryPolicy, entryPredictions };
   }
 
+  function getBarsLimit() {
+    return limitInput.value ? parseInt(limitInput.value, 10) : config.defaultLimit;
+  }
+
   function buildExitPolicyPayload(symbol, openPos) {
     if (!openPos || !openPos.side || !openPos.metrics) return null;
     if (!lastPredictions || !openPos.entry_predictions || !openPos.entry_policy) return null;
@@ -853,6 +928,34 @@
     };
   }
 
+  function buildExitTransformerPayload(symbol, openPos, barsLimit) {
+    if (!openPos || !openPos.side || !openPos.metrics) return null;
+    if (!lastPredictions || !openPos.entry_predictions) return null;
+    if (!exitTransformerBySymbol[symbol]) return null;
+    if (inferenceMinRows > 0 && Number(barsLimit) < inferenceMinRows) return null;
+
+    const m = openPos.metrics;
+    const linearMetric = (value) => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return 0;
+      return n / 100.0;
+    };
+
+    return {
+      symbol_id: symbol,
+      side: openPos.side,
+      eval_horizon: openPos.eval_horizon,
+      bars_held: m.bars_elapsed,
+      bars_limit: barsLimit,
+      entry_predictions: openPos.entry_predictions,
+      current_predictions: lastPredictions,
+      unrealized_linear: linearMetric(m.unrealized_net_return_pct),
+      mfe_linear: linearMetric(m.mfe_net_return_pct),
+      mae_linear: linearMetric(m.mae_net_return_pct),
+      giveback_linear: linearMetric(m.giveback_net_return_pct),
+    };
+  }
+
   function refreshExitPolicy(symbol, openPos) {
     if (!exitGbmEnabled) {
       lastExitPolicy = null;
@@ -870,6 +973,27 @@
       })
       .catch(() => {
         lastExitPolicy = null;
+        return null;
+      });
+  }
+
+  function refreshExitTransformer(symbol, openPos, barsLimit) {
+    if (!exitTransformerEnabled) {
+      lastExitTransformer = null;
+      return Promise.resolve(null);
+    }
+    const payload = buildExitTransformerPayload(symbol, openPos, barsLimit);
+    if (!payload) {
+      lastExitTransformer = null;
+      return Promise.resolve(null);
+    }
+    return API.exitTransformer(payload)
+      .then(result => {
+        lastExitTransformer = result;
+        return result;
+      })
+      .catch(() => {
+        lastExitTransformer = null;
         return null;
       });
   }
@@ -900,6 +1024,32 @@
     `;
   }
 
+  function renderExitTransformerCard(exitTransformer) {
+    if (!exitTransformer || exitTransformer.predicted_delta_pnl == null) return '';
+
+    const deltaPnl = Number(exitTransformer.predicted_delta_pnl);
+    const threshold = Number(exitTransformer.delta_pnl_threshold);
+    const deltaPct = Number.isFinite(deltaPnl) ? formatPct(deltaPnl * 100) : '—';
+    const thresholdPct = Number.isFinite(threshold) ? formatPct(threshold * 100) : '—';
+    const action = String(exitTransformer.action || 'hold').toUpperCase();
+    const runLabel = exitTransformer.run_label || '—';
+    const minHold = exitTransformer.min_hold_steps != null ? exitTransformer.min_hold_steps : '—';
+    const barsHeld = exitTransformer.bars_held != null ? exitTransformer.bars_held : '—';
+    let actionClass = 'exit-policy-hold';
+    if (action === 'CLOSE') actionClass = 'exit-policy-close';
+
+    return `
+      <div class="exit-policy-card exit-policy-transformer ${actionClass}">
+        <div class="exit-policy-action">Exit Transformer v2: ${action}</div>
+        <div class="exit-policy-meta">
+          <span>Δpnl: <strong>${deltaPct}</strong> / порог ${thresholdPct}</span>
+          <span>stack: <strong>${runLabel}</strong></span>
+          <span>бары: <strong>${barsHeld}</strong> (min ${minHold})</span>
+        </div>
+      </div>
+    `;
+  }
+
   function refreshTradeJournal(symbol) {
     if (!symbol) return Promise.resolve();
     return fetchLatestX1Bar(symbol)
@@ -920,7 +1070,10 @@
             }
           }
         }
-        return refreshExitPolicy(symbol, state.open_position).then(() => state);
+        return Promise.all([
+          refreshExitPolicy(symbol, state.open_position),
+          refreshExitTransformer(symbol, state.open_position, getBarsLimit()),
+        ]).then(() => state);
       })
       .then(state => {
         renderTradeJournal(state, symbol);
@@ -953,6 +1106,7 @@
       const m = openPos.metrics;
       maybeNotifyHorizonAlert(openPos, m.at_target_horizon);
       maybeNotifyExitGbmAlert(openPos, lastExitPolicy);
+      maybeNotifyExitTransformerAlert(openPos, lastExitTransformer);
       const progressClass = m.at_target_horizon ? 'at-target' : '';
       const evalHorizonLabel = openPos.eval_horizon || `x${m.eval_horizon_steps}`;
       alertHtml = m.at_target_horizon
@@ -962,6 +1116,11 @@
         const thresholdPct = (Number(lastExitPolicy.close_probability_threshold) * 100).toFixed(1);
         const pClosePct = (Number(lastExitPolicy.close_probability) * 100).toFixed(1);
         alertHtml += `<div class="trade-journal-alert">⏹ Exit GBM: P(close)=${pClosePct}% ≥ ${thresholdPct}% — рассмотри ранний выход</div>`;
+      }
+      if (exitTransformerEnabled && lastExitTransformer && lastExitTransformer.suggest_close) {
+        const thresholdPct = formatPct(Number(lastExitTransformer.delta_pnl_threshold) * 100);
+        const deltaPct = formatPct(Number(lastExitTransformer.predicted_delta_pnl) * 100);
+        alertHtml += `<div class="trade-journal-alert">⏹ Exit Transformer v2: Δpnl=${deltaPct} > ${thresholdPct} — рассмотри ранний выход</div>`;
       }
       const policySideNow = policyActionToSide(lastPolicy && lastPolicy.action);
       if (policySideNow && policySideNow !== openPos.side) {
@@ -978,6 +1137,7 @@
         : '';
       metricsHtml = `
         ${renderExitPolicyCard(lastExitPolicy)}
+        ${renderExitTransformerCard(lastExitTransformer)}
         ${renderEntryPredictionMetrics(openPos, m)}
         <div class="trade-journal-metrics">
           <span>Бары: <strong>${m.bars_elapsed}</strong> / ${m.eval_horizon_steps}</span>
@@ -997,6 +1157,7 @@
     } else if (!hasOpen) {
       resetHorizonAlertState();
       resetExitGbmAlertState();
+      resetExitTransformerAlertState();
       const hintRecommended = lastEntryHint && lastEntryHint.recommended_action
         ? String(lastEntryHint.recommended_action).toUpperCase()
         : null;
@@ -2167,7 +2328,9 @@
       inferenceErrorBySymbolAndHorizon = config.inferenceErrorBySymbolAndHorizon || {};
       policyBySymbol = config.policyBySymbol || {};
       exitPolicyBySymbol = config.exitPolicyBySymbol || {};
+      exitTransformerBySymbol = config.exitTransformerBySymbol || {};
       exitGbmEnabled = Boolean(config.exitGbmEnabled);
+      exitTransformerEnabled = Boolean(config.exitTransformerEnabled);
       checkpointPathBySymbol = config.checkpointPathBySymbol || {};
       if (config.defaultLimit) {
         limitInput.placeholder = config.defaultLimit;
