@@ -73,6 +73,7 @@ class RedisManager:
         """Закрытие соединения с Redis."""
         if self.__redis:
             await self.__redis.close()
+            self.__redis = None
             logger.info('Disconnected from Redis')
 
     async def get(

@@ -17,12 +17,20 @@ async def ensure_redis_connected() -> None:
     _redis_connected = True
 
 
-async def run_with_redis(awaitable: Awaitable[T]) -> T:
-    await ensure_redis_connected()
-    return await awaitable
+async def _run_with_redis_lifecycle(
+    coroutine_factory: Callable[[], Awaitable[T]],
+) -> T:
+    global _redis_connected
+    try:
+        await ensure_redis_connected()
+        return await coroutine_factory()
+    finally:
+        if _redis_connected:
+            await g_redis_manager.disconnect()
+            _redis_connected = False
 
 
 def run_async_data(
     coroutine_factory: Callable[[], Awaitable[T]],
 ) -> T:
-    return asyncio.run(run_with_redis(coroutine_factory()))
+    return asyncio.run(_run_with_redis_lifecycle(coroutine_factory))
