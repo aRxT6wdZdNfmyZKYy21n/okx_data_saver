@@ -51,6 +51,8 @@ def _build_inference_by_sample_from_npz(
     )
     from src.tools.trading_policy_common import (
         ACTION_HOLD,
+        ACTION_LONG,
+        ACTION_SHORT,
         ACTION_LABELS,
         build_policy_arrays,
     )
