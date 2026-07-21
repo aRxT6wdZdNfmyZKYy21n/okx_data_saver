@@ -35,7 +35,7 @@ from enumerations import (
     SymbolId,
 )
 from main.save_trades.schemas import (
-    OKXTradeData2,
+    OKXTradeDataOld,
 )
 from settings import (
     settings,
@@ -110,7 +110,7 @@ def _parse_trade_row(
         row['trade_id'],
     )
 
-    side = row['side']
+    side = row['side'].upper()
     assert side in ('BUY', 'SELL'), (
         file_name,
         side,
@@ -146,14 +146,14 @@ async def _flush_batch(
         return 0
 
     statement = insert(
-        OKXTradeData2,
+        OKXTradeDataOld,
     ).on_conflict_do_nothing(
         index_elements=[
-            OKXTradeData2.symbol_id,
-            OKXTradeData2.trade_id,
+            OKXTradeDataOld.symbol_id,
+            OKXTradeDataOld.trade_id,
         ],
     ).returning(
-        OKXTradeData2.trade_id,
+        OKXTradeDataOld.trade_id,
     )
 
     async with session_maker() as session:
