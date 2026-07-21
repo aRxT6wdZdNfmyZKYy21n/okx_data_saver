@@ -10,19 +10,30 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from settings import settings
+
 logger = logging.getLogger(__name__)
 
 _JOURNAL_LOCK = threading.Lock()
 
 DEFAULT_NOTIONAL_USD = 7.0
-DEFAULT_EVAL_HORIZON = 'x2048'
 ROUND_TRIP_FEE_RATE = 0.001
 TAKER_FEE_RATE_PER_SIDE = 0.0005
 
 
+def _repo_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+
 def journal_path() -> str:
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    return os.path.join(repo_root, 'data', 'trade_journal.json')
+    configured_path = settings.WEB_GUI_TRADE_JOURNAL_PATH
+    if os.path.isabs(configured_path):
+        return configured_path
+    return os.path.join(_repo_root(), configured_path)
+
+
+def default_eval_horizon() -> str:
+    return settings.WEB_GUI_TRADE_JOURNAL_DEFAULT_EVAL_HORIZON
 
 
 def _empty_journal() -> dict[str, Any]:
@@ -376,7 +387,7 @@ def build_journal_response(
         'total_realized_pnl_usd': total_realized,
         'defaults': {
             'notional_usd': DEFAULT_NOTIONAL_USD,
-            'eval_horizon': DEFAULT_EVAL_HORIZON,
+            'eval_horizon': default_eval_horizon(),
             'round_trip_fee_rate': ROUND_TRIP_FEE_RATE,
         },
     }

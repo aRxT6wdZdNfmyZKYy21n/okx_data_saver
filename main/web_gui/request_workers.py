@@ -99,11 +99,10 @@ def _worker_exit_transformer(payload: dict) -> dict[str, object]:
     return run_remote_exit_transformer(payload)
 
 
-def _worker_trade_journal_state(
+def _build_trade_journal_api_response(
     symbol_id_str: str,
     mark_price: float | None,
 ) -> dict:
-    """Загружает journal и при открытой позиции считает bars_elapsed из БД."""
     journal = get_journal_state()
     open_position_data = journal['open_position']
     bars_elapsed = None
@@ -124,10 +123,21 @@ def _worker_trade_journal_state(
     return build_journal_response(journal, bars_elapsed, mark_price)
 
 
+def _worker_trade_journal_state(
+    symbol_id_str: str,
+    mark_price: float | None,
+) -> dict:
+    """Загружает journal и при открытой позиции считает bars_elapsed из БД."""
+    return _build_trade_journal_api_response(
+        symbol_id_str=symbol_id_str,
+        mark_price=mark_price,
+    )
+
+
 def _worker_trade_journal_entry(payload: dict) -> dict:
     entry_policy = payload['entry_policy']
     entry_predictions = payload['entry_predictions']
-    return open_position(
+    open_position(
         symbol_id=payload['symbol_id'],
         side=payload['side'],
         entry_price=float(payload['entry_price']),
@@ -140,20 +150,29 @@ def _worker_trade_journal_entry(payload: dict) -> dict:
         entry_policy=entry_policy,
         entry_predictions=entry_predictions,
     )
+    return _build_trade_journal_api_response(
+        symbol_id_str=payload['symbol_id'],
+        mark_price=float(payload['entry_price']),
+    )
 
 
 def _worker_trade_journal_exit(payload: dict) -> dict:
     exit_overlay = None
     if 'exit_overlay' in payload:
         exit_overlay = payload['exit_overlay']
-    return close_position(
+    closed_trade = close_position(
         exit_price=float(payload['exit_price']),
         exit_start_trade_id=int(payload['exit_start_trade_id']),
         exit_timestamp_ms=int(payload['exit_timestamp_ms']),
         notes=payload['notes'],
         exit_overlay=exit_overlay,
     )
+    return _build_trade_journal_api_response(
+        symbol_id_str=closed_trade['symbol_id'],
+        mark_price=float(payload['exit_price']),
+    )
 
 
-def _worker_trade_journal_discard() -> None:
+def _worker_trade_journal_discard() -> dict:
     discard_open_position()
+    return build_journal_response(get_journal_state(), None, None)

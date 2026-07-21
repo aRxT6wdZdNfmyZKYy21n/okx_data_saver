@@ -89,7 +89,7 @@
     },
   };
 
-  let config = { defaultLimit: 100000, refreshIntervalSec: 30 };
+  let config = { defaultLimit: 10000000, defaultScale: 'x2048', refreshIntervalSec: 30 };
   let chart = null;
   let candleSeries = null;
   let barsData = [];
@@ -129,6 +129,9 @@
   const tradeJournalContent = document.getElementById('tradeJournalContent');
   const tradeJournalTotals = document.getElementById('tradeJournalTotals');
   const journalNotionalInput = document.getElementById('journalNotional');
+  const journalFillPriceInput = document.getElementById('journalFillPrice');
+  const journalFillPriceLabel = document.getElementById('journalFillPriceLabel');
+  const journalActionStatusEl = document.getElementById('journalActionStatus');
   const journalEvalHorizonSelect = document.getElementById('journalEvalHorizon');
   const journalSoundEnabledCheck = document.getElementById('journalSoundEnabled');
   let inferenceErrorBySymbolAndHorizon = {};
@@ -166,6 +169,8 @@
   let previousEntryAllowedAction = null;
   let isFirstEntryHintSample = true;
   let journalHasOpenPosition = false;
+  let lastJournalState = null;
+  let journalActionPending = null;
   let audioContext = null;
   let audioUnlocked = false;
 
@@ -191,22 +196,72 @@
   }
 
   function saveJournalSettingsToStorage() {
-    const notional = Number(journalNotionalInput.value);
     const evalHorizon = journalEvalHorizonSelect.value;
-    if (!Number.isFinite(notional) || notional <= 0) return;
     if (!evalHorizon) return;
     localStorage.setItem(
       JOURNAL_SETTINGS_STORAGE_KEY,
-      JSON.stringify({ notional_usd: notional, eval_horizon: evalHorizon }),
+      JSON.stringify({ eval_horizon: evalHorizon }),
     );
   }
 
-  function getJournalNotionalUsd() {
-    const value = Number(journalNotionalInput.value);
+  function parseJournalFillPrice() {
+    const value = Number(journalFillPriceInput.value);
     if (!Number.isFinite(value) || value <= 0) {
-      return Number(journalDefaults.notional_usd);
+      return null;
     }
     return value;
+  }
+
+  function parseJournalNotionalUsd() {
+    const value = Number(journalNotionalInput.value);
+    if (!Number.isFinite(value) || value <= 0) {
+      return null;
+    }
+    return value;
+  }
+
+  function journalEntryFillValid() {
+    return parseJournalFillPrice() !== null && parseJournalNotionalUsd() !== null;
+  }
+
+  function journalExitFillValid() {
+    return parseJournalFillPrice() !== null;
+  }
+
+  function resetJournalFillFields() {
+    journalFillPriceInput.value = '';
+    journalNotionalInput.value = '';
+  }
+
+  function initJournalFillFieldsOnLoad() {
+    resetJournalFillFields();
+  }
+
+  function setJournalActionPending(pending) {
+    journalActionPending = pending;
+    updateJournalActionStatusUi();
+    if (lastJournalState && symbolSelect.value) {
+      renderTradeJournal(lastJournalState, symbolSelect.value);
+    }
+  }
+
+  function updateJournalActionStatusUi() {
+    if (!journalActionStatusEl) return;
+    if (!journalActionPending) {
+      journalActionStatusEl.classList.add('hidden');
+      journalActionStatusEl.textContent = '';
+      return;
+    }
+    journalActionStatusEl.classList.remove('hidden');
+    journalActionStatusEl.textContent = journalActionPending.message;
+  }
+
+  function getJournalNotionalUsd() {
+    const parsed = parseJournalNotionalUsd();
+    if (parsed !== null) {
+      return parsed;
+    }
+    return Number(journalDefaults.notional_usd);
   }
 
   function getJournalEvalHorizon() {
@@ -232,22 +287,33 @@
     });
 
     const stored = loadJournalSettingsFromStorage();
-    if (stored && stored.notional_usd != null) {
-      journalNotionalInput.value = String(stored.notional_usd);
-    }
     if (stored && stored.eval_horizon != null && JOURNAL_EVAL_HORIZON_OPTIONS.includes(stored.eval_horizon)) {
       journalEvalHorizonSelect.value = stored.eval_horizon;
     } else {
       journalEvalHorizonSelect.value = journalDefaults.eval_horizon;
     }
 
-    journalNotionalInput.addEventListener('change', saveJournalSettingsToStorage);
+    initJournalFillFieldsOnLoad();
+    journalNotionalInput.addEventListener('input', () => {
+      if (lastJournalState && symbolSelect.value && !journalHasOpenPosition) {
+        renderTradeJournal(lastJournalState, symbolSelect.value);
+      }
+    });
+    journalFillPriceInput.addEventListener('input', () => {
+      if (lastJournalState && symbolSelect.value) {
+        renderTradeJournal(lastJournalState, symbolSelect.value);
+      }
+    });
     journalEvalHorizonSelect.addEventListener('change', saveJournalSettingsToStorage);
   }
 
   function syncJournalSettingsDisabled(hasOpen) {
-    journalNotionalInput.disabled = hasOpen;
-    journalEvalHorizonSelect.disabled = hasOpen;
+    journalNotionalInput.disabled = hasOpen || journalActionPending !== null;
+    journalFillPriceInput.disabled = journalActionPending !== null;
+    journalEvalHorizonSelect.disabled = hasOpen || journalActionPending !== null;
+    if (journalFillPriceLabel) {
+      journalFillPriceLabel.textContent = hasOpen ? 'Цена выхода $' : 'Цена входа $';
+    }
   }
 
   function isJournalSoundEnabled() {
@@ -1341,6 +1407,22 @@
     `;
   }
 
+  function applyJournalDefaultsFromState(state) {
+    if (state.defaults) {
+      journalDefaults = state.defaults;
+      if (!loadJournalSettingsFromStorage()) {
+        if (JOURNAL_EVAL_HORIZON_OPTIONS.includes(journalDefaults.eval_horizon)) {
+          journalEvalHorizonSelect.value = journalDefaults.eval_horizon;
+        }
+      }
+    }
+  }
+
+  function applyJournalState(state, symbol) {
+    applyJournalDefaultsFromState(state);
+    renderTradeJournal(state, symbol);
+  }
+
   function refreshTradeJournal(symbol) {
     if (!symbol) return Promise.resolve();
     return fetchLatestX1Bar(symbol)
@@ -1352,19 +1434,11 @@
         return API.tradeJournal(params);
       })
       .then(state => {
-        if (state.defaults) {
-          journalDefaults = state.defaults;
-          if (!loadJournalSettingsFromStorage()) {
-            journalNotionalInput.value = String(journalDefaults.notional_usd);
-            if (JOURNAL_EVAL_HORIZON_OPTIONS.includes(journalDefaults.eval_horizon)) {
-              journalEvalHorizonSelect.value = journalDefaults.eval_horizon;
-            }
-          }
-        }
+        applyJournalDefaultsFromState(state);
         return state;
       })
       .then(state => {
-        renderTradeJournal(state, symbol);
+        applyJournalState(state, symbol);
       })
       .catch(e => {
         tradeJournalContent.innerHTML = `<div class="trade-journal-loading">Ошибка журнала: ${parseErrorDetail(e.message)}</div>`;
@@ -1372,6 +1446,7 @@
   }
 
   function renderTradeJournal(state, symbol) {
+    lastJournalState = state;
     const openPos = state.open_position;
     journalHasOpenPosition = Boolean(openPos);
     if (openPos) {
@@ -1469,25 +1544,54 @@
     }
 
     syncJournalSettingsDisabled(hasOpen);
-    const snrAllowLong = !lastEntryHint || lastEntryHint.allow_long !== false;
-    const snrAllowShort = !lastEntryHint || lastEntryHint.allow_short !== false;
-    const canEnterLong = !hasOpen && policySide === 'long' && snrAllowLong;
-    const canEnterShort = !hasOpen && policySide === 'short' && snrAllowShort;
-    const canEnterManual = !hasOpen && !policySide;
+    updateJournalActionStatusUi();
+    const isPolicyOnlyHint = lastEntryHint && lastEntryHint.hint_mode === 'policy_only';
+    const snrAllowLong = isPolicyOnlyHint
+      || !lastEntryHint
+      || lastEntryHint.allow_long !== false;
+    const snrAllowShort = isPolicyOnlyHint
+      || !lastEntryHint
+      || lastEntryHint.allow_short !== false;
+    const entryFillReady = journalEntryFillValid();
+    const exitFillReady = journalExitFillValid();
+    const actionsLocked = journalActionPending !== null;
+    const canEnterLong = !actionsLocked && !hasOpen && policySide === 'long' && snrAllowLong && entryFillReady;
+    const canEnterShort = !actionsLocked && !hasOpen && policySide === 'short' && snrAllowShort && entryFillReady;
+    const canEnterManual = !actionsLocked && !hasOpen && !policySide && entryFillReady;
+    const canExit = !actionsLocked && hasOpen && exitFillReady;
+    const canDiscard = !actionsLocked && hasOpen;
+
+    const longLabel = journalActionPending && journalActionPending.actionKey === 'entry-long'
+      ? 'Входим LONG…'
+      : 'Вошёл LONG';
+    const shortLabel = journalActionPending && journalActionPending.actionKey === 'entry-short'
+      ? 'Входим SHORT…'
+      : 'Вошёл SHORT';
+    const exitLabel = journalActionPending && journalActionPending.actionKey === 'exit'
+      ? 'Выходим…'
+      : 'Вышел';
+    const discardLabel = journalActionPending && journalActionPending.actionKey === 'discard'
+      ? 'Сброс…'
+      : 'Сброс';
+
+    const longLoadingClass = journalActionPending && journalActionPending.actionKey === 'entry-long' ? ' is-loading' : '';
+    const shortLoadingClass = journalActionPending && journalActionPending.actionKey === 'entry-short' ? ' is-loading' : '';
+    const exitLoadingClass = journalActionPending && journalActionPending.actionKey === 'exit' ? ' is-loading' : '';
+    const discardLoadingClass = journalActionPending && journalActionPending.actionKey === 'discard' ? ' is-loading' : '';
 
     const actionsHtml = `
       <div class="trade-journal-actions">
-        <button type="button" id="btnJournalEntryLong" class="btn-entry-long" ${canEnterLong || canEnterManual ? '' : 'disabled'} title="${canEnterLong ? '' : (policySide === 'long' && !snrAllowLong ? 'Entry hint: подождать' : '')}">
-          Вошёл LONG
+        <button type="button" id="btnJournalEntryLong" class="btn-entry-long${longLoadingClass}" ${canEnterLong || canEnterManual ? '' : 'disabled'} title="${canEnterLong ? '' : (!entryFillReady && !hasOpen ? 'Укажите цену и notional с биржи' : (policySide === 'long' && !snrAllowLong ? 'Entry hint: подождать' : ''))}">
+          ${longLabel}
         </button>
-        <button type="button" id="btnJournalEntryShort" class="btn-entry-short" ${canEnterShort || canEnterManual ? '' : 'disabled'} title="${canEnterShort ? '' : (policySide === 'short' && !snrAllowShort ? 'Entry hint: подождать' : '')}">
-          Вошёл SHORT
+        <button type="button" id="btnJournalEntryShort" class="btn-entry-short${shortLoadingClass}" ${canEnterShort || canEnterManual ? '' : 'disabled'} title="${canEnterShort ? '' : (!entryFillReady && !hasOpen ? 'Укажите цену и notional с биржи' : (policySide === 'short' && !snrAllowShort ? 'Entry hint: подождать' : ''))}">
+          ${shortLabel}
         </button>
-        <button type="button" id="btnJournalExit" class="btn-exit" ${hasOpen ? '' : 'disabled'}>
-          Вышел
+        <button type="button" id="btnJournalExit" class="btn-exit${exitLoadingClass}" ${canExit ? '' : 'disabled'} title="${canExit ? '' : (hasOpen && !exitFillReady ? 'Укажите цену выхода с биржи' : '')}">
+          ${exitLabel}
         </button>
-        <button type="button" id="btnJournalDiscard" ${hasOpen ? '' : 'disabled'} title="Сбросить без записи в историю">
-          Сброс
+        <button type="button" id="btnJournalDiscard"${discardLoadingClass ? ` class="btn-discard${discardLoadingClass}"` : ''} ${canDiscard ? '' : 'disabled'} title="Сбросить без записи в историю">
+          ${discardLabel}
         </button>
       </div>
     `;
@@ -1554,14 +1658,24 @@
   }
 
   function handleJournalEntry(symbol, side) {
+    if (journalActionPending) return;
     if (!latestX1Bar) {
-      setStatus('Нет x1-бара для entry', true);
+      setStatus('Нет x1-бара для привязки по времени', true);
       return;
     }
-    const entryPrice = Number(latestX1Bar.close_price);
+    const entryPrice = parseJournalFillPrice();
+    const notionalUsd = parseJournalNotionalUsd();
+    if (entryPrice === null || notionalUsd === null) {
+      setStatus('Укажите цену и notional с биржи', true);
+      return;
+    }
+    const actionKey = side === 'long' ? 'entry-long' : 'entry-short';
+    const pendingMessage = side === 'long' ? 'Входим LONG…' : 'Входим SHORT…';
+    setJournalActionPending({ actionKey, message: pendingMessage });
+    setStatus('Запись входа…');
+
     const policyAction = lastPolicy && lastPolicy.action ? String(lastPolicy.action).toUpperCase() : null;
     const evalHorizon = getJournalEvalHorizon();
-    const notionalUsd = getJournalNotionalUsd();
     const entrySnapshot = buildEntryJournalPayload(side);
 
     API.tradeJournalEntry({
@@ -1577,49 +1691,80 @@
       entry_policy: entrySnapshot.entryPolicy,
       entry_predictions: entrySnapshot.entryPredictions,
     })
-      .then(() => {
+      .then((state) => {
+        resetJournalFillFields();
         resetHorizonAlertState();
         resetExitGbmAlertState();
         resetExitTransformerAlertState();
         resetExitOverlaySession();
-        return refreshTradeJournal(symbol);
+        setJournalActionPending(null);
+        applyJournalState(state, symbol);
+        setStatus('Вход записан');
       })
-      .catch(e => setStatus('Entry: ' + parseErrorDetail(e.message), true));
+      .catch(e => {
+        setJournalActionPending(null);
+        setStatus('Entry: ' + parseErrorDetail(e.message), true);
+      });
   }
 
   function handleJournalExit(symbol) {
+    if (journalActionPending) return;
     if (!latestX1Bar) {
-      setStatus('Нет x1-бара для exit', true);
+      setStatus('Нет x1-бара для привязки по времени', true);
       return;
     }
+    const exitPrice = parseJournalFillPrice();
+    if (exitPrice === null) {
+      setStatus('Укажите цену выхода с биржи', true);
+      return;
+    }
+    setJournalActionPending({ actionKey: 'exit', message: 'Выходим…' });
+    setStatus('Запись выхода…');
+
     API.tradeJournalExit({
-      exit_price: Number(latestX1Bar.close_price),
+      exit_price: exitPrice,
       exit_start_trade_id: Number(latestX1Bar.start_trade_id),
       exit_timestamp_ms: Number(latestX1Bar.end_timestamp_ms || latestX1Bar.start_timestamp_ms),
       notes: '',
       exit_overlay: buildExitOverlayPayloadForClose(),
     })
-      .then(() => {
+      .then((state) => {
+        resetJournalFillFields();
         resetHorizonAlertState();
         resetExitGbmAlertState();
         resetExitTransformerAlertState();
         resetExitOverlaySession();
-        return refreshTradeJournal(symbol);
+        setJournalActionPending(null);
+        applyJournalState(state, symbol);
+        setStatus('Выход записан');
       })
-      .catch(e => setStatus('Exit: ' + parseErrorDetail(e.message), true));
+      .catch(e => {
+        setJournalActionPending(null);
+        setStatus('Exit: ' + parseErrorDetail(e.message), true);
+      });
   }
 
   function handleJournalDiscard(symbol) {
+    if (journalActionPending) return;
     if (!window.confirm('Сбросить открытую позицию без записи в историю?')) return;
+    setJournalActionPending({ actionKey: 'discard', message: 'Сброс…' });
+    setStatus('Сброс позиции…');
+
     API.tradeJournalDiscardOpen()
-      .then(() => {
+      .then((state) => {
+        resetJournalFillFields();
         resetHorizonAlertState();
         resetExitGbmAlertState();
         resetExitTransformerAlertState();
         resetExitOverlaySession();
-        return refreshTradeJournal(symbol);
+        setJournalActionPending(null);
+        applyJournalState(state, symbol);
+        setStatus('Позиция сброшена');
       })
-      .catch(e => setStatus('Discard: ' + parseErrorDetail(e.message), true));
+      .catch(e => {
+        setJournalActionPending(null);
+        setStatus('Discard: ' + parseErrorDetail(e.message), true);
+      });
   }
 
   function isDowLevel(value) {
@@ -1657,9 +1802,9 @@
             opt.textContent = l;
             scaleSelect.appendChild(opt);
           });
-          // Масштаб по умолчанию для обычных баров — x4096 (если доступен).
-          if (scales.includes('x4096')) {
-            scaleSelect.value = 'x4096';
+          const defaultScale = config.defaultScale != null ? String(config.defaultScale) : 'x2048';
+          if (scales.includes(defaultScale)) {
+            scaleSelect.value = defaultScale;
           }
         });
       }),
@@ -2633,7 +2778,6 @@
       checkpointPathBySymbol = config.checkpointPathBySymbol || {};
       if (config.defaultLimit) {
         limitInput.placeholder = config.defaultLimit;
-        // По умолчанию количество баров фиксировано и равно defaultLimit (min(MAX, 1000)).
         limitInput.value = config.defaultLimit;
       }
       await initDropdowns();

@@ -593,6 +593,21 @@ body {
   cursor: not-allowed;
 }
 
+.trade-journal-actions button.is-loading {
+  opacity: 0.75;
+  cursor: wait;
+}
+
+.trade-journal-action-status {
+  font-size: 0.85rem;
+  color: #90caf9;
+  margin: 0.25rem 0 0.35rem;
+}
+
+.trade-journal-action-status.hidden {
+  display: none;
+}
+
 .trade-journal-actions button.btn-entry-long {
   border-color: var(--green);
   color: var(--green);

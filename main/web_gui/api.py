@@ -40,9 +40,9 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title='OKX Data Set Web GUI', version='0.1.0')
 
-# Дефолтное число баров для обычных свечей:
-# минимум между глобальным лимитом и 1000 (остальное пользователь указывает явно).
-DEFAULT_BARS_LIMIT = min(settings.WEB_GUI_RECORDS_LIMIT, 1000)
+# Дефолтное число баров для GUI = WEB_GUI_RECORDS_LIMIT (обычно 10M).
+DEFAULT_BARS_LIMIT = settings.WEB_GUI_RECORDS_LIMIT
+DEFAULT_CHART_SCALE = 'x2048'
 
 
 @app.get('/api/symbols')
@@ -86,6 +86,7 @@ def get_config() -> dict:
     )
     return {
         'defaultLimit': DEFAULT_BARS_LIMIT,
+        'defaultScale': DEFAULT_CHART_SCALE,
         'refreshIntervalSec': settings.WEB_GUI_REFRESH_INTERVAL_SEC,
         'inferenceMinRows': inference_min_rows,
         'inferenceErrorBySymbolAndHorizon': metadata['error_by_symbol_and_horizon'],
@@ -310,31 +311,28 @@ def post_trade_journal_entry(body: TradeJournalEntryRequest) -> dict:
         raise HTTPException(422, detail=f'Unknown symbol_id: {body.symbol_id}')
 
     try:
-        position = run_in_spawned_process(
+        return run_in_spawned_process(
             _worker_trade_journal_entry,
             body.model_dump(),
         )
     except ValueError as exception:
         raise HTTPException(409, detail=str(exception))
-    return {'open_position': position}
 
 
 @app.post('/api/trade-journal/exit')
 def post_trade_journal_exit(body: TradeJournalExitRequest) -> dict:
     try:
-        closed_trade = run_in_spawned_process(
+        return run_in_spawned_process(
             _worker_trade_journal_exit,
             body.model_dump(),
         )
     except ValueError as exception:
         raise HTTPException(409, detail=str(exception))
-    return {'closed_trade': closed_trade}
 
 
 @app.delete('/api/trade-journal/open')
 def delete_trade_journal_open() -> dict:
-    run_in_spawned_process(_worker_trade_journal_discard)
-    return {'ok': True}
+    return run_in_spawned_process(_worker_trade_journal_discard)
 
 
 def mount_static(static_dir: str) -> None:

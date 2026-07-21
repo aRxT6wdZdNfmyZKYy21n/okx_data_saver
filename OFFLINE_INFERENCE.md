@@ -52,6 +52,8 @@ See `.env.example`:
 - `TRADING_BOT_ROOT` — for NPZ loader policy/gate post-processing (one-way import, no cycle)
 - `INFERENCE_DAEMON_*` — symbol, interval (default 60s), bars limit (default 10M)
 - `WEB_GUI_INFERENCE_API_BASE_URL` — still used by daemon/export to call `inference_api`
+- `WEB_GUI_TRADE_JOURNAL_PATH` — micro-live journal JSON (default `data/trade_journal.json`; set per web_gui instance)
+- `WEB_GUI_TRADE_JOURNAL_DEFAULT_EVAL_HORIZON` — journal UI default horizon (`x2048`, `x1536`, …)
 - `POLARS_MAX_THREADS` — Polars thread pool cap (default 14)
 - `WEB_GUI_BARS_REDIS_CACHE_ENABLED`, `BARS_REDIS_*` — x1 bars Redis cache and refresh lock
 

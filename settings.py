@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
 
     # Web GUI (okx_data_set_record_data_2 viewer)
-    WEB_GUI_RECORDS_LIMIT: int = 1_000_000
+    WEB_GUI_RECORDS_LIMIT: int = 10_000_000
     WEB_GUI_TRADE_RESEARCH_LIMIT: int = 10_000_000
     # Sample stride for sequential hybrid backtest PnL (1 = exact, 128 ≈ fast)
     WEB_GUI_TRADE_RESEARCH_PNL_STRIDE: int = 128
@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     WEB_GUI_EXIT_GBM_ENABLED: bool = False
     # Exit Transformer v2 overlay (043: delta_pnl vs fixed-H)
     WEB_GUI_EXIT_TRANSFORMER_ENABLED: bool = False
+    # Per-instance trade journal (micro live 020); relative paths are under repo root
+    WEB_GUI_TRADE_JOURNAL_PATH: str = 'data/trade_journal.json'
+    WEB_GUI_TRADE_JOURNAL_DEFAULT_EVAL_HORIZON: str = 'x2048'
 
     # Offline inference daemon (writes data/inference/{symbol}/latest_inference.json)
     INFERENCE_DAEMON_SYMBOL: str = 'BTC_USDT'
