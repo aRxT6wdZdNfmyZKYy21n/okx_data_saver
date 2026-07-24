@@ -1,6 +1,6 @@
 """
 Выполнение запросов с Polars в отдельном процессе (spawn), чтобы избежать утечки памяти.
-Одновременно выполняется не более одного такого процесса (ограничение по Lock).
+heavy/light пулы в main.spawn_process (Polars только внутри дочернего процесса).
 """
 
 import logging
@@ -16,8 +16,8 @@ from main.web_gui.inference_service import run_remote_inference
 from main.web_gui.trade_research_artifact_service import run_trade_research_from_artifact
 from main.web_gui.serialization import serialize_bar_row
 from main.web_gui.trade_journal_service import (
-    apply_mark_price_to_open_position,
     build_journal_response,
+    build_trade_journal_api_response,
     close_position,
     discard_open_position,
     get_journal_state,
@@ -99,38 +99,51 @@ def _worker_exit_transformer(payload: dict) -> dict[str, object]:
     return run_remote_exit_transformer(payload)
 
 
-def _build_trade_journal_api_response(
+def _resolve_bars_elapsed_from_db(
     symbol_id_str: str,
     mark_price: float | None,
-) -> dict:
+) -> int | None:
+    if mark_price is None:
+        return None
     journal = get_journal_state()
     open_position_data = journal['open_position']
-    bars_elapsed = None
-    if (
-        open_position_data is not None
-        and open_position_data['symbol_id'] == symbol_id_str
-        and mark_price is not None
-    ):
-        apply_mark_price_to_open_position(mark_price=mark_price)
-        journal = get_journal_state()
-        open_position_data = journal['open_position']
-        symbol = SymbolId[symbol_id_str]
-        entry_start_trade_id = int(open_position_data['entry_start_trade_id'])
-        bars_elapsed = count_x1_bars_since_entry_sync(
-            symbol_id=symbol,
-            entry_start_trade_id=entry_start_trade_id,
-        )
-    return build_journal_response(journal, bars_elapsed, mark_price)
+    if open_position_data is None:
+        return None
+    if open_position_data['symbol_id'] != symbol_id_str:
+        return None
+    symbol = SymbolId[symbol_id_str]
+    entry_start_trade_id = int(open_position_data['entry_start_trade_id'])
+    return count_x1_bars_since_entry_sync(
+        symbol_id=symbol,
+        entry_start_trade_id=entry_start_trade_id,
+    )
 
 
-def _worker_trade_journal_state(
+def _build_trade_journal_api_response_with_db_bars_elapsed(
     symbol_id_str: str,
     mark_price: float | None,
 ) -> dict:
-    """Загружает journal и при открытой позиции считает bars_elapsed из БД."""
-    return _build_trade_journal_api_response(
+    bars_elapsed = _resolve_bars_elapsed_from_db(
         symbol_id_str=symbol_id_str,
         mark_price=mark_price,
+    )
+    return build_trade_journal_api_response(
+        symbol_id_str=symbol_id_str,
+        mark_price=mark_price,
+        bars_elapsed=bars_elapsed,
+        persist_mark_price=True,
+    )
+
+
+def _worker_trade_journal_bars_elapsed(
+    symbol_id_str: str,
+    entry_start_trade_id: int,
+) -> int | None:
+    """COUNT(*) x1 баров с entry — только в spawn-процессе (Polars)."""
+    symbol = SymbolId[symbol_id_str]
+    return count_x1_bars_since_entry_sync(
+        symbol_id=symbol,
+        entry_start_trade_id=entry_start_trade_id,
     )
 
 
@@ -150,7 +163,7 @@ def _worker_trade_journal_entry(payload: dict) -> dict:
         entry_policy=entry_policy,
         entry_predictions=entry_predictions,
     )
-    return _build_trade_journal_api_response(
+    return _build_trade_journal_api_response_with_db_bars_elapsed(
         symbol_id_str=payload['symbol_id'],
         mark_price=float(payload['entry_price']),
     )
@@ -167,7 +180,7 @@ def _worker_trade_journal_exit(payload: dict) -> dict:
         notes=payload['notes'],
         exit_overlay=exit_overlay,
     )
-    return _build_trade_journal_api_response(
+    return _build_trade_journal_api_response_with_db_bars_elapsed(
         symbol_id_str=closed_trade['symbol_id'],
         mark_price=float(payload['exit_price']),
     )

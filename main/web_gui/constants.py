@@ -25,3 +25,22 @@ DOW_LEVEL_NAMES = [
 
 # Максимум баров, отдаваемых chart API (хвост загруженного окна).
 CHART_SHOW_LIMIT = 50000
+
+
+def chart_x1_fetch_limit(
+    scale: str,
+    offset: int,
+    requested_limit: int | None,
+    records_cap: int,
+) -> int:
+    """
+    Сколько x1-баров нужно загрузить из БД для chart API:
+    достаточно для CHART_SHOW_LIMIT агрегированных баров на scale + offset.
+    """
+    mult = scale_to_multiplier(scale)
+    needed = (CHART_SHOW_LIMIT + 1) * mult + offset
+    if requested_limit is not None:
+        needed = min(needed, requested_limit)
+    if needed < 1:
+        needed = 1
+    return min(needed, records_cap)

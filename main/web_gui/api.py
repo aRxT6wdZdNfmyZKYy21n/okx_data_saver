@@ -2,6 +2,7 @@
 REST API веб-GUI: символы, бары с пагинацией и масштабом.
 """
 
+import asyncio
 import logging
 import os
 
@@ -11,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from enumerations import SymbolId
-from main.web_gui.constants import CHART_SHOW_LIMIT, DOW_LEVEL_NAMES, SCALE_NAMES
+from main.web_gui.constants import CHART_SHOW_LIMIT, DOW_LEVEL_NAMES, SCALE_NAMES, chart_x1_fetch_limit
 from main.web_gui.exit_policy_service import (
     build_exit_policy_disabled_response,
     run_remote_exit_policy,
@@ -24,14 +25,17 @@ from main.web_gui.inference_artifact_service import get_inference_artifact
 from main.web_gui.inference_service import (
     fetch_inference_metadata,
 )
-from main.spawn_process import run_in_spawned_process
+from main.web_gui.trade_journal_service import build_trade_journal_api_response
+from main.spawn_process import run_in_spawned_process_async
 from main.web_gui.request_workers import (
     _worker_bars,
     _worker_dow,
+    _worker_exit_policy,
+    _worker_exit_transformer,
+    _worker_trade_journal_bars_elapsed,
     _worker_trade_journal_discard,
     _worker_trade_journal_entry,
     _worker_trade_journal_exit,
-    _worker_trade_journal_state,
     _worker_trade_research_from_artifact,
 )
 from settings import settings
@@ -64,9 +68,9 @@ def list_dow_levels() -> list[str]:
 
 
 @app.get('/api/config')
-def get_config() -> dict:
+async def get_config() -> dict:
     """Параметры для фронта: лимит по умолчанию, интервал обновления (сек)."""
-    metadata = fetch_inference_metadata()
+    metadata = await asyncio.to_thread(fetch_inference_metadata)
     inference_min_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
     policy_by_symbol = metadata['policy_by_symbol'] if 'policy_by_symbol' in metadata else {}
     checkpoint_path_by_symbol = (
@@ -103,7 +107,7 @@ def get_config() -> dict:
 
 
 @app.get('/api/bars')
-def get_bars(
+async def get_bars(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
     limit: int | None = Query(None, ge=1, description='Max bars to return (default from config)'),
     offset: int = Query(0, ge=0),
@@ -114,16 +118,26 @@ def get_bars(
     scale — агрегация на бэкенде (x1 = без агрегации).
     """
     try:
-        symbol = SymbolId[symbol_id]
+        SymbolId[symbol_id]
     except KeyError:
         raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
 
     if scale not in SCALE_NAMES:
         raise HTTPException(422, detail=f'Unknown scale: {scale}')
 
-    effective_limit = min(limit or DEFAULT_BARS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
-    bars = run_in_spawned_process(
-        _worker_bars, symbol_id, effective_limit, offset, scale,
+    effective_limit = chart_x1_fetch_limit(
+        scale=scale,
+        offset=offset,
+        requested_limit=limit,
+        records_cap=settings.WEB_GUI_RECORDS_LIMIT,
+    )
+    bars = await run_in_spawned_process_async(
+        _worker_bars,
+        symbol_id,
+        effective_limit,
+        offset,
+        scale,
+        pool_kind='heavy',
     )
     if bars is None:
         return {'bars': [], 'count': 0}
@@ -131,7 +145,7 @@ def get_bars(
 
 
 @app.get('/api/dow')
-def get_dow(
+async def get_dow(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
     limit: int | None = Query(None, ge=1),
     level: int = Query(..., ge=1, le=10, description='Уровень теории Доу 1..10'),
@@ -140,19 +154,30 @@ def get_dow(
     Бары по теории Доу для выбранного уровня: OHLCV из тензоров после прогона баров через калькулятор.
     """
     try:
-        symbol = SymbolId[symbol_id]
+        SymbolId[symbol_id]
     except KeyError:
         raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
 
-    effective_limit = min(limit or settings.WEB_GUI_RECORDS_LIMIT, settings.WEB_GUI_RECORDS_LIMIT)
-    bars = run_in_spawned_process(_worker_dow, symbol_id, effective_limit, level)
+    effective_limit = chart_x1_fetch_limit(
+        scale='x1',
+        offset=0,
+        requested_limit=limit,
+        records_cap=settings.WEB_GUI_RECORDS_LIMIT,
+    )
+    bars = await run_in_spawned_process_async(
+        _worker_dow,
+        symbol_id,
+        effective_limit,
+        level,
+        pool_kind='heavy',
+    )
     if bars is None:
         raise HTTPException(503, detail='Dow theory aggregator not available or failed')
     return {'bars': bars, 'count': len(bars)}
 
 
 @app.get('/api/inference')
-def get_inference(
+async def get_inference(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
     limit: int | None = Query(
         None,
@@ -166,11 +191,11 @@ def get_inference(
         raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
 
     del limit
-    return get_inference_artifact(symbol_id=symbol_id)
+    return await asyncio.to_thread(get_inference_artifact, symbol_id=symbol_id)
 
 
 @app.get('/api/trade-research')
-def get_trade_research(
+async def get_trade_research(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
     eval_horizon: str = Query('x2048', description='Eval horizon, e.g. x2048'),
     step_bars: int | None = Query(None, ge=1, description='Non-overlapping step in x1 bars'),
@@ -197,13 +222,14 @@ def get_trade_research(
     else:
         effective_step_bars = step_bars
 
-    return run_in_spawned_process(
+    return await run_in_spawned_process_async(
         _worker_trade_research_from_artifact,
         symbol_id,
         eval_horizon,
         effective_step_bars,
         visible_min_start_trade_id,
         visible_max_start_trade_id,
+        pool_kind='heavy',
     )
 
 
@@ -259,7 +285,7 @@ class ExitTransformerRequest(BaseModel):
 
 
 @app.post('/api/exit-policy')
-def post_exit_policy(body: ExitPolicyRequest) -> dict:
+async def post_exit_policy(body: ExitPolicyRequest) -> dict:
     try:
         SymbolId[body.symbol_id]
     except KeyError:
@@ -268,14 +294,15 @@ def post_exit_policy(body: ExitPolicyRequest) -> dict:
     if not settings.WEB_GUI_EXIT_GBM_ENABLED:
         return build_exit_policy_disabled_response()
 
-    return run_in_spawned_process(
+    return await run_in_spawned_process_async(
         _worker_exit_policy,
         body.model_dump(),
+        pool_kind='heavy',
     )
 
 
 @app.post('/api/exit-transformer')
-def post_exit_transformer(body: ExitTransformerRequest) -> dict:
+async def post_exit_transformer(body: ExitTransformerRequest) -> dict:
     try:
         SymbolId[body.symbol_id]
     except KeyError:
@@ -284,9 +311,10 @@ def post_exit_transformer(body: ExitTransformerRequest) -> dict:
     if not settings.WEB_GUI_EXIT_TRANSFORMER_ENABLED:
         return build_exit_transformer_disabled_response()
 
-    return run_in_spawned_process(
+    return await run_in_spawned_process_async(
         _worker_exit_transformer,
         body.model_dump(),
+        pool_kind='heavy',
     )
 
 
@@ -294,45 +322,79 @@ def post_exit_transformer(body: ExitTransformerRequest) -> dict:
 def get_trade_journal(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
     mark_price: float | None = Query(None, gt=0, description='Latest x1 close for unrealized PnL'),
+    bars_elapsed: int | None = Query(
+        None,
+        ge=0,
+        description='Cached bars elapsed from client (DB count via /bars-elapsed)',
+    ),
 ) -> dict:
     try:
         SymbolId[symbol_id]
     except KeyError:
         raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
 
-    return run_in_spawned_process(_worker_trade_journal_state, symbol_id, mark_price)
+    return build_trade_journal_api_response(
+        symbol_id_str=symbol_id,
+        mark_price=mark_price,
+        bars_elapsed=bars_elapsed,
+        persist_mark_price=False,
+    )
+
+
+@app.get('/api/trade-journal/bars-elapsed')
+async def get_trade_journal_bars_elapsed(
+    symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
+    entry_start_trade_id: int = Query(..., ge=0, description='Entry bar start_trade_id'),
+) -> dict:
+    try:
+        SymbolId[symbol_id]
+    except KeyError:
+        raise HTTPException(422, detail=f'Unknown symbol_id: {symbol_id}')
+
+    bars_elapsed = await run_in_spawned_process_async(
+        _worker_trade_journal_bars_elapsed,
+        symbol_id,
+        entry_start_trade_id,
+        pool_kind='light',
+    )
+    return {'bars_elapsed': bars_elapsed}
 
 
 @app.post('/api/trade-journal/entry')
-def post_trade_journal_entry(body: TradeJournalEntryRequest) -> dict:
+async def post_trade_journal_entry(body: TradeJournalEntryRequest) -> dict:
     try:
         SymbolId[body.symbol_id]
     except KeyError:
         raise HTTPException(422, detail=f'Unknown symbol_id: {body.symbol_id}')
 
     try:
-        return run_in_spawned_process(
+        return await run_in_spawned_process_async(
             _worker_trade_journal_entry,
             body.model_dump(),
+            pool_kind='journal',
         )
     except ValueError as exception:
         raise HTTPException(409, detail=str(exception))
 
 
 @app.post('/api/trade-journal/exit')
-def post_trade_journal_exit(body: TradeJournalExitRequest) -> dict:
+async def post_trade_journal_exit(body: TradeJournalExitRequest) -> dict:
     try:
-        return run_in_spawned_process(
+        return await run_in_spawned_process_async(
             _worker_trade_journal_exit,
             body.model_dump(),
+            pool_kind='journal',
         )
     except ValueError as exception:
         raise HTTPException(409, detail=str(exception))
 
 
 @app.delete('/api/trade-journal/open')
-def delete_trade_journal_open() -> dict:
-    return run_in_spawned_process(_worker_trade_journal_discard)
+async def delete_trade_journal_open() -> dict:
+    return await run_in_spawned_process_async(
+        _worker_trade_journal_discard,
+        pool_kind='journal',
+    )
 
 
 def mount_static(static_dir: str) -> None:

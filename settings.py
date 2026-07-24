@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     BARS_REDIS_LOCK_WAIT_SEC: int = 300
     BARS_REDIS_LOCK_POLL_INTERVAL_SEC: float = 0.5
 
+    # Spawn worker pools (Polars isolation). heavy=1 avoids parallel 10M-bar loads.
+    SPAWN_WORKER_HEAVY_POOL_SIZE: int = 1
+    SPAWN_WORKER_LIGHT_POOL_SIZE: int = 2
+    SPAWN_WORKER_JOURNAL_POOL_SIZE: int = 1
+
     model_config = SettingsConfigDict(
         env_file='.env',
         extra='forbid',

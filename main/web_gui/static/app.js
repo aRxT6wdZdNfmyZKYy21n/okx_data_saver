@@ -31,6 +31,10 @@
       const q = new URLSearchParams(params).toString();
       return this.get('./api/trade-journal?' + q);
     },
+    async tradeJournalBarsElapsed(params) {
+      const q = new URLSearchParams(params).toString();
+      return this.get('./api/trade-journal/bars-elapsed?' + q);
+    },
     async tradeJournalEntry(body) {
       const r = await fetch('./api/trade-journal/entry', {
         method: 'POST',
@@ -104,6 +108,20 @@
   let tradeResearchLineSeries = [];
   let extremaLineSeries = [];
   let refreshTimer = null;
+  let inferenceRefreshTimer = null;
+  let journalRefreshTimer = null;
+  let journalBarsElapsedTimer = null;
+  let x1BarRefreshTimer = null;
+  let loadBarsInFlight = false;
+  let loadInferenceInFlight = false;
+  let refreshJournalInFlight = false;
+  let refreshBarsElapsedInFlight = false;
+  let refreshX1BarInFlight = false;
+  let lastJournalBarsElapsed = null;
+  const INFERENCE_REFRESH_INTERVAL_SEC = 10;
+  const JOURNAL_REFRESH_INTERVAL_SEC = 15;
+  const JOURNAL_BARS_ELAPSED_INTERVAL_SEC = 30;
+  const X1_BAR_REFRESH_INTERVAL_SEC = 60;
   const scaleSelect = document.getElementById('scale');
   const symbolSelect = document.getElementById('symbol');
   const limitInput = document.getElementById('limit');
@@ -153,6 +171,7 @@
   let lastComputingStartedAtMs = null;
   let inferenceStatusTickTimer = null;
   let latestX1Bar = null;
+  let lastChartBarClose = null;
   let journalDefaults = {
     notional_usd: 7,
     eval_horizon: 'x2048',
@@ -1222,6 +1241,106 @@
       });
   }
 
+  function updateLatestX1BarFromBarsData(data, scale) {
+    const bars = data.bars || [];
+    if (bars.length === 0) {
+      return;
+    }
+    const lastBar = bars[bars.length - 1];
+    if (lastBar.close_price != null) {
+      lastChartBarClose = Number(lastBar.close_price);
+    }
+    if (scale === 'x1') {
+      latestX1Bar = lastBar;
+    }
+  }
+
+  function getMarkPriceForJournal() {
+    if (latestX1Bar && latestX1Bar.close_price != null) {
+      return Number(latestX1Bar.close_price);
+    }
+    if (lastChartBarClose != null) {
+      return lastChartBarClose;
+    }
+    return null;
+  }
+
+  function buildTradeJournalParams(symbol) {
+    const params = { symbol_id: symbol };
+    const markPrice = getMarkPriceForJournal();
+    if (markPrice != null) {
+      params.mark_price = String(markPrice);
+    }
+    if (lastJournalBarsElapsed != null) {
+      params.bars_elapsed = String(lastJournalBarsElapsed);
+    }
+    return params;
+  }
+
+  function fetchAndApplyTradeJournal(symbol) {
+    return API.tradeJournal(buildTradeJournalParams(symbol))
+      .then(state => {
+        applyJournalState(state, symbol);
+        return state;
+      });
+  }
+
+  function pollJournalBarsElapsed(symbol, entryStartTradeId) {
+    if (refreshBarsElapsedInFlight) {
+      return Promise.resolve();
+    }
+    refreshBarsElapsedInFlight = true;
+    return API.tradeJournalBarsElapsed({
+      symbol_id: symbol,
+      entry_start_trade_id: String(entryStartTradeId),
+    })
+      .then(data => {
+        if (data.bars_elapsed == null) {
+          return;
+        }
+        const nextBarsElapsed = Number(data.bars_elapsed);
+        if (lastJournalBarsElapsed === nextBarsElapsed) {
+          return;
+        }
+        lastJournalBarsElapsed = nextBarsElapsed;
+        return fetchAndApplyTradeJournal(symbol);
+      })
+      .catch(() => {})
+      .finally(() => {
+        refreshBarsElapsedInFlight = false;
+      });
+  }
+
+  function refreshLatestX1Bar() {
+    const symbol = symbolSelect.value;
+    if (!symbol || refreshX1BarInFlight) {
+      return Promise.resolve();
+    }
+    refreshX1BarInFlight = true;
+    return fetchLatestX1Bar(symbol)
+      .then(() => {
+        if (symbolSelect.value === symbol) {
+          return fetchAndApplyTradeJournal(symbol);
+        }
+      })
+      .finally(() => {
+        refreshX1BarInFlight = false;
+      });
+  }
+
+  function refreshInferencePanel() {
+    const symbol = symbolSelect.value;
+    if (!symbol || loadInferenceInFlight) {
+      return Promise.resolve();
+    }
+    loadInferenceInFlight = true;
+    const limit = limitInput.value ? parseInt(limitInput.value, 10) : config.defaultLimit;
+    return loadInference(symbol, limit)
+      .finally(() => {
+        loadInferenceInFlight = false;
+      });
+  }
+
   function buildEntryJournalPayload(side) {
     const evalHorizon = getJournalEvalHorizon();
     let entryPolicy = null;
@@ -1418,31 +1537,64 @@
     }
   }
 
+  function syncJournalBarsElapsedFromState(state) {
+    const openPos = state.open_position;
+    if (openPos && openPos.metrics && openPos.metrics.bars_elapsed != null) {
+      lastJournalBarsElapsed = Number(openPos.metrics.bars_elapsed);
+      return;
+    }
+    lastJournalBarsElapsed = null;
+  }
+
   function applyJournalState(state, symbol) {
+    syncJournalBarsElapsedFromState(state);
     applyJournalDefaultsFromState(state);
     renderTradeJournal(state, symbol);
+    const openPos = state.open_position;
+    if (
+      openPos
+      && openPos.symbol_id === symbol
+      && !openPos.metrics
+      && openPos.entry_start_trade_id != null
+    ) {
+      pollJournalBarsElapsed(symbol, Number(openPos.entry_start_trade_id));
+    }
   }
 
   function refreshTradeJournal(symbol) {
-    if (!symbol) return Promise.resolve();
-    return fetchLatestX1Bar(symbol)
-      .then(bar => {
-        const params = { symbol_id: symbol };
-        if (bar && bar.close_price != null) {
-          params.mark_price = String(Number(bar.close_price));
+    if (!symbol || refreshJournalInFlight) {
+      return Promise.resolve();
+    }
+    refreshJournalInFlight = true;
+    return fetchAndApplyTradeJournal(symbol)
+      .then(state => {
+        const openPos = state.open_position;
+        if (!openPos || openPos.symbol_id !== symbol) {
+          lastJournalBarsElapsed = null;
         }
-        return API.tradeJournal(params);
-      })
-      .then(state => {
-        applyJournalDefaultsFromState(state);
-        return state;
-      })
-      .then(state => {
-        applyJournalState(state, symbol);
       })
       .catch(e => {
         tradeJournalContent.innerHTML = `<div class="trade-journal-loading">Ошибка журнала: ${parseErrorDetail(e.message)}</div>`;
+      })
+      .finally(() => {
+        refreshJournalInFlight = false;
       });
+  }
+
+  function refreshJournalBarsElapsedOnly() {
+    const symbol = symbolSelect.value;
+    if (!symbol || !journalHasOpenPosition || !lastJournalState) {
+      return Promise.resolve();
+    }
+    const openPos = lastJournalState.open_position;
+    if (
+      !openPos
+      || openPos.symbol_id !== symbol
+      || openPos.entry_start_trade_id == null
+    ) {
+      return Promise.resolve();
+    }
+    return pollJournalBarsElapsed(symbol, Number(openPos.entry_start_trade_id));
   }
 
   function renderTradeJournal(state, symbol) {
@@ -2674,6 +2826,9 @@
   }
 
   function loadBars() {
+    if (loadBarsInFlight) {
+      return;
+    }
     const scale = scaleSelect.value;
     if (!scale) return;
 
@@ -2690,6 +2845,7 @@
     if (!symbol) return;
     const limit = limitInput.value ? parseInt(limitInput.value, 10) : config.defaultLimit;
     setStatus('Загрузка…');
+    loadBarsInFlight = true;
 
     const effectiveScale = scaleSelect.value;
     const promise = isDowLevel(effectiveScale)
@@ -2699,25 +2855,65 @@
     promise
       .then(data => {
         applyBarsToChart(data, effectiveScale);
-        return loadInference(symbol, limit);
-      })
-      .then(() => {
+        updateLatestX1BarFromBarsData(data, effectiveScale);
         if (!isTradeResearchEnabled()) {
           return null;
         }
         return loadTradeResearch(symbol);
       })
-      .then(() => refreshTradeJournal(symbol))
       .catch(e => {
         setStatus('Ошибка: ' + e.message, true);
-        setInferenceWarning(parseErrorDetail(e.message));
+      })
+      .finally(() => {
+        loadBarsInFlight = false;
       });
+  }
+
+  function stopIndependentRefreshTimers() {
+    if (inferenceRefreshTimer) clearInterval(inferenceRefreshTimer);
+    if (journalRefreshTimer) clearInterval(journalRefreshTimer);
+    if (journalBarsElapsedTimer) clearInterval(journalBarsElapsedTimer);
+    if (x1BarRefreshTimer) clearInterval(x1BarRefreshTimer);
+    inferenceRefreshTimer = null;
+    journalRefreshTimer = null;
+    journalBarsElapsedTimer = null;
+    x1BarRefreshTimer = null;
+  }
+
+  function startIndependentRefreshTimers() {
+    stopIndependentRefreshTimers();
+    inferenceRefreshTimer = setInterval(
+      refreshInferencePanel,
+      INFERENCE_REFRESH_INTERVAL_SEC * 1000,
+    );
+    journalRefreshTimer = setInterval(() => {
+      const symbol = symbolSelect.value;
+      if (symbol) {
+        refreshTradeJournal(symbol);
+      }
+    }, JOURNAL_REFRESH_INTERVAL_SEC * 1000);
+    journalBarsElapsedTimer = setInterval(
+      refreshJournalBarsElapsedOnly,
+      JOURNAL_BARS_ELAPSED_INTERVAL_SEC * 1000,
+    );
+    x1BarRefreshTimer = setInterval(
+      refreshLatestX1Bar,
+      X1_BAR_REFRESH_INTERVAL_SEC * 1000,
+    );
   }
 
   function startAutoRefresh() {
     if (refreshTimer) clearInterval(refreshTimer);
-    if (!autoRefreshCheck.checked) return;
+    refreshTimer = null;
+    if (!autoRefreshCheck.checked) {
+      return;
+    }
     refreshTimer = setInterval(loadBars, config.refreshIntervalSec * 1000);
+  }
+
+  function startBackgroundRefreshTimers() {
+    stopIndependentRefreshTimers();
+    startIndependentRefreshTimers();
   }
 
   function initCvdWindowDropdown() {
@@ -2745,6 +2941,11 @@
     concentrationPanel.classList.remove('hidden');
     cumulativePanel.classList.remove('hidden');
     loadBars();
+    refreshInferencePanel();
+    const symbol = symbolSelect.value;
+    if (symbol) {
+      refreshTradeJournal(symbol);
+    }
   });
   autoRefreshCheck.addEventListener('change', startAutoRefresh);
   if (extremaLinesEnabledCheck) {
@@ -2804,6 +3005,13 @@
         }
       });
       loadBars();
+      refreshLatestX1Bar();
+      refreshInferencePanel();
+      const initialSymbol = symbolSelect.value;
+      if (initialSymbol) {
+        refreshTradeJournal(initialSymbol);
+      }
+      startBackgroundRefreshTimers();
       startAutoRefresh();
     } catch (e) {
       setStatus('Ошибка инициализации: ' + e.message, true);

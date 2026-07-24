@@ -155,20 +155,42 @@ def apply_mark_price_to_open_position(mark_price: float) -> None:
         open_position_data = journal['open_position']
         if open_position_data is None:
             return
-        side = open_position_data['side']
-        entry_price = float(open_position_data['entry_price'])
-        if 'excursion' in open_position_data:
-            excursion = open_position_data['excursion']
-        else:
-            excursion = _empty_excursion_state(entry_price)
-        open_position_data['excursion'] = update_excursion_state(
-            side=side,
-            entry_price=entry_price,
+        open_position_data['excursion'] = _excursion_for_mark_price(
+            open_position_data=open_position_data,
             mark_price=mark_price,
-            excursion=excursion,
         )
         journal['open_position'] = open_position_data
         _save_journal_unlocked(journal)
+
+
+def _excursion_for_mark_price(
+    open_position_data: dict[str, Any],
+    mark_price: float,
+) -> dict[str, float]:
+    side = open_position_data['side']
+    entry_price = float(open_position_data['entry_price'])
+    if 'excursion' in open_position_data:
+        excursion = open_position_data['excursion']
+    else:
+        excursion = _empty_excursion_state(entry_price)
+    return update_excursion_state(
+        side=side,
+        entry_price=entry_price,
+        mark_price=mark_price,
+        excursion=excursion,
+    )
+
+
+def _open_position_with_mark_price_excursion(
+    open_position_data: dict[str, Any],
+    mark_price: float,
+) -> dict[str, Any]:
+    enriched = dict(open_position_data)
+    enriched['excursion'] = _excursion_for_mark_price(
+        open_position_data=open_position_data,
+        mark_price=mark_price,
+    )
+    return enriched
 
 
 def compute_position_metrics(
@@ -391,3 +413,30 @@ def build_journal_response(
             'round_trip_fee_rate': ROUND_TRIP_FEE_RATE,
         },
     }
+
+
+def build_trade_journal_api_response(
+    symbol_id_str: str,
+    mark_price: float | None,
+    bars_elapsed: int | None,
+    persist_mark_price: bool,
+) -> dict[str, Any]:
+    journal = get_journal_state()
+    open_position_data = journal['open_position']
+    if (
+        open_position_data is not None
+        and open_position_data['symbol_id'] == symbol_id_str
+        and mark_price is not None
+    ):
+        if persist_mark_price:
+            apply_mark_price_to_open_position(mark_price=mark_price)
+            journal = get_journal_state()
+        else:
+            journal = {
+                'open_position': _open_position_with_mark_price_excursion(
+                    open_position_data,
+                    mark_price,
+                ),
+                'closed_trades': journal['closed_trades'],
+            }
+    return build_journal_response(journal, bars_elapsed, mark_price)
