@@ -5,7 +5,6 @@ from typing import Any
 
 import numpy as np
 
-from main.offline_inference.trading_bot_imports import ensure_trading_bot_on_path
 from main.web_gui.trade_research_service import (
     OKX_ROUND_TRIP_TAKER_FEE_RATE,
     _direction_action_from_inference,
@@ -17,174 +16,11 @@ from main.web_gui.trade_research_service import (
     _sample_indices_for_pnl_backtest,
     _segment_visible_by_start_trade_id,
     _trade_net_pnl_from_linear_return,
+    build_inference_by_sample_from_npz,
     horizon_steps_from_name,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _policy_action_from_probabilities(probabilities: np.ndarray) -> str:
-    ensure_trading_bot_on_path()
-    from src.tools.trading_policy_common import ACTION_LABELS
-
-    action_id = int(np.argmax(probabilities))
-    return ACTION_LABELS[action_id]
-
-
-def _build_inference_by_sample_from_npz(
-    npz_data: np.lib.npyio.NpzFile,
-    eval_horizon: str,
-) -> dict[int, dict[str, object]]:
-    ensure_trading_bot_on_path()
-    import pickle
-    from pathlib import Path
-
-    import lightgbm as lgb
-
-    from ai_code.load_inference_stack import load_btc_inference_stack
-    from inference_api.entry_hint import build_hybrid_entry_hint_for_policy
-    from inference_api.gate_policy import LoadedGate
-    from src.tools.gate_policy_common import (
-        build_gate_arrays,
-        build_gate_side_channel,
-        load_gate_pickle,
-    )
-    from src.tools.trading_policy_common import (
-        ACTION_HOLD,
-        ACTION_LONG,
-        ACTION_SHORT,
-        ACTION_LABELS,
-        build_policy_arrays,
-    )
-
-    sample_index = npz_data['sample_index'].astype(np.int64)
-    horizon_names = [str(item) for item in npz_data['horizon_names']]
-    row_count = int(sample_index.shape[0])
-
-    predictions_by_horizon = {
-        horizon_name: npz_data[f'pred_{horizon_name}'].astype(np.float64)
-        for horizon_name in horizon_names
-    }
-    eval_target_log2 = npz_data['eval_target_log2'].astype(np.float64)
-
-    stack = load_btc_inference_stack(None)
-    policy_pkl = Path(str(stack['policy_pkl']))
-    gate_pkl = Path(str(stack['gate_pkl']))
-    error_config = Path(str(stack['error_config']))
-    snr_threshold = float(stack['snr_threshold'])
-
-    with policy_pkl.open('rb') as policy_file:
-        policy_payload = pickle.load(policy_file)
-    direction_policy_model: lgb.Booster = policy_payload['model']
-    direction_feature_names = list(policy_payload['feature_names'])
-
-    (
-        gate_model,
-        gate_feature_names,
-        gate_horizon_names,
-        gate_eval_horizon,
-        hold_threshold,
-        gate_label_mode,
-    ) = load_gate_pickle(gate_pkl)
-
-    import yaml
-
-    with error_config.open('r', encoding='utf-8') as error_file:
-        error_config_data = yaml.safe_load(error_file)
-    if 'BTC_USDT' not in error_config_data:
-        raise RuntimeError('error_config missing BTC_USDT')
-    error_by_horizon_map = {
-        str(horizon_name): float(rmse_value)
-        for horizon_name, rmse_value in error_config_data['BTC_USDT'].items()
-    }
-    if eval_horizon not in error_by_horizon_map:
-        raise RuntimeError(f'error_config missing eval horizon {eval_horizon!r}')
-
-    _entry_feature_names, entry_features, _entry_labels = build_policy_arrays(
-        horizon_names=horizon_names,
-        predictions_by_horizon=predictions_by_horizon,
-        eval_target_log2=eval_target_log2,
-        round_trip_fee_rate=OKX_ROUND_TRIP_TAKER_FEE_RATE,
-    )
-    if direction_feature_names != _entry_feature_names:
-        raise RuntimeError('Direction policy feature names mismatch NPZ')
-
-    entry_probabilities = direction_policy_model.predict(entry_features)
-    entry_baseline_actions = np.argmax(entry_probabilities, axis=1).astype(np.int64)
-
-    gate_side_channel_names, gate_side_channel = build_gate_side_channel(
-        predictions_by_horizon=predictions_by_horizon,
-        eval_horizon=eval_horizon,
-        rmse_pct=error_by_horizon_map[eval_horizon],
-        round_trip_fee_rate=OKX_ROUND_TRIP_TAKER_FEE_RATE,
-    )
-    gate_feature_names_from_arrays, gate_features, _gate_labels, _label_mask = (
-        build_gate_arrays(
-            horizon_names=horizon_names,
-            predictions_by_horizon=predictions_by_horizon,
-            eval_target_log2=eval_target_log2,
-            round_trip_fee_rate=OKX_ROUND_TRIP_TAKER_FEE_RATE,
-            side_channel_features=gate_side_channel,
-            side_channel_names=gate_side_channel_names,
-            gate_label_mode=gate_label_mode,
-            entry_baseline_actions=entry_baseline_actions,
-        )
-    )
-    if gate_feature_names_from_arrays != gate_feature_names:
-        raise RuntimeError('Gate feature names mismatch saved gate.pkl')
-
-    loaded_gate = LoadedGate(
-        run_label=str(npz_data['run_label'][0]),
-        gate_path=str(gate_pkl),
-        eval_horizon=gate_eval_horizon,
-        horizon_names=list(gate_horizon_names),
-        hold_probability_threshold=hold_threshold,
-        snr_threshold=snr_threshold,
-        gate_label_mode=gate_label_mode,
-        model=gate_model,
-        feature_names=list(gate_feature_names),
-    )
-
-    inference_by_sample: dict[int, dict[str, object]] = {}
-    for row_index in range(row_count):
-        sample_idx = int(sample_index[row_index])
-        probabilities = entry_probabilities[row_index]
-        policy_action = _policy_action_from_probabilities(probabilities)
-
-        predictions: dict[str, float] = {}
-        for horizon_name in horizon_names:
-            key = f'target_close_return_signed_log2_{horizon_name}'
-            predictions[key] = float(predictions_by_horizon[horizon_name][row_index])
-
-        entry_hint = build_hybrid_entry_hint_for_policy(
-            predictions=predictions,
-            eval_horizon=eval_horizon,
-            policy_action=policy_action,
-            policy_probabilities={
-                ACTION_LABELS[ACTION_HOLD]: float(probabilities[ACTION_HOLD]),
-                ACTION_LABELS[ACTION_LONG]: float(probabilities[ACTION_LONG]),
-                ACTION_LABELS[ACTION_SHORT]: float(probabilities[ACTION_SHORT]),
-            },
-            error_by_horizon=error_by_horizon_map,
-            round_trip_fee_rate=OKX_ROUND_TRIP_TAKER_FEE_RATE,
-            loaded_gate=loaded_gate,
-            snr_threshold=snr_threshold,
-        )
-
-        inference_by_sample[sample_idx] = {
-            'predictions': predictions,
-            'policy': {
-                'action': policy_action,
-                'probabilities': {
-                    'hold': float(probabilities[ACTION_HOLD]),
-                    'long': float(probabilities[ACTION_LONG]),
-                    'short': float(probabilities[ACTION_SHORT]),
-                },
-            },
-            'entry_hint': entry_hint,
-        }
-
-    return inference_by_sample
 
 
 def _sample_index_to_row(sample_index: np.ndarray) -> dict[int, int]:
@@ -347,6 +183,16 @@ def load_trade_research_response(
     meta: dict[str, Any],
     npz_path: str,
 ) -> dict[str, object]:
+    npz_data = np.load(npz_path, allow_pickle=True)
+    stored_eval_horizon = str(npz_data['eval_horizon'][0])
+    if eval_horizon != stored_eval_horizon:
+        logger.warning(
+            'Trade research request eval_horizon=%s differs from artifact %s; using artifact',
+            eval_horizon,
+            stored_eval_horizon,
+        )
+        eval_horizon = stored_eval_horizon
+
     horizon_steps = horizon_steps_from_name(eval_horizon)
     if step_bars != horizon_steps:
         raise ValueError(
@@ -354,10 +200,10 @@ def load_trade_research_response(
             f'for eval_horizon={eval_horizon}, got {step_bars}',
         )
 
-    npz_data = np.load(npz_path, allow_pickle=True)
-    inference_by_sample = _build_inference_by_sample_from_npz(
+    horizon_names = [str(item) for item in npz_data['horizon_names']]
+    inference_by_sample = build_inference_by_sample_from_npz(
         npz_data=npz_data,
-        eval_horizon=eval_horizon,
+        horizon_names=horizon_names,
     )
 
     dataset_length = int(npz_data['dataset_length'][0])

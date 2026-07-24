@@ -26,6 +26,10 @@ from main.web_gui.inference_service import (
     fetch_inference_metadata,
 )
 from main.web_gui.trade_journal_service import build_trade_journal_api_response
+from main.web_gui.trade_research_service import (
+    DEFAULT_EVAL_HORIZON,
+    eval_horizon_from_metadata,
+)
 from main.spawn_process import run_in_spawned_process_async
 from main.web_gui.request_workers import (
     _worker_bars,
@@ -88,6 +92,14 @@ async def get_config() -> dict:
         if 'exit_transformer_by_symbol' in metadata
         else {}
     )
+    trade_research_eval_horizon = DEFAULT_EVAL_HORIZON
+    try:
+        trade_research_eval_horizon = eval_horizon_from_metadata(
+            metadata,
+            settings.INFERENCE_DAEMON_SYMBOL,
+        )
+    except RuntimeError:
+        pass
     return {
         'defaultLimit': DEFAULT_BARS_LIMIT,
         'defaultScale': DEFAULT_CHART_SCALE,
@@ -99,6 +111,7 @@ async def get_config() -> dict:
         'exitTransformerBySymbol': exit_transformer_by_symbol,
         'checkpointPathBySymbol': checkpoint_path_by_symbol,
         'chartShowLimit': CHART_SHOW_LIMIT,
+        'tradeResearchEvalHorizon': trade_research_eval_horizon,
         'tradeResearchLimit': settings.WEB_GUI_TRADE_RESEARCH_LIMIT,
         'tradeResearchPnlStride': settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE,
         'exitGbmEnabled': settings.WEB_GUI_EXIT_GBM_ENABLED,

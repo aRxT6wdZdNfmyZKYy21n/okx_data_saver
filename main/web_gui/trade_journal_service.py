@@ -395,8 +395,13 @@ def build_journal_response(
 ) -> dict[str, Any]:
     open_position_data = journal['open_position']
     enriched_open = None
-    if open_position_data is not None and bars_elapsed is not None and mark_price is not None:
-        enriched_open = enrich_open_position(open_position_data, bars_elapsed, mark_price)
+    if open_position_data is not None and mark_price is not None:
+        effective_bars_elapsed = bars_elapsed if bars_elapsed is not None else 0
+        enriched_open = enrich_open_position(
+            open_position_data,
+            effective_bars_elapsed,
+            mark_price,
+        )
 
     closed = journal['closed_trades']
     recent_closed = closed[-20:][::-1]

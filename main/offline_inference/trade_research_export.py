@@ -21,6 +21,7 @@ from main.web_gui.inference_service import (
     fetch_inference_metadata,
 )
 from main.web_gui.trade_research_service import (
+    TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS,
     _call_inference_batch_api,
     _merge_sorted_sample_indices,
     _map_sample_indices_to_train,
@@ -29,12 +30,14 @@ from main.web_gui.trade_research_service import (
     _sample_indices_for_full_dataset,
     _sample_indices_for_pnl_backtest,
     horizon_steps_from_name,
+    inference_row_from_batch_result,
+    inference_stack_fingerprint,
+    npz_stack_matches_fingerprint,
 )
 from settings import settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EVAL_HORIZON = 'x2048'
 BATCH_CHUNK_SIZE = 32
 
 
@@ -102,15 +105,15 @@ def _bar_metadata_for_sample(
     }
 
 
-def _run_batch_predictions(
+def _run_batch_inference(
     sample_indices: list[int],
     train_sample_index_by_inference_sample: dict[int, int],
     train_dataset: object,
     symbol_id: str,
-) -> dict[int, dict[str, float]]:
-    predictions_by_sample: dict[int, dict[str, float]] = {}
+) -> dict[int, dict[str, object]]:
+    inference_by_sample: dict[int, dict[str, object]] = {}
     if len(sample_indices) == 0:
-        return predictions_by_sample
+        return inference_by_sample
 
     total_chunks = (len(sample_indices) + BATCH_CHUNK_SIZE - 1) // BATCH_CHUNK_SIZE
     for chunk_index, chunk_start in enumerate(
@@ -142,24 +145,18 @@ def _run_batch_predictions(
             chunk_results,
             strict=True,
         ):
-            if 'predictions' not in inference_result:
-                raise RuntimeError('Batch inference result missing predictions')
-            predictions = inference_result['predictions']
-            if not isinstance(predictions, dict):
-                raise RuntimeError('Batch inference predictions must be a dict')
-            predictions_by_sample[sample_index] = {
-                str(key): float(value)
-                for key, value in predictions.items()
-            }
+            if not isinstance(inference_result, dict):
+                raise RuntimeError('Batch inference result must be a dict')
+            inference_by_sample[sample_index] = inference_result
         if (chunk_index + 1) % 10 == 0 or (chunk_index + 1) == total_chunks:
             logger.info(
                 'Trade research export inference: %d/%d batches, %d/%d samples',
                 chunk_index + 1,
                 total_chunks,
-                len(predictions_by_sample),
+                len(inference_by_sample),
                 len(sample_indices),
             )
-    return predictions_by_sample
+    return inference_by_sample
 
 
 def _load_existing_npz(npz_path: str) -> dict[str, Any] | None:
@@ -173,15 +170,9 @@ def _load_existing_npz(npz_path: str) -> dict[str, Any] | None:
 
 def _checkpoint_matches_existing(
     existing: dict[str, Any],
-    run_label: str,
-    checkpoint_path: str,
+    fingerprint: dict[str, str],
 ) -> bool:
-    existing_run_label = str(existing['run_label'][0])
-    existing_checkpoint_path = str(existing['checkpoint_path'][0])
-    return (
-        existing_run_label == run_label
-        and existing_checkpoint_path == checkpoint_path
-    )
+    return npz_stack_matches_fingerprint(existing, fingerprint)
 
 
 def _merge_npz_rows(
@@ -202,6 +193,7 @@ def _merge_npz_rows(
         'entry_close',
         'exit_close',
     ]
+    array_keys.extend(TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS)
     for horizon_name in horizon_names:
         array_keys.append(f'pred_{horizon_name}')
         array_keys.append(f'target_{horizon_name}')
@@ -235,6 +227,8 @@ def _merge_npz_rows(
     scalar_keys = [
         'run_label',
         'checkpoint_path',
+        'policy_path',
+        'entry_hint_mode',
         'eval_horizon',
         'dataset_length',
         'start_index',
@@ -274,6 +268,13 @@ def _build_npz_payload(
     payload['entry_close'] = np.array(rows['entry_close'], dtype=np.float64)
     payload['exit_close'] = np.array(rows['exit_close'], dtype=np.float64)
     payload['horizon_names'] = np.array(horizon_names, dtype=object)
+    for key in TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS:
+        if key == 'entry_hint_json':
+            payload[key] = np.array(rows[key], dtype=object)
+        elif key == 'policy_action':
+            payload[key] = np.array(rows[key], dtype=object)
+        else:
+            payload[key] = np.array(rows[key], dtype=np.float64)
     for horizon_name in horizon_names:
         payload[f'pred_{horizon_name}'] = np.array(
             rows[f'pred_{horizon_name}'],
@@ -287,12 +288,19 @@ def _build_npz_payload(
 
 
 def run_trade_research_export(symbol_id: str) -> None:
-    eval_horizon = DEFAULT_EVAL_HORIZON
-    horizon_steps = horizon_steps_from_name(eval_horizon)
-    step_bars = horizon_steps
     research_limit = settings.WEB_GUI_TRADE_RESEARCH_LIMIT
     pnl_stride = settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE
     npz_path = trade_research_npz_path(symbol_id)
+
+    metadata = fetch_inference_metadata()
+    stack_fingerprint = inference_stack_fingerprint(metadata, symbol_id)
+    eval_horizon = stack_fingerprint['eval_horizon']
+    run_label = stack_fingerprint['run_label']
+    checkpoint_path = stack_fingerprint['checkpoint_path']
+    policy_path = stack_fingerprint['policy_path']
+    entry_hint_mode = stack_fingerprint['entry_hint_mode']
+    horizon_steps = horizon_steps_from_name(eval_horizon)
+    step_bars = horizon_steps
 
     write_trade_research_meta(
         symbol_id=symbol_id,
@@ -301,10 +309,11 @@ def run_trade_research_export(symbol_id: str) -> None:
             'eval_horizon': eval_horizon,
             'pnl_stride': pnl_stride,
             'research_limit': research_limit,
+            'policy_path': policy_path,
+            'entry_hint_mode': entry_hint_mode,
         },
     )
 
-    metadata = fetch_inference_metadata()
     required_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
     minimum_rows = required_rows + horizon_steps
     if research_limit < minimum_rows:
@@ -316,12 +325,6 @@ def run_trade_research_export(symbol_id: str) -> None:
     checkpoint_path_by_symbol = metadata['checkpoint_path_by_symbol']
     if symbol_id not in checkpoint_path_by_symbol:
         raise RuntimeError(f'Metadata missing checkpoint for {symbol_id!r}')
-    checkpoint_path = str(checkpoint_path_by_symbol[symbol_id])
-
-    policy_by_symbol = metadata['policy_by_symbol']
-    if symbol_id not in policy_by_symbol:
-        raise RuntimeError(f'Metadata missing policy for {symbol_id!r}')
-    run_label = str(policy_by_symbol[symbol_id]['run_label'])
 
     symbol = SymbolId[symbol_id]
     df = fetch_last_bars_sync(symbol_id=symbol, limit=research_limit, offset=0)
@@ -395,15 +398,27 @@ def run_trade_research_export(symbol_id: str) -> None:
     existing_npz = _load_existing_npz(npz_path)
     if existing_npz is not None and not _checkpoint_matches_existing(
         existing=existing_npz,
-        run_label=run_label,
-        checkpoint_path=checkpoint_path,
+        fingerprint=stack_fingerprint,
     ):
         logger.info(
-            'Checkpoint changed (%s -> %s); rebuilding NPZ from scratch',
-            str(existing_npz['checkpoint_path'][0]),
-            checkpoint_path,
+            'Inference stack changed (%s / %s / %s); rebuilding NPZ from scratch',
+            str(existing_npz['run_label'][0]),
+            str(existing_npz['eval_horizon'][0]),
+            str(existing_npz['policy_path'][0])
+            if 'policy_path' in existing_npz
+            else 'unknown policy',
         )
         existing_npz = None
+
+    if existing_npz is not None:
+        for key in TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS:
+            if key not in existing_npz:
+                logger.info(
+                    'Existing NPZ missing %s; rebuilding from scratch',
+                    key,
+                )
+                existing_npz = None
+                break
 
     if existing_npz is not None:
         existing_start_index = int(existing_npz['start_index'][0])
@@ -436,7 +451,7 @@ def run_trade_research_export(symbol_id: str) -> None:
         len(samples_to_infer),
     )
 
-    predictions_by_sample = _run_batch_predictions(
+    inference_by_sample = _run_batch_inference(
         sample_indices=samples_to_infer,
         train_sample_index_by_inference_sample=train_sample_index_by_inference_sample,
         train_dataset=train_dataset,
@@ -457,10 +472,18 @@ def run_trade_research_export(symbol_id: str) -> None:
     for horizon_name in horizon_names:
         rows[f'pred_{horizon_name}'] = []
         rows[f'target_{horizon_name}'] = []
+    for key in TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS:
+        rows[key] = []
 
     for sample_index in samples_to_infer:
         train_sample_index = train_sample_index_by_inference_sample[sample_index]
-        sample_predictions = predictions_by_sample[sample_index]
+        inference_result = inference_by_sample[sample_index]
+        if 'predictions' not in inference_result:
+            raise RuntimeError('Batch inference result missing predictions')
+        sample_predictions = inference_result['predictions']
+        if not isinstance(sample_predictions, dict):
+            raise RuntimeError('Batch inference predictions must be a dict')
+        inference_row = inference_row_from_batch_result(inference_result)
         targets_by_horizon = _target_log2_from_train_sample(
             train_dataset=train_dataset,
             train_sample_index=train_sample_index,
@@ -494,12 +517,17 @@ def run_trade_research_export(symbol_id: str) -> None:
             rows[f'pred_{horizon_name}'].append(float(sample_predictions[prediction_key]))
             rows[f'target_{horizon_name}'].append(float(targets_by_horizon[horizon_name]))
 
+        for key in TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS:
+            rows[key].append(inference_row[key])
+
     last_bar_row = df.row(df.height - 1, named=True)
     last_bar_start_trade_id = int(_row_value(last_bar_row, 'start_trade_id'))
 
     metadata_fields = {
         'run_label': np.array([run_label], dtype=object),
         'checkpoint_path': np.array([checkpoint_path], dtype=object),
+        'policy_path': np.array([policy_path], dtype=object),
+        'entry_hint_mode': np.array([entry_hint_mode], dtype=object),
         'eval_horizon': np.array([eval_horizon], dtype=object),
         'dataset_length': np.array([dataset_length], dtype=np.int64),
         'start_index': np.array([start_index], dtype=np.int64),
@@ -548,6 +576,8 @@ def run_trade_research_export(symbol_id: str) -> None:
             'last_bar_start_trade_id': last_bar_start_trade_id,
             'run_label': run_label,
             'checkpoint_path': checkpoint_path,
+            'policy_path': policy_path,
+            'entry_hint_mode': entry_hint_mode,
             'sample_selection_note': sample_selection_note,
         },
     )

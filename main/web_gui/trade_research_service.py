@@ -8,11 +8,14 @@ for sequential hybrid backtest PnL (capital-constrained re-entry after exit).
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import traceback
+from typing import Any
 
 import httpx
+import numpy as np
 import polars
 from fastapi import HTTPException
 
@@ -38,11 +41,163 @@ BATCH_HTTP_TIMEOUT_SEC = 600.0
 # OKX USDT-margined perpetual, regular tier (taker 0.05% per side) — как в trading_bot backtest
 OKX_ROUND_TRIP_TAKER_FEE_RATE = 0.0005 * 2.0
 
+TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS = [
+    'policy_action',
+    'policy_prob_hold',
+    'policy_prob_long',
+    'policy_prob_short',
+    'entry_hint_json',
+]
+
 
 def horizon_steps_from_name(horizon_name: str) -> int:
     if not horizon_name.startswith('x'):
         raise ValueError(f'Invalid horizon name: {horizon_name!r}')
     return int(horizon_name[1:])
+
+
+def inference_stack_fingerprint(
+    metadata: dict[str, object],
+    symbol_id: str,
+) -> dict[str, str]:
+    policy_by_symbol = metadata['policy_by_symbol']
+    if symbol_id not in policy_by_symbol:
+        raise RuntimeError(f'Metadata missing policy for {symbol_id!r}')
+    policy_entry = policy_by_symbol[symbol_id]
+    if not isinstance(policy_entry, dict):
+        raise RuntimeError(f'Invalid policy metadata for {symbol_id!r}')
+
+    checkpoint_path_by_symbol = metadata['checkpoint_path_by_symbol']
+    if symbol_id not in checkpoint_path_by_symbol:
+        raise RuntimeError(f'Metadata missing checkpoint for {symbol_id!r}')
+
+    if 'eval_horizon' not in policy_entry:
+        raise RuntimeError(f'Metadata policy missing eval_horizon for {symbol_id!r}')
+    if 'run_label' not in policy_entry:
+        raise RuntimeError(f'Metadata policy missing run_label for {symbol_id!r}')
+    if 'policy_path' not in policy_entry:
+        raise RuntimeError(f'Metadata policy missing policy_path for {symbol_id!r}')
+
+    entry_hint_mode = 'hybrid'
+    if 'entry_hint_mode_by_symbol' in metadata:
+        entry_hint_mode_by_symbol = metadata['entry_hint_mode_by_symbol']
+        if symbol_id in entry_hint_mode_by_symbol:
+            entry_hint_mode = str(entry_hint_mode_by_symbol[symbol_id])
+
+    return {
+        'run_label': str(policy_entry['run_label']),
+        'checkpoint_path': str(checkpoint_path_by_symbol[symbol_id]),
+        'eval_horizon': str(policy_entry['eval_horizon']),
+        'policy_path': str(policy_entry['policy_path']),
+        'entry_hint_mode': entry_hint_mode,
+    }
+
+
+def eval_horizon_from_metadata(
+    metadata: dict[str, object],
+    symbol_id: str,
+) -> str:
+    return inference_stack_fingerprint(metadata, symbol_id)['eval_horizon']
+
+
+def npz_stack_matches_fingerprint(
+    existing: dict[str, Any],
+    fingerprint: dict[str, str],
+) -> bool:
+    for key in ('run_label', 'checkpoint_path', 'eval_horizon', 'policy_path', 'entry_hint_mode'):
+        if key not in existing:
+            return False
+        if str(existing[key][0]) != fingerprint[key]:
+            return False
+    return True
+
+
+def inference_row_from_batch_result(
+    inference_result: dict[str, object],
+) -> dict[str, object]:
+    if 'policy' not in inference_result:
+        raise RuntimeError('Batch inference result missing policy')
+    if 'entry_hint' not in inference_result:
+        raise RuntimeError('Batch inference result missing entry_hint')
+    policy = inference_result['policy']
+    if not isinstance(policy, dict):
+        raise RuntimeError('Batch inference policy must be a dict')
+    if 'action' not in policy:
+        raise RuntimeError('Batch inference policy missing action')
+    if 'probabilities' not in policy:
+        raise RuntimeError('Batch inference policy missing probabilities')
+    probabilities = policy['probabilities']
+    if not isinstance(probabilities, dict):
+        raise RuntimeError('Batch inference policy probabilities must be a dict')
+    for key in ('hold', 'long', 'short'):
+        if key not in probabilities:
+            raise RuntimeError(f'Batch inference policy probabilities missing {key!r}')
+
+    entry_hint = inference_result['entry_hint']
+    if not isinstance(entry_hint, dict):
+        raise RuntimeError('Batch inference entry_hint must be a dict')
+
+    return {
+        'policy_action': str(policy['action']),
+        'policy_prob_hold': float(probabilities['hold']),
+        'policy_prob_long': float(probabilities['long']),
+        'policy_prob_short': float(probabilities['short']),
+        'entry_hint_json': json.dumps(entry_hint, ensure_ascii=False, separators=(',', ':')),
+    }
+
+
+def build_inference_by_sample_from_npz(
+    npz_data: np.lib.npyio.NpzFile,
+    horizon_names: list[str],
+) -> dict[int, dict[str, object]]:
+    for key in TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS:
+        if key not in npz_data.files:
+            raise RuntimeError(
+                'Trade research NPZ missing policy columns; re-run '
+                'main.trade_research_export against the current inference_api config',
+            )
+
+    sample_index = npz_data['sample_index'].astype(np.int64)
+    row_count = int(sample_index.shape[0])
+    policy_action = npz_data['policy_action']
+    policy_prob_hold = npz_data['policy_prob_hold'].astype(np.float64)
+    policy_prob_long = npz_data['policy_prob_long'].astype(np.float64)
+    policy_prob_short = npz_data['policy_prob_short'].astype(np.float64)
+    entry_hint_json = npz_data['entry_hint_json']
+
+    inference_by_sample: dict[int, dict[str, object]] = {}
+    for row_index in range(row_count):
+        sample_idx = int(sample_index[row_index])
+        predictions: dict[str, float] = {}
+        for horizon_name in horizon_names:
+            prediction_key = _prediction_key_for_horizon(horizon_name)
+            predictions[prediction_key] = float(
+                npz_data[f'pred_{horizon_name}'].astype(np.float64)[row_index],
+            )
+
+        entry_hint_raw = entry_hint_json[row_index]
+        if isinstance(entry_hint_raw, bytes):
+            entry_hint_text = entry_hint_raw.decode('utf-8')
+        else:
+            entry_hint_text = str(entry_hint_raw)
+        entry_hint = json.loads(entry_hint_text)
+        if not isinstance(entry_hint, dict):
+            raise RuntimeError(f'Invalid entry_hint JSON for sample {sample_idx}')
+
+        inference_by_sample[sample_idx] = {
+            'predictions': predictions,
+            'policy': {
+                'action': str(policy_action[row_index]),
+                'probabilities': {
+                    'hold': float(policy_prob_hold[row_index]),
+                    'long': float(policy_prob_long[row_index]),
+                    'short': float(policy_prob_short[row_index]),
+                },
+            },
+            'entry_hint': entry_hint,
+        }
+
+    return inference_by_sample
 
 
 def _prediction_key_for_horizon(horizon_name: str) -> str:
@@ -186,6 +341,11 @@ def _hybrid_backtest_allows_entry(
         if 'hybrid_blocks_entry' not in entry_hint:
             return False
         return not bool(entry_hint['hybrid_blocks_entry'])
+    if hint_mode == 'policy_only':
+        if 'recommended_action' not in entry_hint:
+            return False
+        recommended_action = str(entry_hint['recommended_action'])
+        return recommended_action in ('long', 'short')
     raise RuntimeError(f'Unknown entry_hint hint_mode: {hint_mode!r}')
 
 

@@ -197,8 +197,8 @@
   const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
   const CVD_WINDOW_DEFAULT = 'x512';
   const JOURNAL_EVAL_HORIZON_OPTIONS = ['x512', 'x1024', 'x1536', 'x2048', 'x3072', 'x4096'];
-  const TRADE_RESEARCH_EVAL_HORIZON = 'x2048';
-  const TRADE_RESEARCH_SCALE = 'x2048';
+  let tradeResearchEvalHorizon = 'x2048';
+  let tradeResearchScale = 'x2048';
   const JOURNAL_SETTINGS_STORAGE_KEY = 'okx_web_gui_journal_settings';
   const JOURNAL_SOUND_ENABLED_STORAGE_KEY = 'okx_web_gui_journal_sound_enabled';
 
@@ -1543,7 +1543,9 @@
       lastJournalBarsElapsed = Number(openPos.metrics.bars_elapsed);
       return;
     }
-    lastJournalBarsElapsed = null;
+    if (!openPos) {
+      lastJournalBarsElapsed = null;
+    }
   }
 
   function applyJournalState(state, symbol) {
@@ -1554,8 +1556,8 @@
     if (
       openPos
       && openPos.symbol_id === symbol
-      && !openPos.metrics
       && openPos.entry_start_trade_id != null
+      && lastJournalBarsElapsed == null
     ) {
       pollJournalBarsElapsed(symbol, Number(openPos.entry_start_trade_id));
     }
@@ -1668,6 +1670,19 @@
         </div>
         <div class="trade-journal-progress" title="${m.progress_pct.toFixed(1)}%">
           <div class="trade-journal-progress-bar ${progressClass}" style="width: ${Math.min(100, m.progress_pct)}%"></div>
+        </div>
+      `;
+    } else if (hasOpen) {
+      const entryPrice = Number(openPos.entry_price).toFixed(2);
+      const evalHorizonLabel = openPos.eval_horizon
+        ? String(openPos.eval_horizon)
+        : (openPos.eval_horizon_steps ? `x${openPos.eval_horizon_steps}` : '—');
+      metricsHtml = `
+        <div class="trade-journal-metrics">
+          <span>Entry: <strong>${entryPrice}</strong></span>
+          <span>Horizon: <strong>${evalHorizonLabel}</strong></span>
+          <span>Notional: <strong>$${Number(openPos.notional_usd).toFixed(2)}</strong></span>
+          <span>Mark / бары: <strong>загрузка…</strong></span>
         </div>
       `;
     } else if (!hasOpen) {
@@ -2230,8 +2245,8 @@
 
   function ensureTradeResearchScale() {
     if (!isTradeResearchEnabled()) return true;
-    if (scaleSelect.value === TRADE_RESEARCH_SCALE) return true;
-    scaleSelect.value = TRADE_RESEARCH_SCALE;
+    if (scaleSelect.value === tradeResearchScale) return true;
+    scaleSelect.value = tradeResearchScale;
     return false;
   }
 
@@ -2419,18 +2434,18 @@
       removeTradeResearchLineSeries();
       return Promise.resolve(null);
     }
-    if (scaleSelect.value !== TRADE_RESEARCH_SCALE) {
+    if (scaleSelect.value !== tradeResearchScale) {
       tradeResearchSegments = [];
       removeTradeResearchLineSeries();
-      setStatus(`Trade research: выберите масштаб ${TRADE_RESEARCH_SCALE}`, true);
+      setStatus(`Trade research: выберите масштаб ${tradeResearchScale}`, true);
       return Promise.resolve(null);
     }
-    const horizonSteps = Number(TRADE_RESEARCH_EVAL_HORIZON.slice(1));
+    const horizonSteps = Number(tradeResearchEvalHorizon.slice(1));
     const visibleRange = getVisibleStartTradeIdRange();
     setStatus('Trade research: онлайн-инференс на полной истории…');
     const requestParams = {
       symbol_id: symbol,
-      eval_horizon: TRADE_RESEARCH_EVAL_HORIZON,
+      eval_horizon: tradeResearchEvalHorizon,
       step_bars: horizonSteps,
     };
     if (visibleRange.min != null) {
@@ -2464,7 +2479,7 @@
         const pnlStride = payload.pnl_stride != null ? payload.pnl_stride : '?';
         let statusText =
           `Trade research: ${tradeResearchSegments.length} на графике ` +
-          `(${entryAllowedCount} entry ok / ${tradeCount} policy long/short из ${sampleCount} точек @ ${TRADE_RESEARCH_EVAL_HORIZON}, ` +
+          `(${entryAllowedCount} entry ok / ${tradeCount} policy long/short из ${sampleCount} точек @ ${tradeResearchEvalHorizon}, ` +
           `контекст ${barsLoaded} x1)`;
         if (backtestNetPnl != null && backtestTradeCount != null) {
           statusText =
@@ -2856,6 +2871,7 @@
       .then(data => {
         applyBarsToChart(data, effectiveScale);
         updateLatestX1BarFromBarsData(data, effectiveScale);
+        refreshTradeJournal(symbol);
         if (!isTradeResearchEnabled()) {
           return null;
         }
@@ -2977,6 +2993,10 @@
       exitGbmEnabled = Boolean(config.exitGbmEnabled);
       exitTransformerEnabled = Boolean(config.exitTransformerEnabled);
       checkpointPathBySymbol = config.checkpointPathBySymbol || {};
+      if (config.tradeResearchEvalHorizon) {
+        tradeResearchEvalHorizon = String(config.tradeResearchEvalHorizon);
+        tradeResearchScale = tradeResearchEvalHorizon;
+      }
       if (config.defaultLimit) {
         limitInput.placeholder = config.defaultLimit;
         limitInput.value = config.defaultLimit;
