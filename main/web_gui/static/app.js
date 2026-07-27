@@ -2,10 +2,43 @@
   'use strict';
 
   const API = {
-    async get(path) {
-      const r = await fetch(path);
-      if (!r.ok) throw new Error(await r.text());
-      return r.json();
+    async get(path, fetchOptions) {
+      const timeoutMs = fetchOptions && fetchOptions.timeoutMs != null
+        ? fetchOptions.timeoutMs
+        : null;
+      const externalSignal = fetchOptions ? fetchOptions.signal : null;
+
+      const controller = new AbortController();
+      let timeoutId = null;
+
+      if (externalSignal) {
+        if (externalSignal.aborted) {
+          controller.abort();
+        } else {
+          externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+        }
+      }
+      if (timeoutMs != null) {
+        timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      }
+
+      try {
+        const r = await fetch(path, { signal: controller.signal });
+        if (!r.ok) throw new Error(await r.text());
+        return r.json();
+      } catch (exception) {
+        if (exception.name === 'AbortError') {
+          if (externalSignal && externalSignal.aborted) {
+            throw exception;
+          }
+          throw new Error('Request timed out');
+        }
+        throw exception;
+      } finally {
+        if (timeoutId != null) {
+          clearTimeout(timeoutId);
+        }
+      }
     },
     async config() { return this.get('./api/config'); },
     async symbols() { return this.get('./api/symbols'); },
@@ -19,9 +52,13 @@
       const q = new URLSearchParams(params).toString();
       return this.get('./api/dow?' + q);
     },
-    async inference(params) {
+    async inference(params, fetchOptions) {
       const q = new URLSearchParams(params).toString();
-      return this.get('./api/inference?' + q);
+      const options = fetchOptions ? { ...fetchOptions } : {};
+      if (options.timeoutMs == null) {
+        options.timeoutMs = INFERENCE_FETCH_TIMEOUT_MS;
+      }
+      return this.get('./api/inference?' + q, options);
     },
     async tradeResearch(params) {
       const q = new URLSearchParams(params).toString();
@@ -93,7 +130,7 @@
     },
   };
 
-  let config = { defaultLimit: 10000000, defaultScale: 'x2048', refreshIntervalSec: 30 };
+  let config = { defaultLimit: 10000000, defaultScale: 'x1536', refreshIntervalSec: 30 };
   let chart = null;
   let candleSeries = null;
   let barsData = [];
@@ -103,7 +140,7 @@
   let candleDataByIndex = [];
   /** Сегменты от экстремума к экстремуму: { green: [{indexFrom, valueFrom, indexTo, valueTo}, ...], red: [...] } */
   let extremaSegments = { green: [], red: [] };
-  /** Серии линий non-overlapping trade research @ x2048 */
+  /** Серии линий non-overlapping trade research @ eval horizon */
   let tradeResearchSegments = [];
   let tradeResearchLineSeries = [];
   let extremaLineSeries = [];
@@ -113,12 +150,29 @@
   let journalBarsElapsedTimer = null;
   let x1BarRefreshTimer = null;
   let loadBarsInFlight = false;
-  let loadInferenceInFlight = false;
+  let loadBarsRequestSeq = 0;
+  let activeLoadBarsRequestId = 0;
+  let loadTradeResearchInFlight = false;
+  let tradeResearchRequestSeq = 0;
+  let activeTradeResearchRequestId = 0;
+  /** Инкремент при каждой перезагрузке баров — отсекает stale trade research. */
+  let barsDataGeneration = 0;
+  /** Последний запрос trade research, пропущенный из‑за inFlight (перезапуск в finally). */
+  let pendingTradeResearch = null;
+
+  function guiLog(event, details) {
+    const payload = details === undefined ? '' : details;
+    console.log(`[web-gui] ${new Date().toISOString()} ${event}`, payload);
+  }
+  let inferenceFetchAbortController = null;
+  let loadInferenceRequestSeq = 0;
+  let activeLoadInferenceRequestId = 0;
   let refreshJournalInFlight = false;
   let refreshBarsElapsedInFlight = false;
   let refreshX1BarInFlight = false;
   let lastJournalBarsElapsed = null;
   const INFERENCE_REFRESH_INTERVAL_SEC = 10;
+  const INFERENCE_FETCH_TIMEOUT_MS = 30000;
   const JOURNAL_REFRESH_INTERVAL_SEC = 15;
   const JOURNAL_BARS_ELAPSED_INTERVAL_SEC = 30;
   const X1_BAR_REFRESH_INTERVAL_SEC = 60;
@@ -129,6 +183,8 @@
   const autoRefreshCheck = document.getElementById('autoRefresh');
   const extremaLinesEnabledCheck = document.getElementById('extremaLinesEnabled');
   const tradeResearchEnabledCheck = document.getElementById('tradeResearchEnabled');
+  const tradeResearchEnabledLabel = document.getElementById('tradeResearchEnabledLabel');
+  const tradeResearchEnabledText = document.getElementById('tradeResearchEnabledText');
   const statusEl = document.getElementById('status');
   const chartDiv = document.getElementById('chart');
   const concentrationCanvas = document.getElementById('concentrationCanvas');
@@ -168,13 +224,14 @@
   let lastExitTransformer = null;
   let lastInferenceStatus = null;
   let lastInferenceCompletedAtMs = null;
+  let lastInferenceNetworkError = null;
   let lastComputingStartedAtMs = null;
   let inferenceStatusTickTimer = null;
   let latestX1Bar = null;
   let lastChartBarClose = null;
   let journalDefaults = {
     notional_usd: 7,
-    eval_horizon: 'x2048',
+    eval_horizon: 'x1536',
     round_trip_fee_rate: 0.001,
   };
   let previousAtTargetHorizon = false;
@@ -193,12 +250,24 @@
   let audioContext = null;
   let audioUnlocked = false;
 
-  const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384', 'x32768', 'x65536', 'x131072', 'x262144'];
+  const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x1536', 'x2048', 'x4096', 'x8192', 'x16384', 'x32768', 'x65536', 'x131072', 'x262144'];
   const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
   const CVD_WINDOW_DEFAULT = 'x512';
   const JOURNAL_EVAL_HORIZON_OPTIONS = ['x512', 'x1024', 'x1536', 'x2048', 'x3072', 'x4096'];
-  let tradeResearchEvalHorizon = 'x2048';
-  let tradeResearchScale = 'x2048';
+  let tradeResearchEvalHorizon = 'x1536';
+  let tradeResearchScale = 'x1536';
+  let tradeResearchAvailableHorizons = [];
+
+  function updateTradeResearchUi() {
+    const horizon = tradeResearchEvalHorizon || '?';
+    if (tradeResearchEnabledText) {
+      tradeResearchEnabledText.textContent = `Исследовать сделки @ ${horizon}`;
+    }
+    if (tradeResearchEnabledLabel) {
+      tradeResearchEnabledLabel.title =
+        `Non-overlapping policy trades @ ${horizon} на x1`;
+    }
+  }
   const JOURNAL_SETTINGS_STORAGE_KEY = 'okx_web_gui_journal_settings';
   const JOURNAL_SOUND_ENABLED_STORAGE_KEY = 'okx_web_gui_journal_sound_enabled';
 
@@ -937,6 +1006,10 @@
       'inference-status-computing',
       lastInferenceStatus === 'computing',
     );
+    inferenceStatusBar.classList.toggle(
+      'inference-status-network-error',
+      lastInferenceStatus === 'network_error',
+    );
 
     if (lastInferenceStatus === 'ok') {
       const ageLabel = formatRelativeTimeAgo(lastInferenceCompletedAtMs);
@@ -956,6 +1029,16 @@
       inferenceStatusBar.innerHTML = `
         ${snapshotLine}
         <span class="inference-status-computing-label">Обновление… (${refreshDuration})</span>
+      `;
+      return;
+    }
+
+    if (lastInferenceStatus === 'network_error') {
+      const ageLabel = formatRelativeTimeAgo(lastInferenceCompletedAtMs);
+      const errorMessage = lastInferenceNetworkError || 'сеть недоступна';
+      inferenceStatusBar.innerHTML = `
+        <span class="inference-status-age">Обновлено: <strong>${ageLabel}</strong></span>
+        <span class="inference-status-network-error-label">${errorMessage}. Повтор через ${INFERENCE_REFRESH_INTERVAL_SEC} сек…</span>
       `;
     }
   }
@@ -1108,9 +1191,40 @@
     maybeNotifyEntryAllowedAlert(entryHint);
   }
 
-  function loadInference(symbol, limit) {
-    return API.inference({ symbol_id: symbol, limit })
+  function handleInferenceFetchError(error, symbol) {
+    const message = parseErrorDetail(error.message);
+    guiLog('inference refresh error', {
+      message,
+      hasStalePredictions: Boolean(lastPredictions),
+    });
+
+    if (lastPredictions) {
+      lastInferenceStatus = 'network_error';
+      lastInferenceNetworkError = message;
+      renderInference(
+        lastPredictions,
+        symbol,
+        lastPolicy,
+        lastEntryHint,
+        true,
+      );
+      renderInferenceStatusBar();
+      startInferenceStatusTick();
+      return;
+    }
+
+    stopInferenceStatusTick();
+    lastInferenceStatus = null;
+    setInferenceWarning(message);
+  }
+
+  function loadInference(symbol, limit, fetchSignal, requestId) {
+    const fetchOptions = fetchSignal ? { signal: fetchSignal } : null;
+    return API.inference({ symbol_id: symbol, limit }, fetchOptions)
       .then(response => {
+        if (activeLoadInferenceRequestId !== requestId) {
+          return;
+        }
         const status = response.status != null ? String(response.status) : 'ok';
         if (status === 'computing') {
           lastInferenceStatus = 'computing';
@@ -1180,6 +1294,7 @@
           return;
         }
         lastInferenceStatus = 'ok';
+        lastInferenceNetworkError = null;
         lastInferenceCompletedAtMs = response.inference_completed_at_ms != null
           ? Number(response.inference_completed_at_ms)
           : (response.updated_at_ms != null ? Number(response.updated_at_ms) : null);
@@ -1197,7 +1312,13 @@
         startInferenceStatusTick();
       })
       .catch(e => {
-        setInferenceWarning(parseErrorDetail(e.message));
+        if (activeLoadInferenceRequestId !== requestId) {
+          return;
+        }
+        if (e.name === 'AbortError') {
+          return;
+        }
+        handleInferenceFetchError(e, symbol);
       });
   }
 
@@ -1330,14 +1451,23 @@
 
   function refreshInferencePanel() {
     const symbol = symbolSelect.value;
-    if (!symbol || loadInferenceInFlight) {
+    if (!symbol) {
       return Promise.resolve();
     }
-    loadInferenceInFlight = true;
+    if (inferenceFetchAbortController) {
+      inferenceFetchAbortController.abort();
+    }
+    inferenceFetchAbortController = new AbortController();
+    const fetchController = inferenceFetchAbortController;
+    loadInferenceRequestSeq = loadInferenceRequestSeq + 1;
+    const requestId = loadInferenceRequestSeq;
+    activeLoadInferenceRequestId = requestId;
     const limit = limitInput.value ? parseInt(limitInput.value, 10) : config.defaultLimit;
-    return loadInference(symbol, limit)
+    return loadInference(symbol, limit, fetchController.signal, requestId)
       .finally(() => {
-        loadInferenceInFlight = false;
+        if (inferenceFetchAbortController === fetchController) {
+          inferenceFetchAbortController = null;
+        }
       });
   }
 
@@ -1969,7 +2099,7 @@
             opt.textContent = l;
             scaleSelect.appendChild(opt);
           });
-          const defaultScale = config.defaultScale != null ? String(config.defaultScale) : 'x2048';
+          const defaultScale = config.defaultScale != null ? String(config.defaultScale) : 'x1536';
           if (scales.includes(defaultScale)) {
             scaleSelect.value = defaultScale;
           }
@@ -2317,7 +2447,50 @@
     return lookup;
   }
 
-  function resolveSegmentCandle(startTradeId, timestampMs, candleByTime) {
+  function findCandleForTimestampMs(timestampMs) {
+    if (timestampMs == null || candleDataByIndex.length === 0) {
+      return null;
+    }
+    const targetSec = Math.floor(Number(timestampMs) / 1000);
+    if (!Number.isFinite(targetSec)) {
+      return null;
+    }
+    let lo = 0;
+    let hi = candleDataByIndex.length - 1;
+    let bestIndex = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const candleTime = candleDataByIndex[mid].time;
+      if (candleTime <= targetSec) {
+        bestIndex = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (bestIndex < 0) {
+      return null;
+    }
+    return candleDataByIndex[bestIndex];
+  }
+
+  function resolveEntrySegmentCandle(startTradeId, timestampMs, candleByTime) {
+    const exactBar = findBarForStartTradeId(startTradeId);
+    if (!exactBar) {
+      return null;
+    }
+    const barCandle = candleFromBar(exactBar, candleByTime);
+    if (!barCandle) {
+      return null;
+    }
+    const candleByTimestamp = findCandleForTimestampMs(timestampMs);
+    if (candleByTimestamp && candleByTimestamp.time === barCandle.time) {
+      return candleByTimestamp;
+    }
+    return barCandle;
+  }
+
+  function resolveExitSegmentCandle(startTradeId, timestampMs, candleByTime) {
     const exactBar = findBarForStartTradeId(startTradeId);
     const barCandle = candleFromBar(exactBar, candleByTime);
     if (barCandle) {
@@ -2352,12 +2525,12 @@
     let missingEntryCount = 0;
     let missingExitCount = 0;
     for (const segment of tradeResearchSegments) {
-      const entryCandle = resolveSegmentCandle(
+      const entryCandle = resolveEntrySegmentCandle(
         segment.entry_start_trade_id,
         segment.entry_timestamp_ms,
         candleByTime,
       );
-      const exitCandle = resolveSegmentCandle(
+      const exitCandle = resolveExitSegmentCandle(
         segment.exit_start_trade_id,
         segment.exit_timestamp_ms,
         candleByTime,
@@ -2413,9 +2586,11 @@
     if (barsData.length === 0) {
       return { min: null, max: null };
     }
+    const lastBar = barsData[barsData.length - 1];
     return {
       min: Number(barsData[0].start_trade_id),
-      max: Number(barsData[barsData.length - 1].start_trade_id),
+      // Верхняя граница — end_trade_id последней свечи: entry внутри bucket не отрезается.
+      max: Number(lastBar.end_trade_id),
     };
   }
 
@@ -2428,21 +2603,69 @@
     return sign + pct.toFixed(2) + '%';
   }
 
-  function loadTradeResearch(symbol) {
+  function formatBacktestMetricsBlock(label, metrics) {
+    if (metrics == null) {
+      return '';
+    }
+    const tradeCount = metrics.trade_count;
+    if (tradeCount == null || Number(tradeCount) === 0) {
+      return '';
+    }
+    let block =
+      `${label} linear ${formatTradeResearchNetPnl(metrics.net_pnl_sum)} ` +
+      `(${tradeCount}`;
+    if (metrics.avg_trade_pnl != null) {
+      block = block + `, avg ${formatTradeResearchNetPnl(metrics.avg_trade_pnl)}`;
+    }
+    block = block + ')';
+    if (metrics.compounded_return != null) {
+      block = block + ` compound ${formatTradeResearchNetPnl(metrics.compounded_return)}`;
+    }
+    return block;
+  }
+
+  function readBacktestMetrics(payload, prefix) {
+    const tradeCount = payload[`${prefix}_trade_count`];
+    if (tradeCount == null) {
+      return null;
+    }
+    return {
+      net_pnl_sum: payload[`${prefix}_net_pnl_sum`],
+      trade_count: tradeCount,
+      avg_trade_pnl: payload[`${prefix}_avg_trade_pnl`],
+      compounded_return: payload[`${prefix}_compounded_return`],
+    };
+  }
+
+  function loadTradeResearch(symbol, trigger) {
     if (!isTradeResearchEnabled()) {
       tradeResearchSegments = [];
       removeTradeResearchLineSeries();
-      return Promise.resolve(null);
+      return;
     }
     if (scaleSelect.value !== tradeResearchScale) {
       tradeResearchSegments = [];
       removeTradeResearchLineSeries();
       setStatus(`Trade research: выберите масштаб ${tradeResearchScale}`, true);
-      return Promise.resolve(null);
+      guiLog('loadTradeResearch skipped wrong scale', {
+        trigger,
+        scale: scaleSelect.value,
+        expected: tradeResearchScale,
+      });
+      return;
     }
+    if (loadTradeResearchInFlight) {
+      pendingTradeResearch = { symbol, trigger };
+      guiLog('loadTradeResearch skipped: in flight (queued retry)', {
+        trigger,
+        activeTradeResearchRequestId,
+      });
+      return;
+    }
+    pendingTradeResearch = null;
+
     const horizonSteps = Number(tradeResearchEvalHorizon.slice(1));
     const visibleRange = getVisibleStartTradeIdRange();
-    setStatus('Trade research: онлайн-инференс на полной истории…');
     const requestParams = {
       symbol_id: symbol,
       eval_horizon: tradeResearchEvalHorizon,
@@ -2454,55 +2677,130 @@
     if (visibleRange.max != null) {
       requestParams.visible_max_start_trade_id = visibleRange.max;
     }
-    return API.tradeResearch(requestParams)
+
+    loadTradeResearchInFlight = true;
+    tradeResearchRequestSeq = tradeResearchRequestSeq + 1;
+    const requestId = tradeResearchRequestSeq;
+    activeTradeResearchRequestId = requestId;
+    const barsGenerationAtRequest = barsDataGeneration;
+    const tradeResearchStartedMs = performance.now();
+    guiLog('loadTradeResearch start', {
+      requestId,
+      trigger,
+      requestParams,
+    });
+
+    API.tradeResearch(requestParams)
       .then((payload) => {
+        if (activeTradeResearchRequestId !== requestId) {
+          guiLog('loadTradeResearch stale response ignored', { requestId, trigger });
+          return;
+        }
+        if (barsGenerationAtRequest !== barsDataGeneration) {
+          guiLog('loadTradeResearch stale bars generation ignored', {
+            requestId,
+            trigger,
+            barsGenerationAtRequest,
+            barsDataGeneration,
+          });
+          return;
+        }
+        guiLog('loadTradeResearch done', {
+          requestId,
+          trigger,
+          durationMs: Math.round(performance.now() - tradeResearchStartedMs),
+          segmentCount: Array.isArray(payload.segments) ? payload.segments.length : 0,
+          sampleCount: payload.sample_count,
+        });
         tradeResearchSegments = Array.isArray(payload.segments) ? payload.segments : [];
+        if (payload.eval_horizon) {
+          tradeResearchEvalHorizon = String(payload.eval_horizon);
+          tradeResearchScale = tradeResearchEvalHorizon;
+          updateTradeResearchUi();
+        }
         addTradeResearchLinesToChart();
+        const artifactHorizon = payload.eval_horizon != null
+          ? String(payload.eval_horizon)
+          : tradeResearchEvalHorizon;
+        const requestedHorizon = payload.requested_eval_horizon != null
+          ? String(payload.requested_eval_horizon)
+          : artifactHorizon;
+        const entryHintMode = payload.entry_hint_mode != null
+          ? String(payload.entry_hint_mode)
+          : '?';
         const sampleCount = payload.sample_count != null ? payload.sample_count : '?';
         const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
         const entryAllowedCount = payload.entry_allowed_count != null ? payload.entry_allowed_count : '?';
         const barsLoaded = payload.bars_loaded != null ? payload.bars_loaded : '?';
-        const backtestNetPnl = payload.sequential_backtest_net_pnl_sum != null
-          ? payload.sequential_backtest_net_pnl_sum
-          : payload.backtest_net_pnl_sum;
-        const backtestTradeCount = payload.sequential_backtest_trade_count != null
-          ? payload.sequential_backtest_trade_count
-          : payload.backtest_trade_count;
-        const backtestVisibleNetPnl = payload.sequential_backtest_visible_net_pnl_sum != null
-          ? payload.sequential_backtest_visible_net_pnl_sum
-          : payload.backtest_visible_net_pnl_sum;
-        const backtestVisibleTradeCount = payload.sequential_backtest_visible_trade_count != null
-          ? payload.sequential_backtest_visible_trade_count
-          : payload.backtest_visible_trade_count;
-        const gridBacktestNetPnl = payload.grid_backtest_net_pnl_sum;
-        const gridBacktestTradeCount = payload.grid_backtest_trade_count;
+        const backtestVisibleNetPnl = payload.grid_backtest_visible_net_pnl_sum;
+        const backtestVisibleTradeCount = payload.grid_backtest_visible_trade_count;
         const pnlStride = payload.pnl_stride != null ? payload.pnl_stride : '?';
+        const sequentialHybridMetrics = readBacktestMetrics(payload, 'sequential_backtest');
+        const sequentialEntryOkMetrics = readBacktestMetrics(payload, 'sequential_entry_ok_backtest');
+        const gridHybridMetrics = readBacktestMetrics(payload, 'grid_backtest');
+        const gridEntryOkMetrics = readBacktestMetrics(payload, 'grid_entry_ok_backtest');
+        const sequentialValMetrics = readBacktestMetrics(payload, 'sequential_backtest_val');
+        const gridValMetrics = readBacktestMetrics(payload, 'grid_backtest_val');
+        const valSplitAvailable = Boolean(payload.val_split_available);
+        const trainSizeRatio = payload.train_size_ratio;
         let statusText =
           `Trade research: ${tradeResearchSegments.length} на графике ` +
-          `(${entryAllowedCount} entry ok / ${tradeCount} policy long/short из ${sampleCount} точек @ ${tradeResearchEvalHorizon}, ` +
-          `контекст ${barsLoaded} x1)`;
-        if (backtestNetPnl != null && backtestTradeCount != null) {
+          `(${entryAllowedCount} entry ok / ${tradeCount} policy long/short из ${sampleCount} grid @ ${artifactHorizon}, ` +
+          `mode ${entryHintMode}, контекст ${barsLoaded} x1)`;
+        if (requestedHorizon !== artifactHorizon) {
+          statusText = statusText + ` [запрос ${requestedHorizon} → artifact ${artifactHorizon}]`;
+        } else if (
+          tradeResearchAvailableHorizons.length > 0 &&
+          !tradeResearchAvailableHorizons.includes(artifactHorizon)
+        ) {
           statusText =
             statusText +
-            `, sequential PnL ${formatTradeResearchNetPnl(backtestNetPnl)} ` +
-            `(${backtestTradeCount} trades, stride ${pnlStride})`;
-          if (gridBacktestNetPnl != null && gridBacktestTradeCount != null) {
-            statusText =
-              statusText +
-              `; grid ${formatTradeResearchNetPnl(gridBacktestNetPnl)} ` +
-              `(${gridBacktestTradeCount})`;
+            ` [artifact ${artifactHorizon} не в списке: ${tradeResearchAvailableHorizons.join(', ')}]`;
+        }
+        const seqHybridBlock = formatBacktestMetricsBlock('seq hybrid', sequentialHybridMetrics);
+        if (seqHybridBlock) {
+          statusText = statusText + `, ${seqHybridBlock} (stride ${pnlStride}, walk-forward)`;
+        }
+        const seqEntryOkBlock = formatBacktestMetricsBlock('seq entry-ok', sequentialEntryOkMetrics);
+        if (seqEntryOkBlock) {
+          statusText = statusText + `; ${seqEntryOkBlock}`;
+        }
+        const gridHybridBlock = formatBacktestMetricsBlock('grid hybrid', gridHybridMetrics);
+        if (gridHybridBlock) {
+          statusText = statusText + `; ${gridHybridBlock}`;
+        }
+        const gridEntryOkBlock = formatBacktestMetricsBlock('grid entry-ok', gridEntryOkMetrics);
+        if (gridEntryOkBlock) {
+          statusText = statusText + `; ${gridEntryOkBlock} (=линии)`;
+        }
+        if (valSplitAvailable) {
+          const valRatioPct = trainSizeRatio != null
+            ? Math.round((1.0 - Number(trainSizeRatio)) * 100.0)
+            : 25;
+          const valSequentialBlock = formatBacktestMetricsBlock('seq val', sequentialValMetrics);
+          const valGridBlock = formatBacktestMetricsBlock('grid val', gridValMetrics);
+          if (valSequentialBlock || valGridBlock) {
+            statusText = statusText + ` | val ~${valRatioPct}% tail`;
+            if (valSequentialBlock) {
+              statusText = statusText + `: ${valSequentialBlock}`;
+            }
+            if (valGridBlock) {
+              statusText = statusText + `; ${valGridBlock}`;
+            }
           }
-          if (
-            backtestVisibleNetPnl != null &&
-            backtestVisibleTradeCount != null &&
-            tradeResearchSegments.length > 0 &&
-            Number(backtestVisibleTradeCount) !== Number(backtestTradeCount)
-          ) {
-            statusText =
-              statusText +
-              ` / ${formatTradeResearchNetPnl(backtestVisibleNetPnl)} ` +
-              `(${backtestVisibleTradeCount} на графике)`;
-          }
+        } else {
+          statusText = statusText + ' | val split: re-export NPZ';
+        }
+        if (
+          backtestVisibleNetPnl != null &&
+          backtestVisibleTradeCount != null &&
+          tradeResearchSegments.length > 0 &&
+          Number(backtestVisibleTradeCount) !== Number(entryAllowedCount)
+        ) {
+          statusText =
+            statusText +
+            ` / visible entry-ok linear ${formatTradeResearchNetPnl(backtestVisibleNetPnl)} ` +
+            `(${backtestVisibleTradeCount} на графике)`;
         }
         if (payload.sample_selection_note) {
           statusText = statusText + ` [${payload.sample_selection_note}]`;
@@ -2521,14 +2819,56 @@
           statusText = statusText + ` — нарисовано ${renderedLines}/${tradeResearchSegments.length} линий`;
         }
         setStatus(statusText);
-        return payload;
       })
       .catch((error) => {
+        if (activeTradeResearchRequestId !== requestId) {
+          return;
+        }
+        if (barsGenerationAtRequest !== barsDataGeneration) {
+          return;
+        }
+        guiLog('loadTradeResearch error', {
+          requestId,
+          trigger,
+          durationMs: Math.round(performance.now() - tradeResearchStartedMs),
+          message: error.message,
+        });
         tradeResearchSegments = [];
         removeTradeResearchLineSeries();
         setStatus('Trade research: ' + parseErrorDetail(error.message), true);
-        return null;
+      })
+      .finally(() => {
+        if (activeTradeResearchRequestId === requestId) {
+          loadTradeResearchInFlight = false;
+          if (pendingTradeResearch != null) {
+            const pending = pendingTradeResearch;
+            pendingTradeResearch = null;
+            if (symbolSelect.value === pending.symbol) {
+              guiLog('loadTradeResearch retry after inFlight', {
+                requestId,
+                trigger: pending.trigger,
+              });
+              loadTradeResearch(pending.symbol, `${pending.trigger}:retry`);
+            }
+          }
+        }
+        guiLog('loadTradeResearch finished', {
+          requestId,
+          trigger,
+          durationMs: Math.round(performance.now() - tradeResearchStartedMs),
+          inFlight: loadTradeResearchInFlight,
+        });
       });
+  }
+
+  function scheduleTradeResearch(symbol, trigger) {
+    if (!symbol) {
+      return;
+    }
+    if (symbolSelect.value !== symbol) {
+      return;
+    }
+    loadTradeResearch(symbol, trigger);
   }
 
   /** Удаляет серии линий экстремумов с графика и обновляет extremaLineSeries. */
@@ -2813,11 +3153,7 @@
     chart.timeScale().fitContent();
     addExtremaLinesToChart();
     if (isTradeResearchEnabled()) {
-      if (tradeResearchSegments.length > 0) {
-        addTradeResearchLinesToChart();
-      } else {
-        removeTradeResearchLineSeries();
-      }
+      removeTradeResearchLineSeries();
     }
 
     concentrationPanel.classList.remove('hidden');
@@ -2842,6 +3178,9 @@
 
   function loadBars() {
     if (loadBarsInFlight) {
+      guiLog('loadBars skipped: previous request still in flight', {
+        activeLoadBarsRequestId,
+      });
       return;
     }
     const scale = scaleSelect.value;
@@ -2860,28 +3199,63 @@
     if (!symbol) return;
     const limit = limitInput.value ? parseInt(limitInput.value, 10) : config.defaultLimit;
     setStatus('Загрузка…');
+    barsDataGeneration = barsDataGeneration + 1;
+    tradeResearchSegments = [];
+    removeTradeResearchLineSeries();
+    pendingTradeResearch = null;
+    loadTradeResearchInFlight = false;
+    tradeResearchRequestSeq = tradeResearchRequestSeq + 1;
+    activeTradeResearchRequestId = tradeResearchRequestSeq;
     loadBarsInFlight = true;
+    loadBarsRequestSeq = loadBarsRequestSeq + 1;
+    const loadRequestId = loadBarsRequestSeq;
+    activeLoadBarsRequestId = loadRequestId;
+    const loadStartedMs = performance.now();
 
     const effectiveScale = scaleSelect.value;
+    const barsParams = isDowLevel(effectiveScale)
+      ? { symbol_id: symbol, limit, level: parseDowLevel(effectiveScale) }
+      : { symbol_id: symbol, limit, scale: effectiveScale };
+    guiLog('loadBars start', {
+      loadRequestId,
+      symbol,
+      effectiveScale,
+      limit,
+      tradeResearchEnabled: isTradeResearchEnabled(),
+    });
     const promise = isDowLevel(effectiveScale)
-      ? API.dow({ symbol_id: symbol, limit, level: parseDowLevel(effectiveScale) })
-      : API.bars({ symbol_id: symbol, limit, scale: effectiveScale });
+      ? API.dow(barsParams)
+      : API.bars(barsParams);
 
     promise
       .then(data => {
+        guiLog('loadBars bars done', {
+          loadRequestId,
+          durationMs: Math.round(performance.now() - loadStartedMs),
+          count: data.count,
+        });
         applyBarsToChart(data, effectiveScale);
         updateLatestX1BarFromBarsData(data, effectiveScale);
         refreshTradeJournal(symbol);
-        if (!isTradeResearchEnabled()) {
-          return null;
-        }
-        return loadTradeResearch(symbol);
       })
       .catch(e => {
+        guiLog('loadBars error', {
+          loadRequestId,
+          durationMs: Math.round(performance.now() - loadStartedMs),
+          message: e.message,
+        });
         setStatus('Ошибка: ' + e.message, true);
       })
       .finally(() => {
-        loadBarsInFlight = false;
+        if (activeLoadBarsRequestId === loadRequestId) {
+          loadBarsInFlight = false;
+        }
+        guiLog('loadBars finished', {
+          loadRequestId,
+          durationMs: Math.round(performance.now() - loadStartedMs),
+          inFlight: loadBarsInFlight,
+        });
+        scheduleTradeResearch(symbol, 'afterBars');
       });
   }
 
@@ -2997,6 +3371,10 @@
         tradeResearchEvalHorizon = String(config.tradeResearchEvalHorizon);
         tradeResearchScale = tradeResearchEvalHorizon;
       }
+      if (Array.isArray(config.tradeResearchAvailableHorizons)) {
+        tradeResearchAvailableHorizons = config.tradeResearchAvailableHorizons.map(String);
+      }
+      updateTradeResearchUi();
       if (config.defaultLimit) {
         limitInput.placeholder = config.defaultLimit;
         limitInput.value = config.defaultLimit;
@@ -3033,6 +3411,9 @@
       }
       startBackgroundRefreshTimers();
       startAutoRefresh();
+      window.addEventListener('online', () => {
+        refreshInferencePanel();
+      });
     } catch (e) {
       setStatus('Ошибка инициализации: ' + e.message, true);
     }
