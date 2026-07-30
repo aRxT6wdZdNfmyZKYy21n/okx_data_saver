@@ -26,6 +26,9 @@ VERBOSE = False
 
 SpawnPoolKind = Literal['heavy', 'light', 'journal']
 
+SLOW_POOL_WAIT_SEC = 1.0
+SLOW_WORKER_SEC = 30.0
+
 WORKER_RESULT_POLL_INTERVAL_SEC = 0.5
 WORKER_RESULT_TIMEOUT_SEC = 12 * 3600
 WORKER_JOIN_TIMEOUT_SEC = 30
@@ -78,6 +81,11 @@ def _run_single_spawn_process(fn: Callable[..., object], *args: object) -> objec
         args=(result_queue, fn, VERBOSE) + args,
     )
     process.start()
+    logger.info(
+        'Spawn worker started: fn=%s pid=%d',
+        fn.__name__,
+        process.pid,
+    )
 
     deadline = time.monotonic() + WORKER_RESULT_TIMEOUT_SEC
     kind: str | None = None
@@ -105,7 +113,9 @@ def _run_single_spawn_process(fn: Callable[..., object], *args: object) -> objec
         raise RuntimeError('Spawn worker did not exit after sending result')
 
     if kind == 'error':
+        logger.error('Spawn worker failed: fn=%s error=%s', fn.__name__, payload)
         raise RuntimeError(f'Worker error: {payload}')
+    logger.info('Spawn worker finished: fn=%s', fn.__name__)
     return payload
 
 
@@ -114,8 +124,43 @@ def _execute_spawn_worker(
     fn: Callable[..., object],
     *args: object,
 ) -> object:
+    fn_name = fn.__name__
+    wait_started = time.monotonic()
+    logger.info('Spawn pool wait: pool=%s fn=%s', pool_kind, fn_name)
     with _pool_semaphore(pool_kind):
-        return _run_single_spawn_process(fn, *args)
+        wait_ms = int((time.monotonic() - wait_started) * 1000)
+        if wait_ms >= int(SLOW_POOL_WAIT_SEC * 1000):
+            logger.warning(
+                'Spawn pool acquired after slow wait: pool=%s fn=%s wait_ms=%d',
+                pool_kind,
+                fn_name,
+                wait_ms,
+            )
+        else:
+            logger.info(
+                'Spawn pool acquired: pool=%s fn=%s wait_ms=%d',
+                pool_kind,
+                fn_name,
+                wait_ms,
+            )
+        worker_started = time.monotonic()
+        result = _run_single_spawn_process(fn, *args)
+        worker_ms = int((time.monotonic() - worker_started) * 1000)
+        if worker_ms >= int(SLOW_WORKER_SEC * 1000):
+            logger.warning(
+                'Spawn worker slow: pool=%s fn=%s duration_ms=%d',
+                pool_kind,
+                fn_name,
+                worker_ms,
+            )
+        else:
+            logger.info(
+                'Spawn worker done: pool=%s fn=%s duration_ms=%d',
+                pool_kind,
+                fn_name,
+                worker_ms,
+            )
+        return result
 
 
 def run_in_spawned_process(

@@ -240,32 +240,22 @@ def load_trade_research_response(
     visible_max_start_trade_id: int | None,
     meta: dict[str, Any],
     npz_path: str,
-    segments_npz_path: str | None,
-    segments_meta: dict[str, Any] | None,
 ) -> dict[str, object]:
-    if segments_npz_path is None:
-        segments_npz_path = npz_path
     started = time.monotonic()
     logger.info(
-        'trade_research_loader start symbol=%s eval_horizon=%s step_bars=%d pnl_npz=%s segments_npz=%s',
+        'trade_research_loader start symbol=%s eval_horizon=%s step_bars=%d npz=%s',
         symbol_id,
         eval_horizon,
         step_bars,
         npz_path,
-        segments_npz_path,
     )
-    pnl_npz_data = np.load(npz_path, allow_pickle=True)
-    if segments_npz_path == npz_path:
-        segments_npz_data = pnl_npz_data
-    else:
-        segments_npz_data = np.load(segments_npz_path, allow_pickle=True)
+    npz_data = np.load(npz_path, allow_pickle=True)
     logger.info(
         'trade_research_loader npz loaded symbol=%s duration_ms=%d',
         symbol_id,
         int((time.monotonic() - started) * 1000),
     )
-    stored_eval_horizon = str(pnl_npz_data['eval_horizon'][0])
-    segments_eval_horizon = str(segments_npz_data['eval_horizon'][0])
+    stored_eval_horizon = str(npz_data['eval_horizon'][0])
     requested_eval_horizon = eval_horizon
     if eval_horizon != stored_eval_horizon:
         raise RuntimeError(
@@ -283,26 +273,18 @@ def load_trade_research_response(
         )
         step_bars = horizon_steps
 
-    if eval_horizon != segments_eval_horizon:
-        raise RuntimeError(
-            'Trade research segments artifact eval_horizon='
-            f'{segments_eval_horizon} does not match request {eval_horizon}',
-        )
-
-    pnl_store = TradeResearchNpzStore(npz_data=pnl_npz_data)
-    segments_store = TradeResearchNpzStore(npz_data=segments_npz_data)
+    npz_store = TradeResearchNpzStore(npz_data=npz_data)
     logger.info(
-        'trade_research_loader npz store ready symbol=%s pnl_rows=%d segments_rows=%d duration_ms=%d',
+        'trade_research_loader npz store ready symbol=%s rows=%d duration_ms=%d',
         symbol_id,
-        pnl_store.row_count(),
-        segments_store.row_count(),
+        npz_store.row_count(),
         int((time.monotonic() - started) * 1000),
     )
 
-    dataset_length = int(pnl_npz_data['dataset_length'][0])
-    start_index = int(pnl_npz_data['start_index'][0])
-    pnl_stride = int(pnl_npz_data['pnl_stride'][0])
-    eval_target_log2 = pnl_npz_data['eval_target_log2'].astype(np.float64)
+    dataset_length = int(npz_data['dataset_length'][0])
+    start_index = int(npz_data['start_index'][0])
+    pnl_stride = int(npz_data['pnl_stride'][0])
+    eval_target_log2 = npz_data['eval_target_log2'].astype(np.float64)
 
     max_sample_index = dataset_length - 1 - horizon_steps
     grid_sample_indices, _grid_note = _sample_indices_for_full_dataset(
@@ -313,7 +295,7 @@ def load_trade_research_response(
     mapped_grid_indices = [
         sample_index_value
         for sample_index_value in grid_sample_indices
-        if segments_store.has_sample(sample_index_value)
+        if npz_store.has_sample(sample_index_value)
     ]
     pnl_sample_indices = _sample_indices_for_pnl_backtest(
         max_sample_index=max_sample_index,
@@ -322,26 +304,32 @@ def load_trade_research_response(
     mapped_pnl_indices = [
         sample_index_value
         for sample_index_value in pnl_sample_indices
-        if pnl_store.has_sample(sample_index_value)
+        if npz_store.has_sample(sample_index_value)
     ]
     pnl_grid_indices = [
         sample_index_value
         for sample_index_value in grid_sample_indices
-        if pnl_store.has_sample(sample_index_value)
+        if npz_store.has_sample(sample_index_value)
     ]
 
-    entry_start_trade_id = segments_npz_data['entry_start_trade_id'].astype(np.int64)
-    exit_start_trade_id = segments_npz_data['exit_start_trade_id'].astype(np.int64)
-    entry_timestamp_ms = segments_npz_data['entry_timestamp_ms'].astype(np.int64)
-    exit_timestamp_ms = segments_npz_data['exit_timestamp_ms'].astype(np.int64)
-    entry_open = segments_npz_data['entry_open'].astype(np.float64)
-    entry_close = segments_npz_data['entry_close'].astype(np.float64)
-    exit_close = segments_npz_data['exit_close'].astype(np.float64)
-    pred_eval_log2 = segments_npz_data[f'pred_{eval_horizon}'].astype(np.float64)
-    pnl_entry_start_trade_id = pnl_npz_data['entry_start_trade_id'].astype(np.int64)
+    entry_start_trade_id = npz_data['entry_start_trade_id'].astype(np.int64)
+    exit_start_trade_id = npz_data['exit_start_trade_id'].astype(np.int64)
+    entry_timestamp_ms = npz_data['entry_timestamp_ms'].astype(np.int64)
+    exit_timestamp_ms = npz_data['exit_timestamp_ms'].astype(np.int64)
+    entry_open = npz_data['entry_open'].astype(np.float64)
+    entry_close = npz_data['entry_close'].astype(np.float64)
+    exit_close = npz_data['exit_close'].astype(np.float64)
+    pred_eval_log2 = npz_data[f'pred_{eval_horizon}'].astype(np.float64)
+    has_pred_start_price = 'pred_start_price' in npz_data.files
+    has_pred_target_price = 'pred_target_price' in npz_data.files
+    if has_pred_start_price:
+        pred_start_price = npz_data['pred_start_price'].astype(np.float64)
+    if has_pred_target_price:
+        pred_target_price = npz_data['pred_target_price'].astype(np.float64)
+    npz_entry_start_trade_id = npz_data['entry_start_trade_id'].astype(np.int64)
 
     grid_trade_pnls = _collect_grid_trade_pnls_from_npz(
-        store=pnl_store,
+        store=npz_store,
         grid_sample_indices=pnl_grid_indices,
         eval_target_log2=eval_target_log2,
         split='all',
@@ -349,7 +337,7 @@ def load_trade_research_response(
     )
     grid_metrics = summarize_trade_pnls(grid_trade_pnls)
     grid_entry_ok_pnls = _collect_grid_trade_pnls_from_npz(
-        store=pnl_store,
+        store=npz_store,
         grid_sample_indices=pnl_grid_indices,
         eval_target_log2=eval_target_log2,
         split='all',
@@ -357,10 +345,10 @@ def load_trade_research_response(
     )
     grid_entry_ok_metrics = summarize_trade_pnls(grid_entry_ok_pnls)
     visible_grid_pnls = _visible_trade_pnls_from_grid(
-        store=pnl_store,
+        store=npz_store,
         grid_sample_indices=pnl_grid_indices,
         eval_target_log2=eval_target_log2,
-        entry_start_trade_id=pnl_entry_start_trade_id,
+        entry_start_trade_id=npz_entry_start_trade_id,
         visible_min_start_trade_id=visible_min_start_trade_id,
         visible_max_start_trade_id=visible_max_start_trade_id,
         split='all',
@@ -380,27 +368,27 @@ def load_trade_research_response(
     )
 
     sequential_trade_pnls, sequential_visible_pnls = _collect_sequential_trade_pnls_from_npz(
-        store=pnl_store,
+        store=npz_store,
         cached_pnl_sample_indices=mapped_pnl_indices,
         max_sample_index=max_sample_index,
         horizon_steps=horizon_steps,
         eval_target_log2=eval_target_log2,
         split='all',
         entry_filter='hybrid',
-        entry_start_trade_id=pnl_entry_start_trade_id,
+        entry_start_trade_id=npz_entry_start_trade_id,
         visible_min_start_trade_id=visible_min_start_trade_id,
         visible_max_start_trade_id=visible_max_start_trade_id,
     )
     sequential_metrics = summarize_trade_pnls(sequential_trade_pnls)
     sequential_entry_ok_pnls, _sequential_entry_ok_visible_pnls = _collect_sequential_trade_pnls_from_npz(
-        store=pnl_store,
+        store=npz_store,
         cached_pnl_sample_indices=mapped_pnl_indices,
         max_sample_index=max_sample_index,
         horizon_steps=horizon_steps,
         eval_target_log2=eval_target_log2,
         split='all',
         entry_filter='recommended',
-        entry_start_trade_id=pnl_entry_start_trade_id,
+        entry_start_trade_id=npz_entry_start_trade_id,
         visible_min_start_trade_id=visible_min_start_trade_id,
         visible_max_start_trade_id=visible_max_start_trade_id,
     )
@@ -418,8 +406,8 @@ def load_trade_research_response(
         int((time.monotonic() - started) * 1000),
     )
 
-    val_split_available = pnl_store.val_split_available
-    train_size_ratio = pnl_store.train_size_ratio
+    val_split_available = npz_store.val_split_available
+    train_size_ratio = npz_store.train_size_ratio
     sequential_val_metrics: dict[str, float | int | None] = {
         'net_pnl_sum': None,
         'trade_count': None,
@@ -434,7 +422,7 @@ def load_trade_research_response(
     }
     if val_split_available:
         sequential_val_pnls, _sequential_val_visible_pnls = _collect_sequential_trade_pnls_from_npz(
-            store=pnl_store,
+            store=npz_store,
             cached_pnl_sample_indices=mapped_pnl_indices,
             max_sample_index=max_sample_index,
             horizon_steps=horizon_steps,
@@ -447,7 +435,7 @@ def load_trade_research_response(
         )
         sequential_val_metrics = summarize_trade_pnls(sequential_val_pnls)
         grid_val_pnls = _collect_grid_trade_pnls_from_npz(
-            store=pnl_store,
+            store=npz_store,
             grid_sample_indices=pnl_grid_indices,
             eval_target_log2=eval_target_log2,
             split='val',
@@ -467,15 +455,15 @@ def load_trade_research_response(
     entry_allowed_count = 0
 
     for sample_index_value in mapped_grid_indices:
-        row_index = segments_store.row_for_sample(sample_index_value)
+        row_index = npz_store.row_for_sample(sample_index_value)
         if row_index is None:
             continue
 
-        action = segments_store.policy_action_at_row(row_index)
+        action = npz_store.policy_action_at_row(row_index)
         if action in ('long', 'short'):
             policy_trade_count = policy_trade_count + 1
 
-        recommended_action = segments_store.recommended_action_at_row(row_index)
+        recommended_action = npz_store.recommended_action_at_row(row_index)
         if recommended_action is None:
             continue
         entry_allowed_count = entry_allowed_count + 1
@@ -491,6 +479,17 @@ def load_trade_research_response(
         entry_bar_index = start_index + sample_index_value
         exit_bar_index = entry_bar_index + horizon_steps
         pred_log2 = float(pred_eval_log2[row_index])
+        if has_pred_start_price:
+            segment_pred_start_price = float(pred_start_price[row_index])
+        else:
+            segment_pred_start_price = float(entry_close[row_index])
+        if has_pred_target_price:
+            segment_pred_target_close = float(pred_target_price[row_index])
+        else:
+            segment_pred_target_close = _pred_target_price(
+                entry_price=segment_pred_start_price,
+                pred_eval_log2=pred_log2,
+            )
 
         segments.append(
             {
@@ -504,14 +503,13 @@ def load_trade_research_response(
                 'entry_open': float(entry_open[row_index]),
                 'entry_close': float(entry_close[row_index]),
                 'exit_close': float(exit_close[row_index]),
+                'pred_start_price': segment_pred_start_price,
+                'pred_target_price': segment_pred_target_close,
                 'pred_target_open': _pred_target_price(
                     entry_price=float(entry_open[row_index]),
                     pred_eval_log2=pred_log2,
                 ),
-                'pred_target_close': _pred_target_price(
-                    entry_price=float(entry_close[row_index]),
-                    pred_eval_log2=pred_log2,
-                ),
+                'pred_target_close': segment_pred_target_close,
                 'pred_eval_log2': pred_log2,
                 'policy_action': action,
                 'action': recommended_action,
@@ -578,14 +576,14 @@ def load_trade_research_response(
         'sample_selection_note': meta['sample_selection_note']
         if 'sample_selection_note' in meta
         else None,
-        'display_payload_mode': segments_meta['payload_mode']
-        if segments_meta is not None and 'payload_mode' in segments_meta
+        'display_payload_mode': meta['payload_mode']
+        if 'payload_mode' in meta
         else None,
-        'display_sample_selection_note': segments_meta['sample_selection_note']
-        if segments_meta is not None and 'sample_selection_note' in segments_meta
+        'display_sample_selection_note': meta['sample_selection_note']
+        if 'sample_selection_note' in meta
         else None,
-        'display_artifact_updated_at_ms': segments_meta['updated_at_ms']
-        if segments_meta is not None and 'updated_at_ms' in segments_meta
+        'display_artifact_updated_at_ms': meta['updated_at_ms']
+        if 'updated_at_ms' in meta
         else None,
         'artifact_updated_at_ms': meta['updated_at_ms'],
         'run_label': meta['run_label'],

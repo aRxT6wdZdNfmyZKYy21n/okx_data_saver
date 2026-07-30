@@ -18,15 +18,31 @@ OHLC_MIN = {'low_price'}
 VOLUME_SUM = {'total_volume', 'buy_volume', 'total_quantity', 'buy_quantity', 'total_trades_count', 'buy_trades_count'}
 
 
-def aggregate_bars(df: polars.DataFrame, multiplier: int) -> polars.DataFrame:
+def aggregate_bars(
+    df: polars.DataFrame,
+    multiplier: int,
+    absolute_start_index: int | None = None,
+) -> polars.DataFrame:
     """
     Агрегирует бары: каждые `multiplier` подряд идущих строк в одну.
     Группировка по index // multiplier. Ожидается порядок по start_trade_id ASC.
+
+    absolute_start_index: глобальный индекс x1-бара для df[0] в полной истории.
+    Нужен для совпадения coarse buckets с dataset/inference (start_index + sample_index).
     """
     if multiplier <= 1:
         return df
 
-    df = df.with_columns((polars.int_range(polars.len()) // multiplier).alias('_group_id'))
+    if absolute_start_index is None:
+        row_index = polars.int_range(polars.len())
+    else:
+        if absolute_start_index < 0:
+            raise ValueError(
+                f'absolute_start_index must be >= 0, got {absolute_start_index}',
+            )
+        row_index = polars.int_range(polars.len()) + absolute_start_index
+
+    df = df.with_columns((row_index // multiplier).alias('_group_id'))
 
     first_cols = [c for c in OHLC_FIRST if c in df.columns]
     last_cols = [c for c in OHLC_LAST if c in df.columns]

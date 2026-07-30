@@ -5,6 +5,7 @@ REST API веб-GUI: символы, бары с пагинацией и мас�
 import asyncio
 import logging
 import os
+import time
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -26,6 +27,7 @@ from main.web_gui.inference_service import (
     fetch_inference_metadata,
 )
 from main.web_gui.trade_journal_service import build_trade_journal_api_response
+from main.offline_inference.artifacts import list_trade_research_horizons
 from main.web_gui.trade_research_service import (
     DEFAULT_EVAL_HORIZON,
     eval_horizon_from_metadata,
@@ -50,7 +52,7 @@ app = FastAPI(title='OKX Data Set Web GUI', version='0.1.0')
 
 # Дефолтное число баров для GUI = WEB_GUI_RECORDS_LIMIT (обычно 10M).
 DEFAULT_BARS_LIMIT = settings.WEB_GUI_RECORDS_LIMIT
-DEFAULT_CHART_SCALE = 'x2048'
+DEFAULT_CHART_SCALE = 'x1536'
 
 
 @app.get('/api/symbols')
@@ -100,6 +102,9 @@ async def get_config() -> dict:
         )
     except RuntimeError:
         pass
+    trade_research_available_horizons = list_trade_research_horizons(
+        symbol_id=settings.INFERENCE_DAEMON_SYMBOL,
+    )
     return {
         'defaultLimit': DEFAULT_BARS_LIMIT,
         'defaultScale': DEFAULT_CHART_SCALE,
@@ -112,6 +117,7 @@ async def get_config() -> dict:
         'checkpointPathBySymbol': checkpoint_path_by_symbol,
         'chartShowLimit': CHART_SHOW_LIMIT,
         'tradeResearchEvalHorizon': trade_research_eval_horizon,
+        'tradeResearchAvailableHorizons': trade_research_available_horizons,
         'tradeResearchLimit': settings.WEB_GUI_TRADE_RESEARCH_LIMIT,
         'tradeResearchPnlStride': settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE,
         'exitGbmEnabled': settings.WEB_GUI_EXIT_GBM_ENABLED,
@@ -144,6 +150,15 @@ async def get_bars(
         requested_limit=limit,
         records_cap=settings.WEB_GUI_RECORDS_LIMIT,
     )
+    started = time.monotonic()
+    logger.info(
+        'GET /api/bars start symbol=%s scale=%s limit=%d offset=%d effective_limit=%d',
+        symbol_id,
+        scale,
+        limit if limit is not None else -1,
+        offset,
+        effective_limit,
+    )
     bars = await run_in_spawned_process_async(
         _worker_bars,
         symbol_id,
@@ -152,8 +167,22 @@ async def get_bars(
         scale,
         pool_kind='heavy',
     )
+    duration_ms = int((time.monotonic() - started) * 1000)
     if bars is None:
+        logger.info(
+            'GET /api/bars done symbol=%s scale=%s count=0 duration_ms=%d',
+            symbol_id,
+            scale,
+            duration_ms,
+        )
         return {'bars': [], 'count': 0}
+    logger.info(
+        'GET /api/bars done symbol=%s scale=%s count=%d duration_ms=%d',
+        symbol_id,
+        scale,
+        len(bars),
+        duration_ms,
+    )
     return {'bars': bars, 'count': len(bars)}
 
 
@@ -210,7 +239,7 @@ async def get_inference(
 @app.get('/api/trade-research')
 async def get_trade_research(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
-    eval_horizon: str = Query('x2048', description='Eval horizon, e.g. x2048'),
+    eval_horizon: str = Query(DEFAULT_EVAL_HORIZON, description='Eval horizon, e.g. x1536'),
     step_bars: int | None = Query(None, ge=1, description='Non-overlapping step in x1 bars'),
     visible_min_start_trade_id: int | None = Query(
         None,
@@ -235,15 +264,45 @@ async def get_trade_research(
     else:
         effective_step_bars = step_bars
 
-    return await run_in_spawned_process_async(
-        _worker_trade_research_from_artifact,
+    started = time.monotonic()
+    logger.info(
+        'GET /api/trade-research start symbol=%s eval_horizon=%s step_bars=%d '
+        'visible_min=%s visible_max=%s',
         symbol_id,
         eval_horizon,
         effective_step_bars,
         visible_min_start_trade_id,
         visible_max_start_trade_id,
-        pool_kind='heavy',
     )
+    try:
+        payload = await run_in_spawned_process_async(
+            _worker_trade_research_from_artifact,
+            symbol_id,
+            eval_horizon,
+            effective_step_bars,
+            visible_min_start_trade_id,
+            visible_max_start_trade_id,
+            pool_kind='heavy',
+        )
+    except RuntimeError as exception:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        logger.error(
+            'GET /api/trade-research failed symbol=%s duration_ms=%d error=%s',
+            symbol_id,
+            duration_ms,
+            exception,
+        )
+        raise HTTPException(status_code=503, detail=str(exception)) from exception
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    segment_count = payload['segment_count'] if 'segment_count' in payload else '?'
+    logger.info(
+        'GET /api/trade-research done symbol=%s segments=%s duration_ms=%d',
+        symbol_id,
+        segment_count,
+        duration_ms,
+    )
+    return payload
 
 
 class TradeJournalEntryRequest(BaseModel):

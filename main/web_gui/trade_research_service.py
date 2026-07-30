@@ -34,8 +34,8 @@ from settings import settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EVAL_HORIZON = 'x2048'
-DEFAULT_STEP_BARS = 2048
+DEFAULT_EVAL_HORIZON = 'x1536'
+DEFAULT_STEP_BARS = 1536
 BATCH_CHUNK_SIZE = 32
 BATCH_HTTP_TIMEOUT_SEC = 600.0
 # OKX USDT-margined perpetual, regular tier (taker 0.05% per side) — как в trading_bot backtest
@@ -47,6 +47,11 @@ TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS = [
     'policy_prob_long',
     'policy_prob_short',
     'entry_hint_json',
+]
+
+TRADE_RESEARCH_NPZ_PRICE_ROW_KEYS = [
+    'pred_start_price',
+    'pred_target_price',
 ]
 
 
@@ -164,6 +169,10 @@ def build_inference_by_sample_from_npz(
     policy_prob_long = npz_data['policy_prob_long'].astype(np.float64)
     policy_prob_short = npz_data['policy_prob_short'].astype(np.float64)
     entry_hint_json = npz_data['entry_hint_json']
+    pred_by_horizon = {
+        horizon_name: npz_data[f'pred_{horizon_name}'].astype(np.float64)
+        for horizon_name in horizon_names
+    }
 
     inference_by_sample: dict[int, dict[str, object]] = {}
     for row_index in range(row_count):
@@ -171,9 +180,7 @@ def build_inference_by_sample_from_npz(
         predictions: dict[str, float] = {}
         for horizon_name in horizon_names:
             prediction_key = _prediction_key_for_horizon(horizon_name)
-            predictions[prediction_key] = float(
-                npz_data[f'pred_{horizon_name}'].astype(np.float64)[row_index],
-            )
+            predictions[prediction_key] = float(pred_by_horizon[horizon_name][row_index])
 
         entry_hint_raw = entry_hint_json[row_index]
         if isinstance(entry_hint_raw, bytes):
@@ -360,6 +367,44 @@ def _trade_net_pnl_from_linear_return(
         return -realized_linear_return - round_trip_fee_rate
     raise RuntimeError(f'Unexpected action for PnL: {action!r}')
 
+
+def compounded_return_from_trade_pnls(trade_pnls: list[float]) -> float:
+    equity = 1.0
+    for trade_pnl in trade_pnls:
+        equity = equity * (1.0 + trade_pnl)
+    return equity - 1.0
+
+
+def summarize_trade_pnls(
+    trade_pnls: list[float],
+) -> dict[str, float | int | None]:
+    trade_count = len(trade_pnls)
+    if trade_count == 0:
+        return {
+            'net_pnl_sum': 0.0,
+            'trade_count': 0,
+            'avg_trade_pnl': None,
+            'compounded_return': None,
+        }
+    net_pnl_sum = float(sum(trade_pnls))
+    return {
+        'net_pnl_sum': net_pnl_sum,
+        'trade_count': trade_count,
+        'avg_trade_pnl': net_pnl_sum / float(trade_count),
+        'compounded_return': compounded_return_from_trade_pnls(trade_pnls),
+    }
+
+
+def backtest_metrics_response_prefix(
+    prefix: str,
+    metrics: dict[str, float | int | None],
+) -> dict[str, float | int | None]:
+    return {
+        f'{prefix}_net_pnl_sum': metrics['net_pnl_sum'],
+        f'{prefix}_trade_count': metrics['trade_count'],
+        f'{prefix}_avg_trade_pnl': metrics['avg_trade_pnl'],
+        f'{prefix}_compounded_return': metrics['compounded_return'],
+    }
 
 def _sample_indices_for_pnl_backtest(
     max_sample_index: int,

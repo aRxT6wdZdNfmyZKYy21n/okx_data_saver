@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import traceback
 
 import polars
@@ -46,6 +47,21 @@ def _cast_bars_dataframe_types(df: polars.DataFrame) -> polars.DataFrame:
         polars.col('total_volume').cast(polars.Float64),
         polars.col('buy_volume').cast(polars.Float64),
     ])
+
+
+def _count_x1_bars_from_db_sync(symbol_id: SymbolId) -> int:
+    logger.info('DB read start: count_x1_bars symbol=%s', symbol_id.name)
+    query = f"""
+    SELECT COUNT(*) AS bar_count
+    FROM {OKXDataSetRecordData_3.__tablename__}
+    WHERE symbol_id = '{symbol_id.name}'
+    """
+    df = polars.read_database_uri(engine='connectorx', query=query, uri=_db_uri())
+    if df.height == 0:
+        raise RuntimeError(f'Failed to count x1 bars for {symbol_id.name}')
+    bar_count = int(df['bar_count'][0])
+    logger.info('DB read done: count_x1_bars symbol=%s bar_count=%d', symbol_id.name, bar_count)
+    return bar_count
 
 
 def _fetch_last_bars_from_db_sync(
@@ -242,15 +258,53 @@ async def get_bars_for_api(
     """
     Возвращает DataFrame для сериализации в API: последние бары с вычисляемыми полями и агрегацией.
     """
+    started = time.monotonic()
+    logger.info(
+        'get_bars_for_api start symbol=%s scale=%s limit=%d offset=%d',
+        symbol_id.name,
+        scale,
+        limit,
+        offset,
+    )
     raw = await fetch_last_bars(symbol_id=symbol_id, limit=limit, offset=offset)
     if raw is None:
+        logger.info(
+            'get_bars_for_api done symbol=%s scale=%s rows=0 duration_ms=%d',
+            symbol_id.name,
+            scale,
+            int((time.monotonic() - started) * 1000),
+        )
         return None
 
     mult = scale_to_multiplier(scale)
     if mult > 1:
-        raw = aggregate_bars(raw, mult)
+        total_x1_bars = await asyncio.to_thread(_count_x1_bars_from_db_sync, symbol_id)
+        absolute_start_index = total_x1_bars - int(raw.height)
+        if absolute_start_index < 0:
+            absolute_start_index = 0
+        logger.info(
+            'get_bars_for_api absolute aggregation symbol=%s scale=%s total_x1=%d rows=%d absolute_start=%d',
+            symbol_id.name,
+            scale,
+            total_x1_bars,
+            int(raw.height),
+            absolute_start_index,
+        )
+        raw = aggregate_bars(
+            raw,
+            mult,
+            absolute_start_index=absolute_start_index,
+        )
 
-    return add_computed_columns(raw)
+    result = add_computed_columns(raw)
+    logger.info(
+        'get_bars_for_api done symbol=%s scale=%s rows=%d duration_ms=%d',
+        symbol_id.name,
+        scale,
+        int(result.height),
+        int((time.monotonic() - started) * 1000),
+    )
+    return result
 
 
 def get_bars_for_api_sync(

@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     WEB_GUI_TRADE_RESEARCH_LIMIT: int = 10_000_000
     # Sample stride for sequential hybrid backtest PnL (1 = exact, 128 ≈ fast)
     WEB_GUI_TRADE_RESEARCH_PNL_STRIDE: int = 128
+    # Train/val split for trade research val-only metrics (matches dataset yaml train_size)
+    WEB_GUI_TRADE_RESEARCH_TRAIN_SIZE_RATIO: float = 0.75
     WEB_GUI_REFRESH_INTERVAL_SEC: int = 30
     WEB_GUI_DOW_SEQUENCE_LENGTH: int = 32
     WEB_GUI_INFERENCE_ENABLED: bool = True

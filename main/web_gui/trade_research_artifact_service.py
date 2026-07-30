@@ -5,7 +5,6 @@ from fastapi import HTTPException
 from main.offline_inference.artifacts import (
     list_trade_research_horizons,
     resolve_trade_research_artifact,
-    resolve_trade_research_inference_artifact,
 )
 from main.offline_inference.trade_research_loader import load_trade_research_response
 from settings import settings
@@ -46,18 +45,6 @@ def run_trade_research_from_artifact(
 
     npz_path, meta = resolved
 
-    inference_resolved = resolve_trade_research_inference_artifact(
-        symbol_id=symbol_id,
-        eval_horizon=eval_horizon,
-    )
-    segments_npz_path: str | None = None
-    segments_meta: dict[str, object] | None = None
-    if inference_resolved is not None:
-        segments_npz_path, segments_meta = inference_resolved
-        if segments_meta['status'] != 'ok':
-            segments_npz_path = None
-            segments_meta = None
-
     if meta['status'] == 'computing':
         raise HTTPException(
             status_code=503,
@@ -78,6 +65,4 @@ def run_trade_research_from_artifact(
         visible_max_start_trade_id=visible_max_start_trade_id,
         meta=meta,
         npz_path=npz_path,
-        segments_npz_path=segments_npz_path,
-        segments_meta=segments_meta,
     )

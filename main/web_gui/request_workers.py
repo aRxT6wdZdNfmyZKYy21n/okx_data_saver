@@ -4,6 +4,7 @@ heavy/light пулы в main.spawn_process (Polars только внутри д�
 """
 
 import logging
+import time
 
 from enumerations import SymbolId
 
@@ -38,14 +39,39 @@ BAR_COLS = [
 
 def _worker_bars(symbol_id_str: str, limit: int, offset: int, scale: str) -> list[dict] | None:
     """Вызывается в дочернем процессе. Возвращает список сериализованных баров или None."""
+    started = time.monotonic()
+    logger.info(
+        'worker_bars start symbol=%s scale=%s limit=%d offset=%d',
+        symbol_id_str,
+        scale,
+        limit,
+        offset,
+    )
     symbol = SymbolId[symbol_id_str]
     effective_limit = min(limit, settings.WEB_GUI_RECORDS_LIMIT)
     df = get_bars_for_api_sync(symbol_id=symbol, limit=effective_limit, offset=offset, scale=scale)
     if df is None:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        logger.info(
+            'worker_bars done symbol=%s scale=%s rows=0 duration_ms=%d',
+            symbol_id_str,
+            scale,
+            duration_ms,
+        )
         return None
     available = [c for c in BAR_COLS if c in df.columns]
     rows = df.select(available).to_dicts()
-    return [serialize_bar_row(r) for r in rows][-CHART_SHOW_LIMIT:]
+    result = [serialize_bar_row(r) for r in rows][-CHART_SHOW_LIMIT:]
+    duration_ms = int((time.monotonic() - started) * 1000)
+    logger.info(
+        'worker_bars done symbol=%s scale=%s rows=%d returned=%d duration_ms=%d',
+        symbol_id_str,
+        scale,
+        int(df.height),
+        len(result),
+        duration_ms,
+    )
+    return result
 
 
 def _worker_dow(symbol_id_str: str, limit: int, level: int) -> list[dict] | None:
@@ -70,13 +96,32 @@ def _worker_trade_research_from_artifact(
     visible_min_start_trade_id: int | None,
     visible_max_start_trade_id: int | None,
 ) -> dict[str, object]:
-    return run_trade_research_from_artifact(
+    started = time.monotonic()
+    logger.info(
+        'worker_trade_research start symbol=%s eval_horizon=%s step_bars=%d '
+        'visible_min=%s visible_max=%s',
+        symbol_id_str,
+        eval_horizon,
+        step_bars,
+        visible_min_start_trade_id,
+        visible_max_start_trade_id,
+    )
+    payload = run_trade_research_from_artifact(
         symbol_id=symbol_id_str,
         eval_horizon=eval_horizon,
         step_bars=step_bars,
         visible_min_start_trade_id=visible_min_start_trade_id,
         visible_max_start_trade_id=visible_max_start_trade_id,
     )
+    duration_ms = int((time.monotonic() - started) * 1000)
+    segment_count = payload['segment_count'] if 'segment_count' in payload else '?'
+    logger.info(
+        'worker_trade_research done symbol=%s segments=%s duration_ms=%d',
+        symbol_id_str,
+        segment_count,
+        duration_ms,
+    )
+    return payload
 
 
 def _worker_inference_cycle_safe(symbol_id_str: str) -> None:
