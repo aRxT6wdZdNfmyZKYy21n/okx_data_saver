@@ -851,8 +851,12 @@
   }
 
   function extractHorizon(targetName) {
-    const m = targetName.match(/_(x\d+)$/);
+    const m = targetName.match(/_(x\d+)(?:_|$)/);
     return m ? m[1] : targetName;
+  }
+
+  function isAuxiliaryPredictionKey(targetName) {
+    return targetName.endsWith('_pred_long') || targetName.endsWith('_pred_short');
   }
 
   function signedLog2ToPercent(v) {
@@ -1104,14 +1108,38 @@
       const blockTags = isHybrid
         ? `<span>${gbmBlocks ? 'GBM block' : 'GBM ok'} / ${snrBlocks ? 'SNR block' : 'SNR ok'}</span>`
         : '';
+      const dualGate = entryHint.dual_scalar_entry_gate;
+      const dualGateRunLabel = entryHint.dual_scalar_entry_gate_run_label
+        ? String(entryHint.dual_scalar_entry_gate_run_label)
+        : '';
+      let dualScalarMeta = '';
+      if (dualGate) {
+        const predLongPct = signedLog2ToPercent(Number(dualGate.pred_long_log2)).toFixed(2);
+        const predShortPct = signedLog2ToPercent(Number(dualGate.pred_short_log2)).toFixed(2);
+        const gapLog2 = Number(dualGate.strength_gap_log2).toFixed(4);
+        const epsLog2 = Number(dualGate.conflict_eps_log2).toFixed(4);
+        const bothActive = Boolean(dualGate.both_active);
+        const conflictHold = Boolean(dualGate.conflict_hold_blocks_entry);
+        dualScalarMeta = `
+            <span>long/short pred: <strong>${predLongPct}%</strong> / <strong>${predShortPct}%</strong></span>
+            <span>gap: ${gapLog2} (eps ${epsLog2})</span>
+            ${bothActive ? '<span>both active</span>' : ''}
+            ${conflictHold ? '<span>conflict hold</span>' : ''}
+            ${dualGateRunLabel ? `<span>gate: <strong>${dualGateRunLabel}</strong></span>` : ''}
+        `;
+      }
+      const dualScalarTitle = dualGate
+        ? `Entry hint @ ${evalHorizon} (dual-scalar ${dualGate.gate_mode || 'gate'}, rmse=${rmsePct}%)`
+        : title;
       entryHintHtml = `
         <div class="entry-hint ${blocked ? 'entry-hint-blocked' : 'entry-hint-ok'}">
-          <div class="entry-hint-title">${title}</div>
+          <div class="entry-hint-title">${dualScalarTitle}</div>
           <div class="entry-hint-meta">
             <span>SNR: <strong>${snr}</strong></span>
             ${hybridMeta}
             <span>band: [${Number(entryHint.min_pct).toFixed(2)}%, ${Number(entryHint.max_pct).toFixed(2)}%]</span>
             ${blockTags}
+            ${dualScalarMeta}
             <span>→ <strong>${recommended}</strong></span>
           </div>
           ${blocked ? `<div class="entry-hint-warning">${blockReason || 'uncertainty — подождать'}</div>` : ''}
@@ -1159,6 +1187,7 @@
 
     const rows = [];
     for (const key of sorted) {
+      if (isAuxiliaryPredictionKey(key)) continue;
       const horizon = extractHorizon(key);
       const signedLog2 = Number(predictions[key]);
       if (!Number.isFinite(signedLog2)) continue;

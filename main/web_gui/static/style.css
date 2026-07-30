@@ -217,7 +217,12 @@ body {
 }
 
 .inference-horizon {
-  width: 4.5rem;
+  flex-shrink: 0;
+  min-width: 4.5rem;
+  max-width: 6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: #787b86;
 }
 
