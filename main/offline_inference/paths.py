@@ -25,9 +25,41 @@ def trade_research_dir(symbol_id: str) -> str:
     return os.path.join(repo_root(), 'data', 'trade_research', symbol_id)
 
 
-def trade_research_npz_path(symbol_id: str) -> str:
+def trade_research_horizon_dir(symbol_id: str, eval_horizon: str) -> str:
+    return os.path.join(trade_research_dir(symbol_id), eval_horizon)
+
+
+def trade_research_npz_path(symbol_id: str, eval_horizon: str) -> str:
+    return os.path.join(
+        trade_research_horizon_dir(symbol_id, eval_horizon),
+        'predictions.npz',
+    )
+
+
+def trade_research_inference_npz_path(symbol_id: str, eval_horizon: str) -> str:
+    return os.path.join(
+        trade_research_horizon_dir(symbol_id, eval_horizon),
+        'predictions_inference.npz',
+    )
+
+
+def trade_research_meta_path(symbol_id: str, eval_horizon: str) -> str:
+    return os.path.join(
+        trade_research_horizon_dir(symbol_id, eval_horizon),
+        'meta.json',
+    )
+
+
+def trade_research_inference_meta_path(symbol_id: str, eval_horizon: str) -> str:
+    return os.path.join(
+        trade_research_horizon_dir(symbol_id, eval_horizon),
+        'meta_inference.json',
+    )
+
+
+def trade_research_legacy_npz_path(symbol_id: str) -> str:
     return os.path.join(trade_research_dir(symbol_id), 'predictions.npz')
 
 
-def trade_research_meta_path(symbol_id: str) -> str:
+def trade_research_legacy_meta_path(symbol_id: str) -> str:
     return os.path.join(trade_research_dir(symbol_id), 'meta.json')

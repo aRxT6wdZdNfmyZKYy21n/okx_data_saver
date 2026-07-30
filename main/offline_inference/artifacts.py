@@ -147,23 +147,149 @@ def read_latest_inference(symbol_id: str) -> dict[str, Any] | None:
 
 def write_trade_research_meta(
     symbol_id: str,
+    eval_horizon: str,
     payload: dict[str, Any],
 ) -> None:
-    from main.offline_inference.paths import trade_research_meta_path
+    from main.offline_inference.paths import trade_research_horizon_dir, trade_research_meta_path
 
+    os.makedirs(trade_research_horizon_dir(symbol_id, eval_horizon), exist_ok=True)
     artifact = dict(payload)
     artifact['updated_at_ms'] = _now_ms()
     artifact['symbol_id'] = symbol_id
+    artifact['eval_horizon'] = eval_horizon
     atomic_write_json(
-        path=trade_research_meta_path(symbol_id),
+        path=trade_research_meta_path(symbol_id, eval_horizon),
         payload=artifact,
     )
 
 
-def read_trade_research_meta(symbol_id: str) -> dict[str, Any] | None:
+def read_trade_research_meta(
+    symbol_id: str,
+    eval_horizon: str,
+) -> dict[str, Any] | None:
     from main.offline_inference.paths import trade_research_meta_path
 
-    path = trade_research_meta_path(symbol_id)
+    path = trade_research_meta_path(symbol_id, eval_horizon)
     if not os.path.isfile(path):
         return None
     return read_json(path)
+
+
+def write_trade_research_inference_meta(
+    symbol_id: str,
+    eval_horizon: str,
+    payload: dict[str, Any],
+) -> None:
+    from main.offline_inference.paths import (
+        trade_research_horizon_dir,
+        trade_research_inference_meta_path,
+    )
+
+    os.makedirs(trade_research_horizon_dir(symbol_id, eval_horizon), exist_ok=True)
+    artifact = dict(payload)
+    artifact['updated_at_ms'] = _now_ms()
+    artifact['symbol_id'] = symbol_id
+    artifact['eval_horizon'] = eval_horizon
+    atomic_write_json(
+        path=trade_research_inference_meta_path(symbol_id, eval_horizon),
+        payload=artifact,
+    )
+
+
+def read_trade_research_inference_meta(
+    symbol_id: str,
+    eval_horizon: str,
+) -> dict[str, Any] | None:
+    from main.offline_inference.paths import trade_research_inference_meta_path
+
+    path = trade_research_inference_meta_path(symbol_id, eval_horizon)
+    if not os.path.isfile(path):
+        return None
+    return read_json(path)
+
+
+def resolve_trade_research_inference_artifact(
+    symbol_id: str,
+    eval_horizon: str,
+) -> tuple[str, dict[str, Any]] | None:
+    from main.offline_inference.paths import trade_research_inference_npz_path
+
+    meta = read_trade_research_inference_meta(
+        symbol_id=symbol_id,
+        eval_horizon=eval_horizon,
+    )
+    npz_path = trade_research_inference_npz_path(symbol_id, eval_horizon)
+    if meta is not None and os.path.isfile(npz_path):
+        return npz_path, meta
+    return None
+
+
+def _legacy_trade_research_meta(symbol_id: str) -> dict[str, Any] | None:
+    from main.offline_inference.paths import trade_research_legacy_meta_path
+
+    path = trade_research_legacy_meta_path(symbol_id)
+    if not os.path.isfile(path):
+        return None
+    return read_json(path)
+
+
+def list_trade_research_horizons(symbol_id: str) -> list[str]:
+    from main.offline_inference.paths import (
+        trade_research_dir,
+        trade_research_meta_path,
+        trade_research_npz_path,
+    )
+
+    horizons: list[str] = []
+    base_dir = trade_research_dir(symbol_id)
+    if os.path.isdir(base_dir):
+        for entry_name in sorted(os.listdir(base_dir)):
+            entry_path = os.path.join(base_dir, entry_name)
+            if not os.path.isdir(entry_path):
+                continue
+            if not entry_name.startswith('x'):
+                continue
+            if not os.path.isfile(trade_research_meta_path(symbol_id, entry_name)):
+                continue
+            if not os.path.isfile(trade_research_npz_path(symbol_id, entry_name)):
+                continue
+            horizons.append(entry_name)
+
+    legacy_meta = _legacy_trade_research_meta(symbol_id=symbol_id)
+    if legacy_meta is not None:
+        from main.offline_inference.paths import trade_research_legacy_npz_path
+
+        if os.path.isfile(trade_research_legacy_npz_path(symbol_id)):
+            if 'eval_horizon' in legacy_meta:
+                legacy_horizon = str(legacy_meta['eval_horizon'])
+                if legacy_horizon not in horizons:
+                    horizons.append(legacy_horizon)
+
+    horizons.sort(key=lambda horizon_name: int(horizon_name[1:]))
+    return horizons
+
+
+def resolve_trade_research_artifact(
+    symbol_id: str,
+    eval_horizon: str,
+) -> tuple[str, dict[str, Any]] | None:
+    from main.offline_inference.paths import (
+        trade_research_legacy_npz_path,
+        trade_research_npz_path,
+    )
+
+    meta = read_trade_research_meta(symbol_id=symbol_id, eval_horizon=eval_horizon)
+    npz_path = trade_research_npz_path(symbol_id, eval_horizon)
+    if meta is not None and os.path.isfile(npz_path):
+        return npz_path, meta
+
+    legacy_meta = _legacy_trade_research_meta(symbol_id=symbol_id)
+    legacy_npz_path = trade_research_legacy_npz_path(symbol_id)
+    if legacy_meta is None or not os.path.isfile(legacy_npz_path):
+        return None
+    if 'eval_horizon' not in legacy_meta:
+        return None
+    legacy_horizon = str(legacy_meta['eval_horizon'])
+    if legacy_horizon != eval_horizon:
+        return None
+    return legacy_npz_path, legacy_meta
