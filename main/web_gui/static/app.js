@@ -2503,33 +2503,46 @@
     return candleDataByIndex[bestIndex];
   }
 
-  function resolveEntrySegmentCandle(startTradeId, timestampMs, candleByTime) {
-    const exactBar = findBarForStartTradeId(startTradeId);
-    if (!exactBar) {
-      return null;
-    }
-    const barCandle = candleFromBar(exactBar, candleByTime);
-    if (!barCandle) {
-      return null;
-    }
-    const candleByTimestamp = findCandleForTimestampMs(timestampMs);
-    if (candleByTimestamp && candleByTimestamp.time === barCandle.time) {
-      return candleByTimestamp;
-    }
-    return barCandle;
-  }
-
-  function resolveExitSegmentCandle(startTradeId, timestampMs, candleByTime) {
-    const exactBar = findBarForStartTradeId(startTradeId);
-    const barCandle = candleFromBar(exactBar, candleByTime);
-    if (barCandle) {
-      return barCandle;
-    }
+  function segmentTimeSecFromTimestampMs(timestampMs) {
     if (timestampMs == null) {
       return null;
     }
-    const time = Math.floor(Number(timestampMs) / 1000);
-    return candleByTime.get(time) || null;
+    const timeSec = Math.floor(Number(timestampMs) / 1000);
+    if (!Number.isFinite(timeSec)) {
+      return null;
+    }
+    return timeSec;
+  }
+
+  function positiveFiniteNumber(value) {
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue) || numberValue <= 0) {
+      return null;
+    }
+    return numberValue;
+  }
+
+  /** Close @ x1 grid bar — matches model target (close→close signed log2) and PnL backtest. */
+  function resolveTradeResearchSegmentEntryPrice(segment) {
+    const entryClose = positiveFiniteNumber(segment.entry_close);
+    if (entryClose != null) {
+      return entryClose;
+    }
+    return positiveFiniteNumber(segment.entry_open);
+  }
+
+  /** Predicted close after horizon; pred is signed log2(close_exit / close_entry). */
+  function resolveTradeResearchSegmentPredTargetClose(segment) {
+    const predTargetClose = positiveFiniteNumber(segment.pred_target_close);
+    if (predTargetClose != null) {
+      return predTargetClose;
+    }
+    const entryPrice = resolveTradeResearchSegmentEntryPrice(segment);
+    const predEvalLog2 = Number(segment.pred_eval_log2);
+    if (entryPrice != null && Number.isFinite(predEvalLog2)) {
+      return positiveFiniteNumber(entryPrice * Math.pow(2, predEvalLog2));
+    }
+    return positiveFiniteNumber(segment.pred_target_open);
   }
 
   function addTradeResearchLinesToChart() {
@@ -2541,7 +2554,6 @@
     if (candleDataByIndex.length === 0 || tradeResearchSegments.length === 0) {
       return;
     }
-    const candleByTime = buildCandleByTimeLookup();
     const LineSeries = LightweightCharts.LineSeries;
     if (!LineSeries) return;
     const opts = {
@@ -2554,46 +2566,31 @@
     let missingEntryCount = 0;
     let missingExitCount = 0;
     for (const segment of tradeResearchSegments) {
-      const entryCandle = resolveEntrySegmentCandle(
-        segment.entry_start_trade_id,
-        segment.entry_timestamp_ms,
-        candleByTime,
-      );
-      const exitCandle = resolveExitSegmentCandle(
-        segment.exit_start_trade_id,
-        segment.exit_timestamp_ms,
-        candleByTime,
-      );
-      if (!entryCandle) {
+      const entryTimeSec = segmentTimeSecFromTimestampMs(segment.entry_timestamp_ms);
+      const exitTimeSec = segmentTimeSecFromTimestampMs(segment.exit_timestamp_ms);
+      if (entryTimeSec == null) {
         missingEntryCount = missingEntryCount + 1;
         continue;
       }
-      if (!exitCandle) {
+      if (exitTimeSec == null || exitTimeSec <= entryTimeSec) {
         missingExitCount = missingExitCount + 1;
         continue;
       }
-      const predTargetOpen = Number(segment.pred_target_open);
-      if (!Number.isFinite(predTargetOpen) || predTargetOpen <= 0) {
-        missingExitCount = missingExitCount + 1;
-        continue;
-      }
-      const entryOpen = Number(segment.entry_open);
-      const entryBar = findBarForStartTradeId(segment.entry_start_trade_id);
-      let entryStartPrice = entryOpen;
-      if (!Number.isFinite(entryStartPrice) || entryStartPrice <= 0) {
-        if (entryBar && entryBar.open_price != null) {
-          entryStartPrice = Number(entryBar.open_price);
-        }
-      }
-      if (!Number.isFinite(entryStartPrice) || entryStartPrice <= 0) {
+      const entryPrice = resolveTradeResearchSegmentEntryPrice(segment);
+      if (entryPrice == null) {
         missingEntryCount = missingEntryCount + 1;
+        continue;
+      }
+      const predTargetClose = resolveTradeResearchSegmentPredTargetClose(segment);
+      if (predTargetClose == null) {
+        missingExitCount = missingExitCount + 1;
         continue;
       }
       const color = segment.action === 'long' ? '#26a69a' : '#ef5350';
       const series = chart.addSeries(LineSeries, { ...opts, color });
       series.setData([
-        { time: entryCandle.time, value: entryStartPrice },
-        { time: exitCandle.time, value: predTargetOpen },
+        { time: entryTimeSec, value: entryPrice },
+        { time: exitTimeSec, value: predTargetClose },
       ]);
       tradeResearchLineSeries.push(series);
       renderedCount = renderedCount + 1;
@@ -2605,6 +2602,7 @@
         rendered: renderedCount,
         missingEntry: missingEntryCount,
         missingExit: missingExitCount,
+        anchor: 'x1_timestamp_entry_close_to_pred_target_close',
         chartBars: barsData.length,
         chartCandles: candleDataByIndex.length,
       },
