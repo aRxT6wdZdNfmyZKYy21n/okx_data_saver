@@ -12,10 +12,10 @@ def _build_raw_dataframe(rows_count: int) -> pl.DataFrame:
     return pl.DataFrame(
         {
             'symbol_id': ['BTC_USDT'] * rows_count,
-            'start_trade_id': (index * 10).cast(pl.Float64),
-            'end_trade_id': (index * 10 + 9).cast(pl.Float64),
-            'start_timestamp_ms': (index * 60000).cast(pl.Float64),
-            'end_timestamp_ms': ((index + 1) * 60000).cast(pl.Float64),
+            'start_trade_id': (index * 10).cast(pl.Int32),
+            'end_trade_id': (index * 10 + 9).cast(pl.Int32),
+            'start_timestamp_ms': (index * 60000).cast(pl.Int64),
+            'end_timestamp_ms': ((index + 1) * 60000).cast(pl.Int64),
             'open_price': (100.0 + index).cast(pl.Float64),
             'high_price': (100.5 + index).cast(pl.Float64),
             'low_price': (99.5 + index).cast(pl.Float64),
@@ -41,7 +41,8 @@ def test_append_forward_target_padding_extends_and_preserves_real_tail() -> None
     assert padded_df.row(99, named=True)['close_price'] == 199.0
     assert padded_df.row(100, named=True)['close_price'] == 199.0
     assert padded_df.row(100, named=True)['total_volume'] == 0.0
-    assert padded_df.row(103, named=True)['start_trade_id'] == 1030.0
+    assert padded_df.row(103, named=True)['start_trade_id'] == 1030
+    assert padded_df.schema['start_trade_id'] == pl.Int32
 
 
 def test_real_last_start_trade_id_uses_real_tail() -> None:

@@ -35,7 +35,7 @@ def append_forward_target_padding(
     close_price = float(last_row['close_price'])
     symbol_id = last_row['symbol_id']
 
-    padding_rows: list[dict[str, float | str]] = []
+    padding_rows: list[dict[str, object]] = []
     previous_end_timestamp_ms = end_timestamp_ms
     previous_end_trade_id = last_end_trade_id
 
@@ -47,8 +47,8 @@ def append_forward_target_padding(
         padding_rows.append(
             {
                 'symbol_id': symbol_id,
-                'start_trade_id': float(bar_start_trade_id),
-                'end_trade_id': float(bar_end_trade_id),
+                'start_trade_id': bar_start_trade_id,
+                'end_trade_id': bar_end_trade_id,
                 'start_timestamp_ms': bar_start_timestamp_ms,
                 'end_timestamp_ms': bar_end_timestamp_ms,
                 'open_price': close_price,
@@ -67,6 +67,12 @@ def append_forward_target_padding(
         previous_end_trade_id = bar_end_trade_id
 
     padding_df = polars.DataFrame(padding_rows)
+    padding_df = padding_df.select(
+        [
+            polars.col(column_name).cast(raw_df.schema[column_name])
+            for column_name in raw_df.columns
+        ],
+    )
     padded_df = polars.concat([raw_df, padding_df], how='vertical')
     logger.info(
         'Trade research forward-target padding: real_bars=%d padded_bars=%d total=%d',
