@@ -19,7 +19,6 @@ from main.offline_inference.paths import (
 )
 from main.web_gui.data_service import fetch_last_bars_sync
 from main.web_gui.trade_research_dataset_common import (
-    TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
     TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE,
     prepare_trade_research_raw_dataframe,
     real_last_start_trade_id,
@@ -185,6 +184,7 @@ def _should_rebuild_existing_npz(
     stack_fingerprint: dict[str, str],
     start_index: int,
     payload_mode: str,
+    forward_target_padding_bars: int,
 ) -> bool:
     if existing_npz is None:
         return False
@@ -233,11 +233,11 @@ def _should_rebuild_existing_npz(
         )
         return True
     existing_padding_bars = int(existing_npz['forward_target_padding_bars'][0])
-    if existing_padding_bars != TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS:
+    if existing_padding_bars != forward_target_padding_bars:
         logger.info(
             'Forward target padding changed (%d -> %d); rebuilding NPZ from scratch',
             existing_padding_bars,
-            TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+            forward_target_padding_bars,
         )
         return True
     if 'forward_target_padding_site' not in existing_npz:
@@ -485,9 +485,17 @@ def _backfill_train_split_fields(
     merged_payload['train_size_ratio'] = np.array([train_size_ratio], dtype=np.float64)
 
 
-def run_trade_research_export(symbol_id: str) -> None:
+def run_trade_research_export(
+    symbol_id: str,
+    forward_target_padding_bars: int,
+) -> None:
     research_limit = settings.WEB_GUI_TRADE_RESEARCH_LIMIT
     pnl_stride = settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE
+
+    logger.info(
+        'Trade research export forward-target padding bars=%d',
+        forward_target_padding_bars,
+    )
 
     metadata = fetch_inference_metadata()
     stack_fingerprint = inference_stack_fingerprint(metadata, symbol_id)
@@ -536,7 +544,10 @@ def run_trade_research_export(symbol_id: str) -> None:
             f'({df.height} < {minimum_rows})',
         )
 
-    df, real_bar_count = prepare_trade_research_raw_dataframe(df)
+    df, real_bar_count = prepare_trade_research_raw_dataframe(
+        df,
+        forward_target_padding_bars,
+    )
     real_last_trade_id = real_last_start_trade_id(df, real_bar_count)
 
     horizon_names = _horizon_names_from_metadata(metadata)
@@ -547,7 +558,7 @@ def run_trade_research_export(symbol_id: str) -> None:
         int(metadata['sequence_length']),
     )
     dataset = _build_dataset(
-        df.head(real_bar_count),
+        df,
         metadata,
     )
     train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
@@ -610,6 +621,7 @@ def run_trade_research_export(symbol_id: str) -> None:
         stack_fingerprint=stack_fingerprint,
         start_index=start_index,
         payload_mode='train',
+        forward_target_padding_bars=forward_target_padding_bars,
     ):
         existing_npz = None
 
@@ -736,7 +748,7 @@ def run_trade_research_export(symbol_id: str) -> None:
         'bars_loaded': np.array([int(df.height)], dtype=np.int64),
         'real_bars_loaded': np.array([real_bar_count], dtype=np.int64),
         'forward_target_padding_bars': np.array(
-            [TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS],
+            [forward_target_padding_bars],
             dtype=np.int64,
         ),
         'forward_target_padding_site': np.array([TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE], dtype=object),
@@ -801,7 +813,7 @@ def run_trade_research_export(symbol_id: str) -> None:
             'required_rows': required_rows,
             'bars_loaded': int(df.height),
             'real_bars_loaded': real_bar_count,
-            'forward_target_padding_bars': TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+            'forward_target_padding_bars': forward_target_padding_bars,
             'forward_target_padding_site': TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE,
             'real_last_start_trade_id': real_last_trade_id,
             'level0_rows': level0_height,
@@ -822,12 +834,18 @@ def run_trade_research_export(symbol_id: str) -> None:
     )
 
 
-def run_trade_research_export_safe(symbol_id: str) -> None:
+def run_trade_research_export_safe(
+    symbol_id: str,
+    forward_target_padding_bars: int,
+) -> None:
     eval_horizon: str | None = None
     try:
         metadata = fetch_inference_metadata()
         eval_horizon = inference_stack_fingerprint(metadata, symbol_id)['eval_horizon']
-        run_trade_research_export(symbol_id=symbol_id)
+        run_trade_research_export(
+            symbol_id=symbol_id,
+            forward_target_padding_bars=forward_target_padding_bars,
+        )
     except Exception as exception:
         logger.error(
             'Trade research export failed: %s',

@@ -86,10 +86,11 @@ def append_forward_target_padding(
 
 def prepare_trade_research_raw_dataframe(
     raw_df: polars.DataFrame,
+    forward_bars: int,
 ) -> tuple[polars.DataFrame, int]:
     return append_forward_target_padding(
         raw_df=raw_df,
-        forward_bars=TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+        forward_bars=forward_bars,
     )
 
 

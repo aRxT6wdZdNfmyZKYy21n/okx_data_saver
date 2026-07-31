@@ -10,6 +10,7 @@ from omegaconf import OmegaConf
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars_sync
 from main.web_gui.trade_research_dataset_common import (
+    TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
     last_real_sample_index,
     prepare_trade_research_raw_dataframe,
 )
@@ -224,40 +225,48 @@ def _prepare_train_aligned_payload_dict(
 
 def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     metadata = fetch_inference_metadata()
-    padded_df, real_bar_count = prepare_trade_research_raw_dataframe(df)
-    inference_real_df = padded_df.head(real_bar_count)
+    padded_df, real_bar_count = prepare_trade_research_raw_dataframe(
+        df,
+        TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+    )
     logger.info(
         'Dataset preparation start: real_rows=%d total_rows=%d sequence_length=%d',
         real_bar_count,
         int(padded_df.height),
         int(metadata['sequence_length']),
     )
-    train_dataset, train_level0_df, _raw_to_train_level0_row = _build_train_level0_context(
-        df=padded_df,
-        metadata=metadata,
+    inference_dataset = _build_dataset(
+        padded_df,
+        metadata,
     )
-    train_level0_to_raw = _build_level0_to_raw_row_indices(padded_df, train_level0_df)
-    last_train_index = last_real_sample_index(
-        dataset_length=len(train_dataset),
-        start_index=int(train_dataset.start_index),
-        level0_to_raw=train_level0_to_raw,
+    start_index = int(inference_dataset.dataset.start_index)
+    logger.info(
+        'Dataset preparation done: samples=%d start_index=%d',
+        len(inference_dataset),
+        start_index,
+    )
+
+    level0_df = inference_dataset.dataset.aggregated_data[0]
+    level0_to_raw = _build_level0_to_raw_row_indices(padded_df, level0_df)
+    last_index = last_real_sample_index(
+        dataset_length=len(inference_dataset),
+        start_index=start_index,
+        level0_to_raw=level0_to_raw,
         real_bar_count=real_bar_count,
     )
-    raw_entry_row = train_level0_to_raw[int(train_dataset.start_index) + last_train_index]
+    raw_entry_row = level0_to_raw[start_index + last_index]
     logger.info(
-        'Last real-bar train sample: index=%d raw_row=%d (real_bar_count=%d)',
-        last_train_index,
+        'Last real-bar sample: index=%d raw_row=%d (real_bar_count=%d)',
+        last_index,
         raw_entry_row,
         real_bar_count,
     )
-    logger.info(
-        'Dataset preparation done: train_samples=%d start_index=%d',
-        len(train_dataset),
-        int(train_dataset.start_index),
-    )
-    return _prepare_payload_dict_from_train_sample(
-        train_dataset=train_dataset,
-        train_sample_index=last_train_index,
+
+    return _prepare_train_aligned_payload_dict(
+        df=padded_df,
+        metadata=metadata,
+        inference_dataset=inference_dataset,
+        sample_index=last_index,
     )
 
 

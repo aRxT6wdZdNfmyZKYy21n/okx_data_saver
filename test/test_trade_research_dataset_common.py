@@ -68,6 +68,9 @@ def test_prepare_trade_research_raw_dataframe_uses_default_padding() -> None:
             'buy_trades_count': [1.0],
         }
     )
-    padded, real_bar_count = prepare_trade_research_raw_dataframe(raw_df)
+    padded, real_bar_count = prepare_trade_research_raw_dataframe(
+        raw_df,
+        TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+    )
     assert real_bar_count == 1
     assert padded.height == 1 + TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS

@@ -772,11 +772,14 @@ def run_trade_research(
             ),
         )
 
-    df, real_bar_count = prepare_trade_research_raw_dataframe(df)
+    df, real_bar_count = prepare_trade_research_raw_dataframe(
+        df,
+        TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+    )
     real_last_trade_id = real_last_start_trade_id(df, real_bar_count)
 
     dataset = _build_dataset(
-        df.head(real_bar_count),
+        df,
         metadata,
     )
     train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
