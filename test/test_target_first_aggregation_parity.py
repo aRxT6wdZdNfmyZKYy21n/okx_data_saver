@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import pytest
-import torch
-from omegaconf import OmegaConf
 
 from main.web_gui.inference_service import (
     _build_level0_to_raw_row_indices,
