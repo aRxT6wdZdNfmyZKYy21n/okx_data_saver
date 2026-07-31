@@ -21,6 +21,11 @@ from fastapi import HTTPException
 
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars_sync
+from main.web_gui.trade_research_dataset_common import (
+    prepare_trade_research_raw_dataframe,
+    real_last_start_trade_id,
+    sample_exit_on_real_bars,
+)
 from main.web_gui.inference_service import (
     _build_dataset,
     _build_level0_to_raw_row_indices,
@@ -515,11 +520,21 @@ def _trade_pnl_for_sample(
     inference_level0_to_raw: list[int],
     train_level0_df: polars.DataFrame,
     raw_to_train_level0_row: dict[int, int],
+    real_bar_count: int | None,
 ) -> float | None:
     entry_bar_index = start_index + sample_index
     exit_bar_index = entry_bar_index + horizon_steps
     if exit_bar_index >= len(inference_level0_to_raw):
         return None
+    if real_bar_count is not None:
+        if not sample_exit_on_real_bars(
+            sample_index=sample_index,
+            start_index=start_index,
+            horizon_steps=horizon_steps,
+            level0_to_raw=inference_level0_to_raw,
+            real_bar_count=real_bar_count,
+        ):
+            return None
 
     realized_linear_return = _realized_linear_return_train_aligned(
         inference_entry_bar_index=entry_bar_index,
@@ -567,6 +582,7 @@ def _compute_grid_hybrid_backtest_sum(
     visible_min_start_trade_id: int | None,
     visible_max_start_trade_id: int | None,
     raw_df: polars.DataFrame,
+    real_bar_count: int | None,
 ) -> tuple[float, int, float, int]:
     net_pnl_sum = 0.0
     trade_count = 0
@@ -588,6 +604,7 @@ def _compute_grid_hybrid_backtest_sum(
             inference_level0_to_raw=inference_level0_to_raw,
             train_level0_df=train_level0_df,
             raw_to_train_level0_row=raw_to_train_level0_row,
+            real_bar_count=real_bar_count,
         )
         if trade_pnl is None:
             continue
@@ -622,6 +639,7 @@ def _compute_sequential_hybrid_backtest(
     visible_min_start_trade_id: int | None,
     visible_max_start_trade_id: int | None,
     raw_df: polars.DataFrame,
+    real_bar_count: int | None,
 ) -> tuple[float, int, float, int]:
     cached_sample_indices = sorted(
         sample_index
@@ -661,6 +679,7 @@ def _compute_sequential_hybrid_backtest(
             inference_level0_to_raw=inference_level0_to_raw,
             train_level0_df=train_level0_df,
             raw_to_train_level0_row=raw_to_train_level0_row,
+            real_bar_count=real_bar_count,
         )
         if trade_pnl is None:
             sample_index = sample_index + 1
@@ -751,6 +770,9 @@ def run_trade_research(
                 f'({df.height} < {minimum_rows})'
             ),
         )
+
+    df, real_bar_count = prepare_trade_research_raw_dataframe(df)
+    real_last_trade_id = real_last_start_trade_id(df, real_bar_count)
 
     dataset = _build_dataset(df, metadata)
     train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
@@ -855,6 +877,8 @@ def run_trade_research(
             'pnl_stride': pnl_stride,
             'required_rows': required_rows,
             'bars_loaded': int(df.height),
+            'real_bars_loaded': real_bar_count,
+            'real_last_start_trade_id': real_last_trade_id,
             'level0_rows': level0_height,
             'dataset_length': dataset_length,
             'start_index': start_index,
@@ -906,6 +930,7 @@ def run_trade_research(
             visible_min_start_trade_id=visible_min_start_trade_id,
             visible_max_start_trade_id=visible_max_start_trade_id,
             raw_df=df,
+            real_bar_count=real_bar_count,
         )
 
         (
@@ -925,6 +950,7 @@ def run_trade_research(
             visible_min_start_trade_id=visible_min_start_trade_id,
             visible_max_start_trade_id=visible_max_start_trade_id,
             raw_df=df,
+            real_bar_count=real_bar_count,
         )
 
         prediction_key = _prediction_key_for_horizon(eval_horizon)
@@ -1016,6 +1042,8 @@ def run_trade_research(
         'pnl_stride': pnl_stride,
         'required_rows': required_rows,
         'bars_loaded': int(df.height),
+        'real_bars_loaded': real_bar_count,
+        'real_last_start_trade_id': real_last_trade_id,
         'level0_rows': level0_height,
         'dataset_length': dataset_length,
         'start_index': start_index,

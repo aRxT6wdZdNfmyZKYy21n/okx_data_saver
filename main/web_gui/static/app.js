@@ -2757,6 +2757,16 @@
         const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
         const entryAllowedCount = payload.entry_allowed_count != null ? payload.entry_allowed_count : '?';
         const barsLoaded = payload.bars_loaded != null ? payload.bars_loaded : '?';
+        const realBarsLoaded = payload.real_bars_loaded != null ? payload.real_bars_loaded : null;
+        let barsContextText = `${barsLoaded} x1`;
+        if (
+          realBarsLoaded != null &&
+          barsLoaded !== '?' &&
+          Number(realBarsLoaded) !== Number(barsLoaded)
+        ) {
+          barsContextText =
+            `${realBarsLoaded} real + ${Number(barsLoaded) - Number(realBarsLoaded)} pad x1`;
+        }
         const backtestVisibleNetPnl = payload.grid_backtest_visible_net_pnl_sum;
         const backtestVisibleTradeCount = payload.grid_backtest_visible_trade_count;
         const pnlStride = payload.pnl_stride != null ? payload.pnl_stride : '?';
@@ -2771,7 +2781,7 @@
         let statusText =
           `Trade research: ${tradeResearchSegments.length} на графике ` +
           `(${entryAllowedCount} entry ok / ${tradeCount} policy long/short из ${sampleCount} grid @ ${artifactHorizon}, ` +
-          `mode ${entryHintMode}, контекст ${barsLoaded} x1)`;
+          `mode ${entryHintMode}, контекст ${barsContextText})`;
         if (requestedHorizon !== artifactHorizon) {
           statusText = statusText + ` [запрос ${requestedHorizon} → artifact ${artifactHorizon}]`;
         } else if (

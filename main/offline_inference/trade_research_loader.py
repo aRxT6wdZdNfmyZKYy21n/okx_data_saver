@@ -35,7 +35,15 @@ def _trade_pnl_for_npz_row(
     row_index: int,
     direction_action: str,
     eval_target_log2: np.ndarray,
-) -> float:
+    exit_start_trade_id: np.ndarray | None,
+    real_last_start_trade_id: int | None,
+) -> float | None:
+    if (
+        exit_start_trade_id is not None
+        and real_last_start_trade_id is not None
+        and int(exit_start_trade_id[row_index]) > real_last_start_trade_id
+    ):
+        return None
     realized_linear_return = _realized_linear_from_npz_row(
         row_index=row_index,
         eval_target_log2=eval_target_log2,
@@ -80,6 +88,8 @@ def _collect_grid_trade_pnls_from_npz(
     eval_target_log2: np.ndarray,
     split: str,
     entry_filter: str,
+    exit_start_trade_id: np.ndarray | None,
+    real_last_start_trade_id: int | None,
 ) -> list[float]:
     trade_pnls: list[float] = []
     for sample_index_value in grid_sample_indices:
@@ -94,17 +104,20 @@ def _collect_grid_trade_pnls_from_npz(
             entry_filter=entry_filter,
         ):
             continue
-        trade_pnls.append(
-            _trade_pnl_for_npz_row(
+        trade_pnl = _trade_pnl_for_npz_row(
+            row_index=row_index,
+            direction_action=_trade_action_for_row(
+                store=store,
                 row_index=row_index,
-                direction_action=_trade_action_for_row(
-                    store=store,
-                    row_index=row_index,
-                    entry_filter=entry_filter,
-                ),
-                eval_target_log2=eval_target_log2,
+                entry_filter=entry_filter,
             ),
+            eval_target_log2=eval_target_log2,
+            exit_start_trade_id=exit_start_trade_id,
+            real_last_start_trade_id=real_last_start_trade_id,
         )
+        if trade_pnl is None:
+            continue
+        trade_pnls.append(trade_pnl)
     return trade_pnls
 
 
@@ -119,6 +132,8 @@ def _collect_sequential_trade_pnls_from_npz(
     entry_start_trade_id: np.ndarray | None,
     visible_min_start_trade_id: int | None,
     visible_max_start_trade_id: int | None,
+    exit_start_trade_id: np.ndarray | None,
+    real_last_start_trade_id: int | None,
 ) -> tuple[list[float], list[float]]:
     cached_sample_indices = sorted(cached_pnl_sample_indices)
     cached_sample_set = set(cached_sample_indices)
@@ -172,7 +187,12 @@ def _collect_sequential_trade_pnls_from_npz(
                 entry_filter=entry_filter,
             ),
             eval_target_log2=eval_target_log2,
+            exit_start_trade_id=exit_start_trade_id,
+            real_last_start_trade_id=real_last_start_trade_id,
         )
+        if trade_pnl is None:
+            sample_index_value = sample_index_value + horizon_steps
+            continue
         trade_pnls.append(trade_pnl)
         if entry_start_trade_id is not None:
             start_trade_id = int(entry_start_trade_id[row_index])
@@ -197,6 +217,8 @@ def _visible_trade_pnls_from_grid(
     visible_max_start_trade_id: int | None,
     split: str,
     entry_filter: str,
+    exit_start_trade_id: np.ndarray | None,
+    real_last_start_trade_id: int | None,
 ) -> list[float]:
     visible_pnls: list[float] = []
     for sample_index_value in grid_sample_indices:
@@ -218,17 +240,20 @@ def _visible_trade_pnls_from_grid(
             visible_max_start_trade_id=visible_max_start_trade_id,
         ):
             continue
-        visible_pnls.append(
-            _trade_pnl_for_npz_row(
+        trade_pnl = _trade_pnl_for_npz_row(
+            row_index=row_index,
+            direction_action=_trade_action_for_row(
+                store=store,
                 row_index=row_index,
-                direction_action=_trade_action_for_row(
-                    store=store,
-                    row_index=row_index,
-                    entry_filter=entry_filter,
-                ),
-                eval_target_log2=eval_target_log2,
+                entry_filter=entry_filter,
             ),
+            eval_target_log2=eval_target_log2,
+            exit_start_trade_id=exit_start_trade_id,
+            real_last_start_trade_id=real_last_start_trade_id,
         )
+        if trade_pnl is None:
+            continue
+        visible_pnls.append(trade_pnl)
     return visible_pnls
 
 
@@ -327,6 +352,9 @@ def load_trade_research_response(
     if has_pred_target_price:
         pred_target_price = npz_data['pred_target_price'].astype(np.float64)
     npz_entry_start_trade_id = npz_data['entry_start_trade_id'].astype(np.int64)
+    real_last_start_trade_id_value: int | None = None
+    if 'real_last_start_trade_id' in npz_data.files:
+        real_last_start_trade_id_value = int(npz_data['real_last_start_trade_id'][0])
 
     grid_trade_pnls = _collect_grid_trade_pnls_from_npz(
         store=npz_store,
@@ -334,6 +362,8 @@ def load_trade_research_response(
         eval_target_log2=eval_target_log2,
         split='all',
         entry_filter='hybrid',
+        exit_start_trade_id=exit_start_trade_id,
+        real_last_start_trade_id=real_last_start_trade_id_value,
     )
     grid_metrics = summarize_trade_pnls(grid_trade_pnls)
     grid_entry_ok_pnls = _collect_grid_trade_pnls_from_npz(
@@ -342,6 +372,8 @@ def load_trade_research_response(
         eval_target_log2=eval_target_log2,
         split='all',
         entry_filter='recommended',
+        exit_start_trade_id=exit_start_trade_id,
+        real_last_start_trade_id=real_last_start_trade_id_value,
     )
     grid_entry_ok_metrics = summarize_trade_pnls(grid_entry_ok_pnls)
     visible_grid_pnls = _visible_trade_pnls_from_grid(
@@ -353,6 +385,8 @@ def load_trade_research_response(
         visible_max_start_trade_id=visible_max_start_trade_id,
         split='all',
         entry_filter='recommended',
+        exit_start_trade_id=exit_start_trade_id,
+        real_last_start_trade_id=real_last_start_trade_id_value,
     )
     visible_grid_metrics = summarize_trade_pnls(visible_grid_pnls)
     grid_backtest_net_pnl_sum = float(grid_metrics['net_pnl_sum'])
@@ -378,6 +412,8 @@ def load_trade_research_response(
         entry_start_trade_id=npz_entry_start_trade_id,
         visible_min_start_trade_id=visible_min_start_trade_id,
         visible_max_start_trade_id=visible_max_start_trade_id,
+        exit_start_trade_id=exit_start_trade_id,
+        real_last_start_trade_id=real_last_start_trade_id_value,
     )
     sequential_metrics = summarize_trade_pnls(sequential_trade_pnls)
     sequential_entry_ok_pnls, _sequential_entry_ok_visible_pnls = _collect_sequential_trade_pnls_from_npz(
@@ -391,6 +427,8 @@ def load_trade_research_response(
         entry_start_trade_id=npz_entry_start_trade_id,
         visible_min_start_trade_id=visible_min_start_trade_id,
         visible_max_start_trade_id=visible_max_start_trade_id,
+        exit_start_trade_id=exit_start_trade_id,
+        real_last_start_trade_id=real_last_start_trade_id_value,
     )
     sequential_entry_ok_metrics = summarize_trade_pnls(sequential_entry_ok_pnls)
     sequential_backtest_net_pnl_sum = float(sequential_metrics['net_pnl_sum'])
@@ -432,6 +470,8 @@ def load_trade_research_response(
             entry_start_trade_id=None,
             visible_min_start_trade_id=None,
             visible_max_start_trade_id=None,
+            exit_start_trade_id=exit_start_trade_id,
+            real_last_start_trade_id=real_last_start_trade_id_value,
         )
         sequential_val_metrics = summarize_trade_pnls(sequential_val_pnls)
         grid_val_pnls = _collect_grid_trade_pnls_from_npz(
@@ -440,6 +480,8 @@ def load_trade_research_response(
             eval_target_log2=eval_target_log2,
             split='val',
             entry_filter='hybrid',
+            exit_start_trade_id=exit_start_trade_id,
+            real_last_start_trade_id=real_last_start_trade_id_value,
         )
         grid_val_metrics = summarize_trade_pnls(grid_val_pnls)
         logger.info(
@@ -538,6 +580,12 @@ def load_trade_research_response(
         else None,
         'required_rows': int(meta['required_rows']),
         'bars_loaded': int(meta['bars_loaded']),
+        'real_bars_loaded': int(meta['real_bars_loaded'])
+        if 'real_bars_loaded' in meta
+        else int(meta['bars_loaded']),
+        'forward_target_padding_bars': int(meta['forward_target_padding_bars'])
+        if 'forward_target_padding_bars' in meta
+        else 0,
         'level0_rows': int(meta['level0_rows']),
         'dataset_length': dataset_length,
         'start_index': start_index,

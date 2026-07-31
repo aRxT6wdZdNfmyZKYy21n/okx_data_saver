@@ -18,6 +18,11 @@ from main.offline_inference.paths import (
     trade_research_npz_path,
 )
 from main.web_gui.data_service import fetch_last_bars_sync
+from main.web_gui.trade_research_dataset_common import (
+    TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+    prepare_trade_research_raw_dataframe,
+    real_last_start_trade_id,
+)
 from main.web_gui.inference_service import (
     _build_dataset,
     _build_level0_to_raw_row_indices,
@@ -221,6 +226,19 @@ def _should_rebuild_existing_npz(
             payload_mode,
         )
         return True
+    if 'forward_target_padding_bars' not in existing_npz:
+        logger.info(
+            'Existing NPZ missing forward_target_padding_bars; rebuilding from scratch',
+        )
+        return True
+    existing_padding_bars = int(existing_npz['forward_target_padding_bars'][0])
+    if existing_padding_bars != TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS:
+        logger.info(
+            'Forward target padding changed (%d -> %d); rebuilding NPZ from scratch',
+            existing_padding_bars,
+            TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+        )
+        return True
     return False
 
 
@@ -331,6 +349,9 @@ def _merge_npz_rows(
         'train_size',
         'train_size_ratio',
         'payload_mode',
+        'real_bars_loaded',
+        'forward_target_padding_bars',
+        'real_last_start_trade_id',
     ]
     metadata_fields = {
         key: new_rows[key]
@@ -499,6 +520,9 @@ def run_trade_research_export(symbol_id: str) -> None:
             'Trade research export: fetched fewer x1 bars than required '
             f'({df.height} < {minimum_rows})',
         )
+
+    df, real_bar_count = prepare_trade_research_raw_dataframe(df)
+    real_last_trade_id = real_last_start_trade_id(df, real_bar_count)
 
     horizon_names = _horizon_names_from_metadata(metadata)
     logger.info(
@@ -678,7 +702,7 @@ def run_trade_research_export(symbol_id: str) -> None:
         for key in TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS:
             rows[key].append(inference_row[key])
 
-    last_bar_row = df.row(df.height - 1, named=True)
+    last_bar_row = df.row(real_bar_count - 1, named=True)
     last_bar_start_trade_id = int(_row_value(last_bar_row, 'start_trade_id'))
 
     metadata_fields = {
@@ -691,6 +715,12 @@ def run_trade_research_export(symbol_id: str) -> None:
         'start_index': np.array([start_index], dtype=np.int64),
         'pnl_stride': np.array([pnl_stride], dtype=np.int64),
         'bars_loaded': np.array([int(df.height)], dtype=np.int64),
+        'real_bars_loaded': np.array([real_bar_count], dtype=np.int64),
+        'forward_target_padding_bars': np.array(
+            [TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS],
+            dtype=np.int64,
+        ),
+        'real_last_start_trade_id': np.array([real_last_trade_id], dtype=np.int64),
         'level0_rows': np.array([level0_height], dtype=np.int64),
         'last_bar_start_trade_id': np.array([last_bar_start_trade_id], dtype=np.int64),
         'research_limit': np.array([research_limit], dtype=np.int64),
@@ -750,6 +780,9 @@ def run_trade_research_export(symbol_id: str) -> None:
             'research_limit': research_limit,
             'required_rows': required_rows,
             'bars_loaded': int(df.height),
+            'real_bars_loaded': real_bar_count,
+            'forward_target_padding_bars': TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+            'real_last_start_trade_id': real_last_trade_id,
             'level0_rows': level0_height,
             'dataset_length': dataset_length,
             'start_index': start_index,
