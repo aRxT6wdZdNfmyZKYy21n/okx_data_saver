@@ -9,7 +9,43 @@ import polars
 logger = logging.getLogger(__name__)
 
 TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS = 65536
-TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE = 'raw_x1'
+TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE = 'dataset_level0'
+TRADE_RESEARCH_EXPORT_FORWARD_TARGET_PADDING_BARS = 0
+TRADE_RESEARCH_PAYLOAD_MODE_MIXED = 'mixed'
+
+
+def inference_tail_grid_sample_indices(
+    grid_sample_indices: list[int],
+    train_sample_index_by_inference_sample: dict[int, int],
+) -> list[int]:
+    return [
+        sample_index
+        for sample_index in grid_sample_indices
+        if sample_index not in train_sample_index_by_inference_sample
+    ]
+
+
+def inference_tail_pnl_sample_indices(
+    pnl_sample_indices: list[int],
+    train_sample_index_by_inference_sample: dict[int, int],
+) -> list[int]:
+    return [
+        sample_index
+        for sample_index in pnl_sample_indices
+        if sample_index not in train_sample_index_by_inference_sample
+    ]
+
+
+def inference_tail_selection_note(
+    unmapped_grid_count: int,
+    unmapped_pnl_count: int,
+) -> str | None:
+    if unmapped_grid_count <= 0 and unmapped_pnl_count <= 0:
+        return None
+    return (
+        f'inference tail {unmapped_grid_count} grid + {unmapped_pnl_count} pnl samples '
+        '(train_sample_index=-1)'
+    )
 
 
 def append_forward_target_padding(

@@ -19,14 +19,19 @@ from main.offline_inference.paths import (
 )
 from main.web_gui.data_service import fetch_last_bars_sync
 from main.web_gui.trade_research_dataset_common import (
+    TRADE_RESEARCH_EXPORT_FORWARD_TARGET_PADDING_BARS,
     TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE,
-    prepare_trade_research_raw_dataframe,
+    TRADE_RESEARCH_PAYLOAD_MODE_MIXED,
+    inference_tail_grid_sample_indices,
+    inference_tail_pnl_sample_indices,
+    inference_tail_selection_note,
     real_last_start_trade_id,
 )
 from main.web_gui.inference_service import (
     _build_dataset,
     _build_level0_to_raw_row_indices,
     _build_train_level0_context,
+    _prepare_payload_dict_from_sample,
     _prepare_payload_dict_from_train_sample,
     _train_sample_index_for_inference_sample,
     fetch_inference_metadata,
@@ -52,6 +57,7 @@ from settings import settings
 logger = logging.getLogger(__name__)
 
 BATCH_CHUNK_SIZE = 32
+EXPORT_PAYLOAD_MODE = TRADE_RESEARCH_PAYLOAD_MODE_MIXED
 
 
 def _train_size_ratio_for_export(metadata: dict[str, object]) -> float:
@@ -94,6 +100,64 @@ def _target_log2_from_train_sample(
         if horizon_name not in targets_by_horizon:
             raise RuntimeError(f'Missing target for horizon {horizon_name!r}')
     return targets_by_horizon
+
+
+def _nan_targets_by_horizon(horizon_names: list[str]) -> dict[str, float]:
+    return {horizon_name: float('nan') for horizon_name in horizon_names}
+
+
+def _append_export_row(
+    rows: dict[str, list[Any]],
+    sample_index: int,
+    train_sample_index: int,
+    inference_result: dict[str, object],
+    targets_by_horizon: dict[str, float],
+    bar_metadata: dict[str, float | int],
+    horizon_names: list[str],
+    eval_horizon: str,
+    eval_prediction_key: str,
+) -> None:
+    if 'predictions' not in inference_result:
+        raise RuntimeError('Batch inference result missing predictions')
+    sample_predictions = inference_result['predictions']
+    if not isinstance(sample_predictions, dict):
+        raise RuntimeError('Batch inference predictions must be a dict')
+    inference_row = inference_row_from_batch_result(inference_result)
+
+    rows['sample_index'].append(int(sample_index))
+    rows['train_sample_index'].append(int(train_sample_index))
+    rows['eval_target_log2'].append(float(targets_by_horizon[eval_horizon]))
+    rows['entry_start_trade_id'].append(int(bar_metadata['entry_start_trade_id']))
+    rows['exit_start_trade_id'].append(int(bar_metadata['exit_start_trade_id']))
+    rows['entry_timestamp_ms'].append(int(bar_metadata['entry_timestamp_ms']))
+    rows['exit_timestamp_ms'].append(int(bar_metadata['exit_timestamp_ms']))
+    rows['entry_open'].append(float(bar_metadata['entry_open']))
+    rows['entry_close'].append(float(bar_metadata['entry_close']))
+    rows['exit_close'].append(float(bar_metadata['exit_close']))
+
+    if eval_prediction_key not in sample_predictions:
+        raise RuntimeError(
+            f'Missing prediction {eval_prediction_key!r} for sample {sample_index}',
+        )
+    pred_eval_log2 = float(sample_predictions[eval_prediction_key])
+
+    for horizon_name in horizon_names:
+        prediction_key = _prediction_key_for_horizon(horizon_name)
+        if prediction_key not in sample_predictions:
+            raise RuntimeError(
+                f'Missing prediction {prediction_key!r} for sample {sample_index}',
+            )
+        rows[f'pred_{horizon_name}'].append(float(sample_predictions[prediction_key]))
+        rows[f'target_{horizon_name}'].append(float(targets_by_horizon[horizon_name]))
+
+    _append_pred_price_fields(
+        rows=rows,
+        entry_close=float(bar_metadata['entry_close']),
+        pred_eval_log2=pred_eval_log2,
+    )
+
+    for key in TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS:
+        rows[key].append(inference_row[key])
 
 
 def _bar_metadata_for_sample(
@@ -179,12 +243,62 @@ def _run_batch_inference(
     return inference_by_sample
 
 
+def _run_batch_inference_inference(
+    sample_indices: list[int],
+    inference_dataset: object,
+    symbol_id: str,
+) -> dict[int, dict[str, object]]:
+    inference_by_sample: dict[int, dict[str, object]] = {}
+    if len(sample_indices) == 0:
+        return inference_by_sample
+
+    total_chunks = (len(sample_indices) + BATCH_CHUNK_SIZE - 1) // BATCH_CHUNK_SIZE
+    for chunk_index, chunk_start in enumerate(
+        range(0, len(sample_indices), BATCH_CHUNK_SIZE),
+    ):
+        chunk_sample_indices = sample_indices[
+            chunk_start:chunk_start + BATCH_CHUNK_SIZE
+        ]
+        chunk_payloads = [
+            _prepare_payload_dict_from_sample(
+                dataset=inference_dataset,
+                sample_index=sample_index,
+            )
+            for sample_index in chunk_sample_indices
+        ]
+        chunk_results = _call_inference_batch_api(
+            samples=chunk_payloads,
+            symbol_id=symbol_id,
+        )
+        if len(chunk_results) != len(chunk_sample_indices):
+            raise RuntimeError(
+                'Batch inference result count mismatch: '
+                f'{len(chunk_results)} != {len(chunk_sample_indices)}',
+            )
+        for sample_index, inference_result in zip(
+            chunk_sample_indices,
+            chunk_results,
+            strict=True,
+        ):
+            if not isinstance(inference_result, dict):
+                raise RuntimeError('Batch inference result must be a dict')
+            inference_by_sample[sample_index] = inference_result
+        if (chunk_index + 1) % 10 == 0 or (chunk_index + 1) == total_chunks:
+            logger.info(
+                'Trade research export inference tail: %d/%d batches, %d/%d samples',
+                chunk_index + 1,
+                total_chunks,
+                len(inference_by_sample),
+                len(sample_indices),
+            )
+    return inference_by_sample
+
+
 def _should_rebuild_existing_npz(
     existing_npz: dict[str, Any] | None,
     stack_fingerprint: dict[str, str],
     start_index: int,
     payload_mode: str,
-    forward_target_padding_bars: int,
 ) -> bool:
     if existing_npz is None:
         return False
@@ -233,11 +347,11 @@ def _should_rebuild_existing_npz(
         )
         return True
     existing_padding_bars = int(existing_npz['forward_target_padding_bars'][0])
-    if existing_padding_bars != forward_target_padding_bars:
+    if existing_padding_bars != TRADE_RESEARCH_EXPORT_FORWARD_TARGET_PADDING_BARS:
         logger.info(
             'Forward target padding changed (%d -> %d); rebuilding NPZ from scratch',
             existing_padding_bars,
-            forward_target_padding_bars,
+            TRADE_RESEARCH_EXPORT_FORWARD_TARGET_PADDING_BARS,
         )
         return True
     if 'forward_target_padding_site' not in existing_npz:
@@ -367,6 +481,8 @@ def _merge_npz_rows(
         'forward_target_padding_bars',
         'forward_target_padding_site',
         'real_last_start_trade_id',
+        'inference_tail_grid_count',
+        'train_aligned_last_grid_sample_index',
     ]
     metadata_fields = {
         key: new_rows[key]
@@ -487,14 +603,12 @@ def _backfill_train_split_fields(
 
 def run_trade_research_export(
     symbol_id: str,
-    forward_target_padding_bars: int,
 ) -> None:
     research_limit = settings.WEB_GUI_TRADE_RESEARCH_LIMIT
     pnl_stride = settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE
 
     logger.info(
-        'Trade research export forward-target padding bars=%d',
-        forward_target_padding_bars,
+        'Trade research export: raw x1 only (forward targets via dataset level0 extension)',
     )
 
     metadata = fetch_inference_metadata()
@@ -544,17 +658,13 @@ def run_trade_research_export(
             f'({df.height} < {minimum_rows})',
         )
 
-    df, real_bar_count = prepare_trade_research_raw_dataframe(
-        df,
-        forward_target_padding_bars,
-    )
+    real_bar_count = int(df.height)
     real_last_trade_id = real_last_start_trade_id(df, real_bar_count)
 
     horizon_names = _horizon_names_from_metadata(metadata)
     logger.info(
-        'Dataset preparation start: trade research real_rows=%d total_rows=%d sequence_length=%d',
+        'Dataset preparation start: trade research rows=%d sequence_length=%d',
         real_bar_count,
-        int(df.height),
         int(metadata['sequence_length']),
     )
     dataset = _build_dataset(
@@ -606,22 +716,43 @@ def run_trade_research_export(
             train_dataset_length=len(train_dataset),
         )
     )
-    if skipped_unmapped > 0:
-        unmapped_note = (
-            f'skipped {skipped_unmapped} samples without train-mode alignment'
-        )
+    unmapped_grid = inference_tail_grid_sample_indices(
+        grid_sample_indices=grid_sample_indices,
+        train_sample_index_by_inference_sample=train_sample_index_by_inference_sample,
+    )
+    unmapped_pnl = inference_tail_pnl_sample_indices(
+        pnl_sample_indices=pnl_sample_indices,
+        train_sample_index_by_inference_sample=train_sample_index_by_inference_sample,
+    )
+    inference_tail_indices = _merge_sorted_sample_indices(
+        first_indices=unmapped_grid,
+        second_indices=unmapped_pnl,
+    )
+    all_inference_indices = _merge_sorted_sample_indices(
+        first_indices=mapped_inference_indices,
+        second_indices=inference_tail_indices,
+    )
+    tail_note = inference_tail_selection_note(
+        unmapped_grid_count=len(unmapped_grid),
+        unmapped_pnl_count=len(unmapped_pnl),
+    )
+    if tail_note is not None:
         if sample_selection_note is None:
-            sample_selection_note = unmapped_note
+            sample_selection_note = tail_note
         else:
-            sample_selection_note = f'{sample_selection_note}; {unmapped_note}'
+            sample_selection_note = f'{sample_selection_note}; {tail_note}'
+    if skipped_unmapped != len(inference_tail_indices):
+        raise RuntimeError(
+            'Unmapped sample count mismatch: '
+            f'skipped={skipped_unmapped} tail={len(inference_tail_indices)}',
+        )
 
     existing_npz = _load_existing_npz(npz_path)
     if _should_rebuild_existing_npz(
         existing_npz=existing_npz,
         stack_fingerprint=stack_fingerprint,
         start_index=start_index,
-        payload_mode='train',
-        forward_target_padding_bars=forward_target_padding_bars,
+        payload_mode=EXPORT_PAYLOAD_MODE,
     ):
         existing_npz = None
 
@@ -632,25 +763,43 @@ def run_trade_research_export(
             for value in existing_npz['sample_index'].astype(np.int64).tolist()
         }
 
-    samples_to_infer = [
+    train_samples_to_infer = [
         sample_index
         for sample_index in mapped_inference_indices
         if sample_index not in existing_sample_set
     ]
+    tail_samples_to_infer = [
+        sample_index
+        for sample_index in inference_tail_indices
+        if sample_index not in existing_sample_set
+    ]
+    samples_to_infer = _merge_sorted_sample_indices(
+        first_indices=train_samples_to_infer,
+        second_indices=tail_samples_to_infer,
+    )
 
     logger.info(
-        'Trade research export: symbol=%s total_samples=%d existing=%d new=%d',
+        'Trade research export: symbol=%s total_samples=%d train=%d tail=%d existing=%d new=%d',
         symbol_id,
+        len(all_inference_indices),
         len(mapped_inference_indices),
+        len(inference_tail_indices),
         len(existing_sample_set),
         len(samples_to_infer),
     )
 
     inference_by_sample = _run_batch_inference(
-        sample_indices=samples_to_infer,
+        sample_indices=train_samples_to_infer,
         train_sample_index_by_inference_sample=train_sample_index_by_inference_sample,
         train_dataset=train_dataset,
         symbol_id=symbol_id,
+    )
+    inference_by_sample.update(
+        _run_batch_inference_inference(
+            sample_indices=tail_samples_to_infer,
+            inference_dataset=dataset,
+            symbol_id=symbol_id,
+        ),
     )
 
     rows: dict[str, list[Any]] = {
@@ -674,21 +823,10 @@ def run_trade_research_export(
         rows[key] = []
 
     eval_prediction_key = _prediction_key_for_horizon(eval_horizon)
+    nan_targets_by_horizon = _nan_targets_by_horizon(horizon_names)
 
     for sample_index in samples_to_infer:
-        train_sample_index = train_sample_index_by_inference_sample[sample_index]
         inference_result = inference_by_sample[sample_index]
-        if 'predictions' not in inference_result:
-            raise RuntimeError('Batch inference result missing predictions')
-        sample_predictions = inference_result['predictions']
-        if not isinstance(sample_predictions, dict):
-            raise RuntimeError('Batch inference predictions must be a dict')
-        inference_row = inference_row_from_batch_result(inference_result)
-        targets_by_horizon = _target_log2_from_train_sample(
-            train_dataset=train_dataset,
-            train_sample_index=train_sample_index,
-            horizon_names=horizon_names,
-        )
         bar_metadata = _bar_metadata_for_sample(
             sample_index=sample_index,
             start_index=start_index,
@@ -697,41 +835,36 @@ def run_trade_research_export(
             raw_df=df,
             level0_height=level0_height,
         )
-
-        rows['sample_index'].append(int(sample_index))
-        rows['train_sample_index'].append(int(train_sample_index))
-        rows['eval_target_log2'].append(float(targets_by_horizon[eval_horizon]))
-        rows['entry_start_trade_id'].append(int(bar_metadata['entry_start_trade_id']))
-        rows['exit_start_trade_id'].append(int(bar_metadata['exit_start_trade_id']))
-        rows['entry_timestamp_ms'].append(int(bar_metadata['entry_timestamp_ms']))
-        rows['exit_timestamp_ms'].append(int(bar_metadata['exit_timestamp_ms']))
-        rows['entry_open'].append(float(bar_metadata['entry_open']))
-        rows['entry_close'].append(float(bar_metadata['entry_close']))
-        rows['exit_close'].append(float(bar_metadata['exit_close']))
-
-        if eval_prediction_key not in sample_predictions:
-            raise RuntimeError(
-                f'Missing prediction {eval_prediction_key!r} for sample {sample_index}',
+        if sample_index in train_sample_index_by_inference_sample:
+            train_sample_index = train_sample_index_by_inference_sample[sample_index]
+            targets_by_horizon = _target_log2_from_train_sample(
+                train_dataset=train_dataset,
+                train_sample_index=train_sample_index,
+                horizon_names=horizon_names,
             )
-        pred_eval_log2 = float(sample_predictions[eval_prediction_key])
-
-        for horizon_name in horizon_names:
-            prediction_key = _prediction_key_for_horizon(horizon_name)
-            if prediction_key not in sample_predictions:
-                raise RuntimeError(
-                    f'Missing prediction {prediction_key!r} for sample {sample_index}',
-                )
-            rows[f'pred_{horizon_name}'].append(float(sample_predictions[prediction_key]))
-            rows[f'target_{horizon_name}'].append(float(targets_by_horizon[horizon_name]))
-
-        _append_pred_price_fields(
+        else:
+            train_sample_index = -1
+            targets_by_horizon = nan_targets_by_horizon
+        _append_export_row(
             rows=rows,
-            entry_close=float(bar_metadata['entry_close']),
-            pred_eval_log2=pred_eval_log2,
+            sample_index=sample_index,
+            train_sample_index=train_sample_index,
+            inference_result=inference_result,
+            targets_by_horizon=targets_by_horizon,
+            bar_metadata=bar_metadata,
+            horizon_names=horizon_names,
+            eval_horizon=eval_horizon,
+            eval_prediction_key=eval_prediction_key,
         )
 
-        for key in TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS:
-            rows[key].append(inference_row[key])
+    mapped_train_grid = [
+        sample_index
+        for sample_index in grid_sample_indices
+        if sample_index in train_sample_index_by_inference_sample
+    ]
+    train_aligned_last_grid_sample_index = (
+        int(mapped_train_grid[-1]) if mapped_train_grid else -1
+    )
 
     last_bar_row = df.row(real_bar_count - 1, named=True)
     last_bar_start_trade_id = int(_row_value(last_bar_row, 'start_trade_id'))
@@ -748,7 +881,7 @@ def run_trade_research_export(
         'bars_loaded': np.array([int(df.height)], dtype=np.int64),
         'real_bars_loaded': np.array([real_bar_count], dtype=np.int64),
         'forward_target_padding_bars': np.array(
-            [forward_target_padding_bars],
+            [TRADE_RESEARCH_EXPORT_FORWARD_TARGET_PADDING_BARS],
             dtype=np.int64,
         ),
         'forward_target_padding_site': np.array([TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE], dtype=object),
@@ -759,7 +892,12 @@ def run_trade_research_export(
         'required_rows': np.array([required_rows], dtype=np.int64),
         'train_size': np.array([train_size], dtype=np.int64),
         'train_size_ratio': np.array([train_size_ratio], dtype=np.float64),
-        'payload_mode': np.array(['train'], dtype=object),
+        'payload_mode': np.array([EXPORT_PAYLOAD_MODE], dtype=object),
+        'inference_tail_grid_count': np.array([len(unmapped_grid)], dtype=np.int64),
+        'train_aligned_last_grid_sample_index': np.array(
+            [train_aligned_last_grid_sample_index],
+            dtype=np.int64,
+        ),
     }
 
     if len(samples_to_infer) == 0 and existing_npz is not None:
@@ -813,7 +951,7 @@ def run_trade_research_export(
             'required_rows': required_rows,
             'bars_loaded': int(df.height),
             'real_bars_loaded': real_bar_count,
-            'forward_target_padding_bars': forward_target_padding_bars,
+            'forward_target_padding_bars': TRADE_RESEARCH_EXPORT_FORWARD_TARGET_PADDING_BARS,
             'forward_target_padding_site': TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE,
             'real_last_start_trade_id': real_last_trade_id,
             'level0_rows': level0_height,
@@ -829,14 +967,15 @@ def run_trade_research_export(
             'train_size': train_size,
             'train_size_ratio': train_size_ratio,
             'sample_selection_note': sample_selection_note,
-            'payload_mode': 'train',
+            'payload_mode': EXPORT_PAYLOAD_MODE,
+            'inference_tail_grid_count': len(unmapped_grid),
+            'train_aligned_last_grid_sample_index': train_aligned_last_grid_sample_index,
         },
     )
 
 
 def run_trade_research_export_safe(
     symbol_id: str,
-    forward_target_padding_bars: int,
 ) -> None:
     eval_horizon: str | None = None
     try:
@@ -844,7 +983,6 @@ def run_trade_research_export_safe(
         eval_horizon = inference_stack_fingerprint(metadata, symbol_id)['eval_horizon']
         run_trade_research_export(
             symbol_id=symbol_id,
-            forward_target_padding_bars=forward_target_padding_bars,
         )
     except Exception as exception:
         logger.error(

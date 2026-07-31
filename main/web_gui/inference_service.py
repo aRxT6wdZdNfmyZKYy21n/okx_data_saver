@@ -10,9 +10,7 @@ from omegaconf import OmegaConf
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars_sync
 from main.web_gui.trade_research_dataset_common import (
-    TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
     last_real_sample_index,
-    prepare_trade_research_raw_dataframe,
 )
 from settings import settings
 from trading_bot_dataset.src.dataset import HybridTradeDataset, HybridTradeDatasetInference
@@ -225,18 +223,14 @@ def _prepare_train_aligned_payload_dict(
 
 def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     metadata = fetch_inference_metadata()
-    padded_df, real_bar_count = prepare_trade_research_raw_dataframe(
-        df,
-        TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
-    )
+    real_bar_count = int(df.height)
     logger.info(
-        'Dataset preparation start: real_rows=%d total_rows=%d sequence_length=%d',
+        'Dataset preparation start: rows=%d sequence_length=%d',
         real_bar_count,
-        int(padded_df.height),
         int(metadata['sequence_length']),
     )
     inference_dataset = _build_dataset(
-        padded_df,
+        df,
         metadata,
     )
     start_index = int(inference_dataset.dataset.start_index)
@@ -247,7 +241,7 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     )
 
     level0_df = inference_dataset.dataset.aggregated_data[0]
-    level0_to_raw = _build_level0_to_raw_row_indices(padded_df, level0_df)
+    level0_to_raw = _build_level0_to_raw_row_indices(df, level0_df)
     last_index = last_real_sample_index(
         dataset_length=len(inference_dataset),
         start_index=start_index,
@@ -263,7 +257,7 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     )
 
     return _prepare_train_aligned_payload_dict(
-        df=padded_df,
+        df=df,
         metadata=metadata,
         inference_dataset=inference_dataset,
         sample_index=last_index,

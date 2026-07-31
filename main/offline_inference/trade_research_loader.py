@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any
 
@@ -26,8 +27,10 @@ logger = logging.getLogger(__name__)
 def _realized_linear_from_npz_row(
     row_index: int,
     eval_target_log2: np.ndarray,
-) -> float:
+) -> float | None:
     target_log2 = float(eval_target_log2[row_index])
+    if math.isnan(target_log2):
+        return None
     return float(2.0 ** target_log2 - 1.0)
 
 
@@ -96,6 +99,8 @@ def _collect_grid_trade_pnls_from_npz(
         row_index = store.row_for_sample(sample_index_value)
         if row_index is None:
             continue
+        if not store.has_train_aligned_targets_at_row(row_index):
+            continue
         if not store.row_matches_split(row_index, split):
             continue
         if not _row_passes_entry_filter(
@@ -153,6 +158,19 @@ def _collect_sequential_trade_pnls_from_npz(
         row_index = store.row_for_sample(sample_index_value)
         if row_index is None:
             sample_index_value = sample_index_value + 1
+            continue
+
+        if not store.has_train_aligned_targets_at_row(row_index):
+            if _row_passes_entry_filter(
+                store=store,
+                row_index=row_index,
+                entry_filter=entry_filter,
+            ):
+                if sample_index_value + horizon_steps > max_sample_index:
+                    break
+                sample_index_value = sample_index_value + horizon_steps
+            else:
+                sample_index_value = sample_index_value + 1
             continue
 
         if not store.row_matches_split(row_index, split):
@@ -224,6 +242,8 @@ def _visible_trade_pnls_from_grid(
     for sample_index_value in grid_sample_indices:
         row_index = store.row_for_sample(sample_index_value)
         if row_index is None:
+            continue
+        if not store.has_train_aligned_targets_at_row(row_index):
             continue
         if not store.row_matches_split(row_index, split):
             continue

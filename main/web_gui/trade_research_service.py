@@ -22,8 +22,9 @@ from fastapi import HTTPException
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars_sync
 from main.web_gui.trade_research_dataset_common import (
-    TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
-    prepare_trade_research_raw_dataframe,
+    inference_tail_grid_sample_indices,
+    inference_tail_pnl_sample_indices,
+    inference_tail_selection_note,
     real_last_start_trade_id,
     sample_exit_on_real_bars,
 )
@@ -32,6 +33,7 @@ from main.web_gui.inference_service import (
     _build_level0_to_raw_row_indices,
     _build_train_level0_context,
     _encode_payload,
+    _prepare_payload_dict_from_sample,
     _prepare_payload_dict_from_train_sample,
     _train_sample_index_for_inference_sample,
     fetch_inference_metadata,
@@ -513,6 +515,52 @@ def _run_inference_for_samples(
     return inference_by_sample
 
 
+def _run_inference_for_tail_samples(
+    sample_indices: list[int],
+    inference_dataset: object,
+    symbol_id: str,
+) -> dict[int, dict[str, object]]:
+    inference_by_sample: dict[int, dict[str, object]] = {}
+    if len(sample_indices) == 0:
+        return inference_by_sample
+
+    total_chunks = (len(sample_indices) + BATCH_CHUNK_SIZE - 1) // BATCH_CHUNK_SIZE
+    for chunk_index, chunk_start in enumerate(
+        range(0, len(sample_indices), BATCH_CHUNK_SIZE),
+    ):
+        chunk_sample_indices = sample_indices[
+            chunk_start:chunk_start + BATCH_CHUNK_SIZE
+        ]
+        chunk_payloads = [
+            _prepare_payload_dict_from_sample(
+                dataset=inference_dataset,
+                sample_index=sample_index,
+            )
+            for sample_index in chunk_sample_indices
+        ]
+        chunk_results = _call_inference_batch_api(chunk_payloads, symbol_id)
+        if len(chunk_results) != len(chunk_sample_indices):
+            raise RuntimeError(
+                'Batch inference result count mismatch: '
+                f'{len(chunk_results)} != {len(chunk_sample_indices)}',
+            )
+        for sample_index, inference_result in zip(
+            chunk_sample_indices,
+            chunk_results,
+            strict=True,
+        ):
+            inference_by_sample[sample_index] = inference_result
+        if (chunk_index + 1) % 10 == 0 or (chunk_index + 1) == total_chunks:
+            logger.info(
+                'Trade research inference tail: %d/%d batches, %d/%d samples',
+                chunk_index + 1,
+                total_chunks,
+                len(inference_by_sample),
+                len(sample_indices),
+            )
+    return inference_by_sample
+
+
 def _trade_pnl_for_sample(
     sample_index: int,
     inference_result: dict[str, object],
@@ -772,10 +820,7 @@ def run_trade_research(
             ),
         )
 
-    df, real_bar_count = prepare_trade_research_raw_dataframe(
-        df,
-        TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
-    )
+    real_bar_count = int(df.height)
     real_last_trade_id = real_last_start_trade_id(df, real_bar_count)
 
     dataset = _build_dataset(
@@ -834,23 +879,42 @@ def run_trade_research(
         for sample_index in pnl_sample_indices
         if sample_index in train_sample_index_by_inference_sample
     ]
-    if skipped_unmapped_samples > 0:
-        unmapped_note = (
-            f'skipped {skipped_unmapped_samples} samples without train-mode alignment'
-        )
+    unmapped_grid = inference_tail_grid_sample_indices(
+        grid_sample_indices=sample_indices,
+        train_sample_index_by_inference_sample=train_sample_index_by_inference_sample,
+    )
+    unmapped_pnl = inference_tail_pnl_sample_indices(
+        pnl_sample_indices=pnl_sample_indices,
+        train_sample_index_by_inference_sample=train_sample_index_by_inference_sample,
+    )
+    inference_tail_indices = _merge_sorted_sample_indices(
+        first_indices=unmapped_grid,
+        second_indices=unmapped_pnl,
+    )
+    tail_note = inference_tail_selection_note(
+        unmapped_grid_count=len(unmapped_grid),
+        unmapped_pnl_count=len(unmapped_pnl),
+    )
+    if tail_note is not None:
         if sample_selection_note is None:
-            sample_selection_note = unmapped_note
+            sample_selection_note = tail_note
         else:
-            sample_selection_note = f'{sample_selection_note}; {unmapped_note}'
+            sample_selection_note = f'{sample_selection_note}; {tail_note}'
+    if skipped_unmapped_samples != len(inference_tail_indices):
+        raise RuntimeError(
+            'Unmapped sample count mismatch: '
+            f'skipped={skipped_unmapped_samples} tail={len(inference_tail_indices)}',
+        )
 
     logger.info(
         'Trade research: symbol=%s grid_samples=%d pnl_samples=%d infer_samples=%d '
-        'step=%d pnl_stride=%d horizon=%s research_limit=%d level0=%d raw_df=%d start=%d '
+        'infer_tail=%d step=%d pnl_stride=%d horizon=%s research_limit=%d level0=%d raw_df=%d start=%d '
         'visible_trade_id=[%s,%s] note=%s',
         symbol_id,
-        len(mapped_grid_indices),
-        len(mapped_pnl_indices),
-        len(mapped_inference_indices),
+        len(mapped_grid_indices) + len(unmapped_grid),
+        len(mapped_pnl_indices) + len(unmapped_pnl),
+        len(mapped_inference_indices) + len(inference_tail_indices),
+        len(inference_tail_indices),
         step_bars,
         pnl_stride,
         eval_horizon,
@@ -875,7 +939,7 @@ def run_trade_research(
     sequential_backtest_visible_net_pnl_sum = 0.0
     sequential_backtest_visible_trade_count = 0
 
-    if len(mapped_inference_indices) == 0:
+    if len(mapped_inference_indices) == 0 and len(inference_tail_indices) == 0:
         return {
             'symbol_id': symbol_id,
             'eval_horizon': eval_horizon,
@@ -920,6 +984,13 @@ def run_trade_research(
             train_dataset=train_dataset,
             symbol_id=symbol_id,
         )
+        inference_by_sample.update(
+            _run_inference_for_tail_samples(
+                sample_indices=inference_tail_indices,
+                inference_dataset=dataset,
+                symbol_id=symbol_id,
+            ),
+        )
 
         (
             grid_backtest_net_pnl_sum,
@@ -961,7 +1032,9 @@ def run_trade_research(
         )
 
         prediction_key = _prediction_key_for_horizon(eval_horizon)
-        for sample_index in mapped_grid_indices:
+        for sample_index in sample_indices:
+            if sample_index not in inference_by_sample:
+                continue
             inference_result = inference_by_sample[sample_index]
             if 'policy' not in inference_result:
                 continue
@@ -1056,7 +1129,7 @@ def run_trade_research(
         'start_index': start_index,
         'visible_min_start_trade_id': visible_min_start_trade_id,
         'visible_max_start_trade_id': visible_max_start_trade_id,
-        'sample_count': len(mapped_grid_indices),
+        'sample_count': len(sample_indices),
         'pnl_sample_count': len(mapped_pnl_indices),
         'trade_inference_count': policy_trade_count,
         'entry_allowed_count': entry_allowed_count,

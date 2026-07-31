@@ -2757,6 +2757,7 @@
         const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
         const entryAllowedCount = payload.entry_allowed_count != null ? payload.entry_allowed_count : '?';
         const realBarsLoaded = payload.real_bars_loaded != null ? payload.real_bars_loaded : null;
+        const barsLoaded = payload.bars_loaded != null ? payload.bars_loaded : '?';
         const paddingSite = payload.forward_target_padding_site != null
           ? String(payload.forward_target_padding_site)
           : null;

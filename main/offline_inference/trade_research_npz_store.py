@@ -70,6 +70,11 @@ class TradeResearchNpzStore:
     def train_size_ratio(self) -> float | None:
         return self._train_size_ratio
 
+    def has_train_aligned_targets_at_row(self, row_index: int) -> bool:
+        if self._train_sample_index is None:
+            return True
+        return int(self._train_sample_index[row_index]) >= 0
+
     def row_matches_split(self, row_index: int, split: str) -> bool:
         if split == 'all':
             return True

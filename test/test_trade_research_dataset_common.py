@@ -3,6 +3,9 @@ import polars as pl
 from main.web_gui.trade_research_dataset_common import (
     TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
     append_forward_target_padding,
+    inference_tail_grid_sample_indices,
+    inference_tail_pnl_sample_indices,
+    inference_tail_selection_note,
     last_real_sample_index,
     prepare_trade_research_raw_dataframe,
 )
@@ -74,3 +77,15 @@ def test_prepare_trade_research_raw_dataframe_uses_default_padding() -> None:
     )
     assert real_bar_count == 1
     assert padded.height == 1 + TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS
+
+
+def test_inference_tail_sample_indices() -> None:
+    train_map = {0: 0, 1536: 1}
+    grid = [0, 1536, 3072]
+    pnl = [512, 3072, 3584]
+    assert inference_tail_grid_sample_indices(grid, train_map) == [3072]
+    assert inference_tail_pnl_sample_indices(pnl, train_map) == [512, 3072, 3584]
+    assert inference_tail_selection_note(1, 3) == (
+        'inference tail 1 grid + 3 pnl samples (train_sample_index=-1)'
+    )
+    assert inference_tail_selection_note(0, 0) is None
