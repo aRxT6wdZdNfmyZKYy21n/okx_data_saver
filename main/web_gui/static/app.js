@@ -2547,6 +2547,89 @@
     return requireSegmentPositiveFinitePrice(segment, 'pred_target_price');
   }
 
+  function resolveSegmentInferenceX1TimestampMs(segment) {
+    if (segment.inference_x1_timestamp_ms != null) {
+      const value = Number(segment.inference_x1_timestamp_ms);
+      if (Number.isFinite(value) && value > 0) {
+        return value;
+      }
+    }
+    if (segment.entry_timestamp_ms != null) {
+      const fallback = Number(segment.entry_timestamp_ms);
+      if (Number.isFinite(fallback) && fallback > 0) {
+        return fallback;
+      }
+    }
+    return null;
+  }
+
+  function resolveSegmentInferenceEntryClose(segment) {
+    if (segment.inference_entry_close != null) {
+      const value = Number(segment.inference_entry_close);
+      if (Number.isFinite(value) && value > 0) {
+        return value;
+      }
+    }
+    return resolveTradeResearchSegmentEntryPrice(segment);
+  }
+
+  function formatInferenceX1Utc(timestampMs) {
+    if (timestampMs == null) {
+      return '?';
+    }
+    const date = new Date(timestampMs);
+    if (Number.isNaN(date.getTime())) {
+      return '?';
+    }
+    return date.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+  }
+
+  function formatTradeResearchLastInferProvenance(provenance) {
+    if (provenance == null) {
+      return '';
+    }
+    const timestampMs = Number(provenance.inference_x1_timestamp_ms);
+    const entryClose = Number(provenance.inference_entry_close);
+    const sampleIndex = provenance.sample_index;
+    if (!Number.isFinite(timestampMs) || !Number.isFinite(entryClose)) {
+      return '';
+    }
+    let text =
+      `last infer x1: ${formatInferenceX1Utc(timestampMs)} @ ${entryClose.toFixed(2)}`;
+    if (sampleIndex != null) {
+      text = text + ` (sample ${sampleIndex})`;
+    }
+    if (provenance.action != null) {
+      text = text + ` ${provenance.action}`;
+    }
+    return text;
+  }
+
+  function tradeResearchEntryPointMarkerText(segment) {
+    const timestampMs = resolveSegmentInferenceX1TimestampMs(segment);
+    const entryClose = resolveSegmentInferenceEntryClose(segment);
+    if (timestampMs == null || entryClose == null) {
+      return '';
+    }
+    const utcLabel = formatInferenceX1Utc(timestampMs);
+    const shortUtc = utcLabel.length > 16 ? utcLabel.slice(0, 16) : utcLabel;
+    return `${shortUtc} @ ${entryClose.toFixed(0)}`;
+  }
+
+  function buildTradeResearchEntryPointMarker(segment, entryCandle) {
+    const marker = {
+      time: entryCandle.time,
+      position: segment.action === 'long' ? 'belowBar' : 'aboveBar',
+      color: segment.action === 'long' ? '#26a69a' : '#ef5350',
+      shape: segment.action === 'long' ? 'arrowUp' : 'arrowDown',
+    };
+    const markerText = tradeResearchEntryPointMarkerText(segment);
+    if (markerText) {
+      marker.text = markerText;
+    }
+    return marker;
+  }
+
   function addTradeResearchLinesToChart() {
     if (!chart || !isTradeResearchEnabled()) {
       removeTradeResearchLineSeries();
@@ -2571,22 +2654,12 @@
       const entryPrice = resolveTradeResearchSegmentEntryPrice(segment);
       const predTargetClose = resolveTradeResearchSegmentPredTargetClose(segment);
       if (isTradeResearchEntryPointSegment(segment)) {
-        entryPointMarkers.push({
-          time: entryCandle.time,
-          position: segment.action === 'long' ? 'belowBar' : 'aboveBar',
-          color: segment.action === 'long' ? '#26a69a' : '#ef5350',
-          shape: segment.action === 'long' ? 'arrowUp' : 'arrowDown',
-        });
+        entryPointMarkers.push(buildTradeResearchEntryPointMarker(segment, entryCandle));
         continue;
       }
       const exitCandle = resolveSegmentChartCandle(segment.exit_timestamp_ms);
       if (exitCandle == null || exitCandle.time <= entryCandle.time) {
-        entryPointMarkers.push({
-          time: entryCandle.time,
-          position: segment.action === 'long' ? 'belowBar' : 'aboveBar',
-          color: segment.action === 'long' ? '#26a69a' : '#ef5350',
-          shape: segment.action === 'long' ? 'arrowUp' : 'arrowDown',
-        });
+        entryPointMarkers.push(buildTradeResearchEntryPointMarker(segment, entryCandle));
         missingExitCount = missingExitCount + 1;
         continue;
       }
@@ -2881,6 +2954,12 @@
         }
         if (payload.sample_selection_note) {
           statusText = statusText + ` [${payload.sample_selection_note}]`;
+        }
+        const lastInferText = formatTradeResearchLastInferProvenance(
+          payload.last_grid_inference_provenance,
+        );
+        if (lastInferText) {
+          statusText = statusText + ` | ${lastInferText}`;
         }
         if (tradeResearchSegments.length === 0 && Number(entryAllowedCount) > 0) {
           statusText = statusText + ' — entry ok, но линии не привязались к свечам';

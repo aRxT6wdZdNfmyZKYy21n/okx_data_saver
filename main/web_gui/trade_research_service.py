@@ -22,10 +22,12 @@ from fastapi import HTTPException
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars_sync
 from main.web_gui.trade_research_dataset_common import (
+    inference_provenance_fields,
     inference_tail_grid_sample_indices,
     inference_tail_pnl_sample_indices,
     inference_tail_selection_note,
     is_trade_research_entry_point_segment,
+    last_grid_inference_provenance_summary,
     pnl_max_sample_index,
     real_last_start_trade_id,
     sample_exit_on_real_bars,
@@ -995,9 +997,11 @@ def run_trade_research(
             'round_trip_fee_rate': OKX_ROUND_TRIP_TAKER_FEE_RATE,
             'segment_count': 0,
             'segments': segments,
+            'last_grid_inference_provenance': None,
             'sample_selection_note': sample_selection_note,
         }
 
+    last_grid_inference_provenance = None
     try:
         inference_by_sample = _run_inference_for_samples(
             sample_indices=mapped_inference_indices,
@@ -1131,6 +1135,10 @@ def run_trade_research(
                         'pred_eval_log2': pred_eval_log2,
                         'policy_action': action,
                         'action': recommended_action,
+                        **inference_provenance_fields(
+                            inference_x1_timestamp_ms=int(entry_meta['start_timestamp_ms']),
+                            inference_entry_close=entry_close,
+                        ),
                     },
                 )
                 continue
@@ -1159,8 +1167,37 @@ def run_trade_research(
                     'pred_eval_log2': pred_eval_log2,
                     'policy_action': action,
                     'action': recommended_action,
+                    **inference_provenance_fields(
+                        inference_x1_timestamp_ms=int(entry_meta['start_timestamp_ms']),
+                        inference_entry_close=entry_close,
+                    ),
                 },
             )
+
+        segments_by_sample_index = {
+            int(segment['sample_index']): segment for segment in segments
+        }
+        if len(sample_indices) > 0:
+            last_sample_index = max(sample_indices)
+            if last_sample_index in inference_by_sample:
+                last_entry_bar_index = start_index + last_sample_index
+                last_entry_raw_index = level0_to_raw_row_indices[last_entry_bar_index]
+                last_entry_meta = _raw_bar_metadata(df, last_entry_raw_index)
+                last_segment_kind = None
+                last_action = None
+                if last_sample_index in segments_by_sample_index:
+                    last_segment = segments_by_sample_index[last_sample_index]
+                    if 'segment_kind' in last_segment:
+                        last_segment_kind = str(last_segment['segment_kind'])
+                    if 'action' in last_segment:
+                        last_action = str(last_segment['action'])
+                last_grid_inference_provenance = last_grid_inference_provenance_summary(
+                    sample_index=last_sample_index,
+                    inference_x1_timestamp_ms=int(last_entry_meta['start_timestamp_ms']),
+                    inference_entry_close=float(last_entry_meta['close_price']),
+                    segment_kind=last_segment_kind,
+                    action=last_action,
+                )
     except HTTPException:
         raise
     except Exception as exception:
@@ -1204,5 +1241,6 @@ def run_trade_research(
         'round_trip_fee_rate': OKX_ROUND_TRIP_TAKER_FEE_RATE,
         'segment_count': len(segments),
         'segments': segments,
+        'last_grid_inference_provenance': last_grid_inference_provenance,
         'sample_selection_note': sample_selection_note,
     }

@@ -61,6 +61,80 @@ def is_trade_research_entry_point_segment(
     return False
 
 
+def inference_provenance_fields(
+    inference_x1_timestamp_ms: int,
+    inference_entry_close: float,
+) -> dict[str, float | int]:
+    return {
+        'inference_x1_timestamp_ms': int(inference_x1_timestamp_ms),
+        'inference_entry_close': float(inference_entry_close),
+    }
+
+
+def inference_entry_close_for_row(
+    row_index: int,
+    entry_close_by_row: object,
+    pred_start_price_by_row: object | None,
+) -> float:
+    if pred_start_price_by_row is not None:
+        return float(pred_start_price_by_row[row_index])
+    return float(entry_close_by_row[row_index])
+
+
+def last_grid_inference_provenance_summary(
+    sample_index: int,
+    inference_x1_timestamp_ms: int,
+    inference_entry_close: float,
+    segment_kind: str | None,
+    action: str | None,
+) -> dict[str, object]:
+    summary: dict[str, object] = {
+        'sample_index': int(sample_index),
+        'inference_x1_timestamp_ms': int(inference_x1_timestamp_ms),
+        'inference_entry_close': float(inference_entry_close),
+    }
+    if segment_kind is not None:
+        summary['segment_kind'] = segment_kind
+    if action is not None:
+        summary['action'] = action
+    return summary
+
+
+def build_last_grid_inference_provenance(
+    grid_sample_indices: list[int],
+    segments_by_sample_index: dict[int, dict[str, object]],
+    entry_timestamp_ms_by_row: object,
+    entry_close_by_row: object,
+    pred_start_price_by_row: object | None,
+    row_for_sample: object,
+) -> dict[str, object] | None:
+    if len(grid_sample_indices) == 0:
+        return None
+    last_sample_index = max(grid_sample_indices)
+    row_index = row_for_sample(last_sample_index)
+    if row_index is None:
+        return None
+    segment_kind: str | None = None
+    action: str | None = None
+    if last_sample_index in segments_by_sample_index:
+        last_segment = segments_by_sample_index[last_sample_index]
+        if 'segment_kind' in last_segment:
+            segment_kind = str(last_segment['segment_kind'])
+        if 'action' in last_segment:
+            action = str(last_segment['action'])
+    return last_grid_inference_provenance_summary(
+        sample_index=last_sample_index,
+        inference_x1_timestamp_ms=int(entry_timestamp_ms_by_row[row_index]),
+        inference_entry_close=inference_entry_close_for_row(
+            row_index=row_index,
+            entry_close_by_row=entry_close_by_row,
+            pred_start_price_by_row=pred_start_price_by_row,
+        ),
+        segment_kind=segment_kind,
+        action=action,
+    )
+
+
 def inference_tail_grid_sample_indices(
     grid_sample_indices: list[int],
     train_sample_index_by_inference_sample: dict[int, int],

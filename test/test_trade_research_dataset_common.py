@@ -3,6 +3,8 @@ import polars as pl
 from main.web_gui.trade_research_dataset_common import (
     TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
     append_forward_target_padding,
+    build_last_grid_inference_provenance,
+    inference_provenance_fields,
     inference_tail_grid_sample_indices,
     inference_tail_pnl_sample_indices,
     inference_tail_selection_note,
@@ -137,3 +139,48 @@ def test_is_trade_research_entry_point_segment() -> None:
         horizon_steps=horizon_steps,
         level0_height=start_index + 100 + horizon_steps,
     )
+
+
+def test_inference_provenance_fields() -> None:
+    fields = inference_provenance_fields(
+        inference_x1_timestamp_ms=1_725_000_000_000,
+        inference_entry_close=62758.2,
+    )
+    assert fields['inference_x1_timestamp_ms'] == 1_725_000_000_000
+    assert fields['inference_entry_close'] == 62758.2
+
+
+def test_build_last_grid_inference_provenance() -> None:
+    entry_timestamp_ms = [1000, 2000, 3000]
+    entry_close = [100.0, 101.0, 102.0]
+    pred_start_price = [100.5, 101.5, 102.5]
+
+    def row_for_sample(sample_index: int) -> int | None:
+        mapping = {0: 0, 1536: 1, 3072: 2}
+        if sample_index in mapping:
+            return mapping[sample_index]
+        return None
+
+    segments_by_sample_index = {
+        3072: {
+            'sample_index': 3072,
+            'segment_kind': 'entry_point',
+            'action': 'long',
+            'inference_x1_timestamp_ms': 3000,
+            'inference_entry_close': 102.5,
+        },
+    }
+    provenance = build_last_grid_inference_provenance(
+        grid_sample_indices=[0, 1536, 3072],
+        segments_by_sample_index=segments_by_sample_index,
+        entry_timestamp_ms_by_row=entry_timestamp_ms,
+        entry_close_by_row=entry_close,
+        pred_start_price_by_row=pred_start_price,
+        row_for_sample=row_for_sample,
+    )
+    assert provenance is not None
+    assert provenance['sample_index'] == 3072
+    assert provenance['inference_x1_timestamp_ms'] == 3000
+    assert provenance['inference_entry_close'] == 102.5
+    assert provenance['segment_kind'] == 'entry_point'
+    assert provenance['action'] == 'long'

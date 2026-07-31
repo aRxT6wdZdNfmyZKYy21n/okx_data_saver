@@ -22,6 +22,8 @@ from main.web_gui.trade_research_service import (
     summarize_trade_pnls,
 )
 from main.web_gui.trade_research_dataset_common import (
+    build_last_grid_inference_provenance,
+    inference_provenance_fields,
     is_trade_research_entry_point_segment,
 )
 
@@ -592,6 +594,10 @@ def load_trade_research_response(
                     'pred_eval_log2': pred_log2,
                     'policy_action': action,
                     'action': recommended_action,
+                    **inference_provenance_fields(
+                        inference_x1_timestamp_ms=int(entry_timestamp_ms[row_index]),
+                        inference_entry_close=segment_pred_start_price,
+                    ),
                 },
             )
             continue
@@ -619,8 +625,24 @@ def load_trade_research_response(
                 'pred_eval_log2': pred_log2,
                 'policy_action': action,
                 'action': recommended_action,
+                **inference_provenance_fields(
+                    inference_x1_timestamp_ms=int(entry_timestamp_ms[row_index]),
+                    inference_entry_close=segment_pred_start_price,
+                ),
             },
         )
+
+    segments_by_sample_index = {
+        int(segment['sample_index']): segment for segment in segments
+    }
+    last_grid_inference_provenance = build_last_grid_inference_provenance(
+        grid_sample_indices=mapped_grid_indices,
+        segments_by_sample_index=segments_by_sample_index,
+        entry_timestamp_ms_by_row=entry_timestamp_ms,
+        entry_close_by_row=entry_close,
+        pred_start_price_by_row=pred_start_price if has_pred_start_price else None,
+        row_for_sample=npz_store.row_for_sample,
+    )
 
     duration_ms = int((time.monotonic() - started) * 1000)
     logger.info(
@@ -685,6 +707,7 @@ def load_trade_research_response(
         'round_trip_fee_rate': OKX_ROUND_TRIP_TAKER_FEE_RATE,
         'segment_count': len(segments),
         'segments': segments,
+        'last_grid_inference_provenance': last_grid_inference_provenance,
         'sample_selection_note': meta['sample_selection_note']
         if 'sample_selection_note' in meta
         else None,
