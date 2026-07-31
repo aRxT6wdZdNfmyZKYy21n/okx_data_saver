@@ -9,6 +9,10 @@ from omegaconf import OmegaConf
 
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars_sync
+from main.web_gui.trade_research_dataset_common import (
+    last_real_sample_index,
+    prepare_trade_research_raw_dataframe,
+)
 from settings import settings
 from trading_bot_dataset.src.dataset import HybridTradeDataset, HybridTradeDatasetInference
 
@@ -221,33 +225,47 @@ def _prepare_train_aligned_payload_dict(
 
 def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     metadata = fetch_inference_metadata()
+    padded_df, real_bar_count = prepare_trade_research_raw_dataframe(df)
     logger.info(
-        'Dataset preparation start: inference rows=%d sequence_length=%d',
-        int(df.height),
+        'Dataset preparation start: real_rows=%d total_rows=%d sequence_length=%d',
+        real_bar_count,
+        int(padded_df.height),
         int(metadata['sequence_length']),
     )
     inference_dataset = _build_dataset(
-        df,
+        padded_df,
         metadata,
-        0,
+        real_bar_count,
     )
+    start_index = int(inference_dataset.dataset.start_index)
     logger.info(
         'Dataset preparation done: samples=%d start_index=%d',
         len(inference_dataset),
-        int(inference_dataset.dataset.start_index),
+        start_index,
     )
 
-    last_index = len(inference_dataset) - 1
-    if last_index < 0:
-        raise RuntimeError('No samples available after dataset preparation')
+    level0_df = inference_dataset.dataset.aggregated_data[0]
+    level0_to_raw = _build_level0_to_raw_row_indices(padded_df, level0_df)
+    last_index = last_real_sample_index(
+        dataset_length=len(inference_dataset),
+        start_index=start_index,
+        level0_to_raw=level0_to_raw,
+        real_bar_count=real_bar_count,
+    )
+    raw_entry_row = level0_to_raw[start_index + last_index]
+    logger.info(
+        'Last real-bar sample: index=%d raw_row=%d (real_bar_count=%d)',
+        last_index,
+        raw_entry_row,
+        real_bar_count,
+    )
 
-    logger.info('Last index: %d', last_index)
     return _prepare_train_aligned_payload_dict(
-        df=df,
+        df=padded_df,
         metadata=metadata,
         inference_dataset=inference_dataset,
         sample_index=last_index,
-        real_input_row_count=0,
+        real_input_row_count=real_bar_count,
     )
 
 

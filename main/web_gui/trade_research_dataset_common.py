@@ -122,3 +122,17 @@ def sample_exit_on_real_bars(
         level0_to_raw=level0_to_raw,
     )
     return exit_raw_index < real_bar_count
+
+
+def last_real_sample_index(
+    dataset_length: int,
+    start_index: int,
+    level0_to_raw: list[int],
+    real_bar_count: int,
+) -> int:
+    for sample_index in range(dataset_length - 1, -1, -1):
+        entry_bar_index = start_index + sample_index
+        raw_entry_row = level0_to_raw[entry_bar_index]
+        if raw_entry_row < real_bar_count:
+            return sample_index
+    raise RuntimeError('No dataset sample maps to a real x1 bar')

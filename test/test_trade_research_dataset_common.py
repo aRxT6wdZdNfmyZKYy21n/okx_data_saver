@@ -3,8 +3,23 @@ import polars as pl
 from main.web_gui.trade_research_dataset_common import (
     TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
     append_forward_target_padding,
+    last_real_sample_index,
     prepare_trade_research_raw_dataframe,
 )
+
+
+def test_last_real_sample_index_skips_synthetic_tail() -> None:
+    start_index = 2
+    level0_to_raw = [0, 1, 2, 3, 4, 5, 6]
+    real_bar_count = 5
+    sample_index = last_real_sample_index(
+        dataset_length=4,
+        start_index=start_index,
+        level0_to_raw=level0_to_raw,
+        real_bar_count=real_bar_count,
+    )
+    assert sample_index == 2
+    assert level0_to_raw[start_index + sample_index] == 4
 
 
 def test_append_forward_target_padding_extends_raw_df() -> None:
