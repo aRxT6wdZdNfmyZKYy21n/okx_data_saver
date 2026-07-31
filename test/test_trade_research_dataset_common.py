@@ -1,72 +1,58 @@
 import polars as pl
 
 from main.web_gui.trade_research_dataset_common import (
+    TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
     append_forward_target_padding,
-    real_last_start_trade_id,
-    sample_exit_on_real_bars,
+    prepare_trade_research_raw_dataframe,
 )
 
 
-def _build_raw_dataframe(rows_count: int) -> pl.DataFrame:
-    index = pl.Series('index', range(rows_count))
-    return pl.DataFrame(
+def test_append_forward_target_padding_extends_raw_df() -> None:
+    raw_df = pl.DataFrame(
         {
-            'symbol_id': ['BTC_USDT'] * rows_count,
-            'start_trade_id': (index * 10).cast(pl.Int32),
-            'end_trade_id': (index * 10 + 9).cast(pl.Int32),
-            'start_timestamp_ms': (index * 60000).cast(pl.Int64),
-            'end_timestamp_ms': ((index + 1) * 60000).cast(pl.Int64),
-            'open_price': (100.0 + index).cast(pl.Float64),
-            'high_price': (100.5 + index).cast(pl.Float64),
-            'low_price': (99.5 + index).cast(pl.Float64),
-            'close_price': (100.0 + index).cast(pl.Float64),
-            'total_volume': (1.0 + index).cast(pl.Float64),
-            'buy_volume': (0.5 + index).cast(pl.Float64),
-            'total_quantity': (2.0 + index).cast(pl.Float64),
-            'buy_quantity': (1.0 + index).cast(pl.Float64),
-            'total_trades_count': (3.0 + index).cast(pl.Float64),
-            'buy_trades_count': (1.0 + index).cast(pl.Float64),
+            'symbol_id': ['BTC_USDT'],
+            'start_trade_id': [10],
+            'end_trade_id': [19],
+            'start_timestamp_ms': [0.0],
+            'end_timestamp_ms': [60000.0],
+            'open_price': [100.0],
+            'high_price': [100.5],
+            'low_price': [99.5],
+            'close_price': [100.0],
+            'total_volume': [1.0],
+            'buy_volume': [0.5],
+            'total_quantity': [1.0],
+            'buy_quantity': [0.5],
+            'total_trades_count': [1.0],
+            'buy_trades_count': [1.0],
         }
     )
+    padded, real_bar_count = append_forward_target_padding(raw_df, 2)
+    assert real_bar_count == 1
+    assert padded.height == 3
+    assert padded.row(-1, named=True)['close_price'] == 100.0
 
 
-def test_append_forward_target_padding_extends_and_preserves_real_tail() -> None:
-    raw_df = _build_raw_dataframe(100)
-    padded_df, real_bar_count = append_forward_target_padding(
-        raw_df=raw_df,
-        forward_bars=4,
+def test_prepare_trade_research_raw_dataframe_uses_default_padding() -> None:
+    raw_df = pl.DataFrame(
+        {
+            'symbol_id': ['BTC_USDT'],
+            'start_trade_id': [10],
+            'end_trade_id': [19],
+            'start_timestamp_ms': [0.0],
+            'end_timestamp_ms': [60000.0],
+            'open_price': [100.0],
+            'high_price': [100.5],
+            'low_price': [99.5],
+            'close_price': [100.0],
+            'total_volume': [1.0],
+            'buy_volume': [0.5],
+            'total_quantity': [1.0],
+            'buy_quantity': [0.5],
+            'total_trades_count': [1.0],
+            'buy_trades_count': [1.0],
+        }
     )
-    assert real_bar_count == 100
-    assert padded_df.height == 104
-    assert padded_df.row(99, named=True)['close_price'] == 199.0
-    assert padded_df.row(100, named=True)['close_price'] == 199.0
-    assert padded_df.row(100, named=True)['total_volume'] == 0.0
-    assert padded_df.row(103, named=True)['start_trade_id'] == 1030
-    assert padded_df.schema['start_trade_id'] == pl.Int32
-
-
-def test_real_last_start_trade_id_uses_real_tail() -> None:
-    raw_df = _build_raw_dataframe(10)
-    padded_df, real_bar_count = append_forward_target_padding(
-        raw_df=raw_df,
-        forward_bars=3,
-    )
-    assert real_last_start_trade_id(padded_df, real_bar_count) == 90
-
-
-def test_sample_exit_on_real_bars() -> None:
-    level0_to_raw = list(range(20))
-    assert sample_exit_on_real_bars(
-        sample_index=2,
-        start_index=5,
-        horizon_steps=3,
-        level0_to_raw=level0_to_raw,
-        real_bar_count=12,
-    )
-    assert not sample_exit_on_real_bars(
-        sample_index=2,
-        start_index=5,
-        horizon_steps=3,
-        level0_to_raw=level0_to_raw,
-        real_bar_count=10,
-    )
+    padded, real_bar_count = prepare_trade_research_raw_dataframe(raw_df)
+    assert real_bar_count == 1
+    assert padded.height == 1 + TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS

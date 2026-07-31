@@ -9,6 +9,7 @@ import polars
 logger = logging.getLogger(__name__)
 
 TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS = 65536
+TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE = 'raw_x1'
 
 
 def append_forward_target_padding(

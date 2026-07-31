@@ -20,6 +20,7 @@ from main.offline_inference.paths import (
 from main.web_gui.data_service import fetch_last_bars_sync
 from main.web_gui.trade_research_dataset_common import (
     TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+    TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE,
     prepare_trade_research_raw_dataframe,
     real_last_start_trade_id,
 )
@@ -239,6 +240,19 @@ def _should_rebuild_existing_npz(
             TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
         )
         return True
+    if 'forward_target_padding_site' not in existing_npz:
+        logger.info(
+            'Existing NPZ missing forward_target_padding_site; rebuilding from scratch',
+        )
+        return True
+    existing_padding_site = str(existing_npz['forward_target_padding_site'][0])
+    if existing_padding_site != TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE:
+        logger.info(
+            'Forward target padding site changed (%s -> %s); rebuilding NPZ from scratch',
+            existing_padding_site,
+            TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE,
+        )
+        return True
     return False
 
 
@@ -351,6 +365,7 @@ def _merge_npz_rows(
         'payload_mode',
         'real_bars_loaded',
         'forward_target_padding_bars',
+        'forward_target_padding_site',
         'real_last_start_trade_id',
     ]
     metadata_fields = {
@@ -526,14 +541,20 @@ def run_trade_research_export(symbol_id: str) -> None:
 
     horizon_names = _horizon_names_from_metadata(metadata)
     logger.info(
-        'Dataset preparation start: trade research rows=%d sequence_length=%d',
+        'Dataset preparation start: trade research real_rows=%d total_rows=%d sequence_length=%d',
+        real_bar_count,
         int(df.height),
         int(metadata['sequence_length']),
     )
-    dataset = _build_dataset(df, metadata)
+    dataset = _build_dataset(
+        df,
+        metadata,
+        real_bar_count,
+    )
     train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
         df=df,
         metadata=metadata,
+        real_input_row_count=real_bar_count,
     )
     train_size_ratio = _train_size_ratio_for_export(metadata)
     train_size = int(len(train_dataset) * train_size_ratio)
@@ -720,6 +741,7 @@ def run_trade_research_export(symbol_id: str) -> None:
             [TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS],
             dtype=np.int64,
         ),
+        'forward_target_padding_site': np.array([TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE], dtype=object),
         'real_last_start_trade_id': np.array([real_last_trade_id], dtype=np.int64),
         'level0_rows': np.array([level0_height], dtype=np.int64),
         'last_bar_start_trade_id': np.array([last_bar_start_trade_id], dtype=np.int64),
@@ -782,6 +804,7 @@ def run_trade_research_export(symbol_id: str) -> None:
             'bars_loaded': int(df.height),
             'real_bars_loaded': real_bar_count,
             'forward_target_padding_bars': TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
+            'forward_target_padding_site': TRADE_RESEARCH_FORWARD_TARGET_PADDING_SITE,
             'real_last_start_trade_id': real_last_trade_id,
             'level0_rows': level0_height,
             'dataset_length': dataset_length,

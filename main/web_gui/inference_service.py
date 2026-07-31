@@ -28,6 +28,7 @@ def fetch_inference_metadata() -> dict:
 def _build_dataset(
     df: polars.DataFrame,
     metadata: dict,
+    real_input_row_count: int,
 ) -> HybridTradeDatasetInference:
     sequence_length = int(metadata['sequence_length'])
     dataset_cfg = metadata['dataset_config']
@@ -51,12 +52,14 @@ def _build_dataset(
         use_indicators=bool(dataset_cfg['use_indicators']),
         indicator_cols=list(dataset_cfg['indicator_cols']),
         model_config=model_cfg_omega,
+        real_input_row_count=real_input_row_count,
     )
 
 
 def _build_train_dataset(
     df: polars.DataFrame,
     metadata: dict,
+    real_input_row_count: int,
 ) -> HybridTradeDataset:
     sequence_length = int(metadata['sequence_length'])
     dataset_cfg = metadata['dataset_config']
@@ -78,7 +81,7 @@ def _build_train_dataset(
         use_indicators=bool(dataset_cfg['use_indicators']),
         indicator_cols=list(dataset_cfg['indicator_cols']),
         model_config=model_cfg_omega,
-        inference_mode=False,
+        real_input_row_count=real_input_row_count,
     )
 
 
@@ -113,8 +116,13 @@ def _build_level0_to_raw_row_indices(
 def _build_train_level0_context(
     df: polars.DataFrame,
     metadata: dict,
+    real_input_row_count: int,
 ) -> tuple[HybridTradeDataset, polars.DataFrame, dict[int, int]]:
-    train_dataset = _build_train_dataset(df=df, metadata=metadata)
+    train_dataset = _build_train_dataset(
+        df=df,
+        metadata=metadata,
+        real_input_row_count=real_input_row_count,
+    )
     train_level0_df = train_dataset.aggregated_data[0]
     train_level0_to_raw = _build_level0_to_raw_row_indices(df, train_level0_df)
     raw_to_train_level0_row: dict[int, int] = {}
@@ -174,10 +182,12 @@ def _prepare_train_aligned_payload_dict(
     metadata: dict,
     inference_dataset: HybridTradeDatasetInference,
     sample_index: int,
+    real_input_row_count: int,
 ) -> dict[str, object]:
     train_dataset, _train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
         df=df,
         metadata=metadata,
+        real_input_row_count=real_input_row_count,
     )
     start_index = int(inference_dataset.dataset.start_index)
     level0_df = inference_dataset.dataset.aggregated_data[0]
@@ -216,7 +226,11 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
         int(df.height),
         int(metadata['sequence_length']),
     )
-    inference_dataset = _build_dataset(df, metadata)
+    inference_dataset = _build_dataset(
+        df,
+        metadata,
+        0,
+    )
     logger.info(
         'Dataset preparation done: samples=%d start_index=%d',
         len(inference_dataset),
@@ -233,6 +247,7 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
         metadata=metadata,
         inference_dataset=inference_dataset,
         sample_index=last_index,
+        real_input_row_count=0,
     )
 
 

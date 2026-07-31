@@ -2756,10 +2756,14 @@
         const sampleCount = payload.sample_count != null ? payload.sample_count : '?';
         const tradeCount = payload.trade_inference_count != null ? payload.trade_inference_count : '?';
         const entryAllowedCount = payload.entry_allowed_count != null ? payload.entry_allowed_count : '?';
-        const barsLoaded = payload.bars_loaded != null ? payload.bars_loaded : '?';
         const realBarsLoaded = payload.real_bars_loaded != null ? payload.real_bars_loaded : null;
+        const paddingSite = payload.forward_target_padding_site != null
+          ? String(payload.forward_target_padding_site)
+          : null;
         let barsContextText = `${barsLoaded} x1`;
-        if (
+        if (paddingSite === 'level0') {
+          barsContextText = `${barsLoaded} x1 (raw pad ${payload.forward_target_padding_bars})`;
+        } else if (
           realBarsLoaded != null &&
           barsLoaded !== '?' &&
           Number(realBarsLoaded) !== Number(barsLoaded)

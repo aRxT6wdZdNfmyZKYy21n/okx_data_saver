@@ -22,6 +22,7 @@ from fastapi import HTTPException
 from enumerations import SymbolId
 from main.web_gui.data_service import fetch_last_bars_sync
 from main.web_gui.trade_research_dataset_common import (
+    TRADE_RESEARCH_FORWARD_TARGET_PADDING_BARS,
     prepare_trade_research_raw_dataframe,
     real_last_start_trade_id,
     sample_exit_on_real_bars,
@@ -774,10 +775,15 @@ def run_trade_research(
     df, real_bar_count = prepare_trade_research_raw_dataframe(df)
     real_last_trade_id = real_last_start_trade_id(df, real_bar_count)
 
-    dataset = _build_dataset(df, metadata)
+    dataset = _build_dataset(
+        df,
+        metadata,
+        real_bar_count,
+    )
     train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
         df=df,
         metadata=metadata,
+        real_input_row_count=real_bar_count,
     )
     start_index = int(dataset.dataset.start_index)
     dataset_length = len(dataset)
