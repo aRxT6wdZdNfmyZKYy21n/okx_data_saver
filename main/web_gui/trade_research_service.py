@@ -776,7 +776,7 @@ def run_trade_research(
     real_last_trade_id = real_last_start_trade_id(df, real_bar_count)
 
     dataset = _build_dataset(
-        df,
+        df.head(real_bar_count),
         metadata,
     )
     train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(

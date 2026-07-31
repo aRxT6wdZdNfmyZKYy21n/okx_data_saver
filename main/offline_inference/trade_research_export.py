@@ -547,7 +547,7 @@ def run_trade_research_export(symbol_id: str) -> None:
         int(metadata['sequence_length']),
     )
     dataset = _build_dataset(
-        df,
+        df.head(real_bar_count),
         metadata,
     )
     train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
