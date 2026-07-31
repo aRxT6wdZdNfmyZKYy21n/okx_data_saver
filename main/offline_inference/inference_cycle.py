@@ -37,11 +37,12 @@ def _linear_metric_from_pct(value: float | int) -> float:
     return numeric / 100.0
 
 
-def _latest_bar_metadata(df) -> dict[str, int]:
+def _latest_bar_metadata(df) -> dict[str, int | float]:
     last_row = df.row(df.height - 1, named=True)
     return {
         'bar_start_trade_id': int(last_row['start_trade_id']),
         'bar_timestamp_ms': int(last_row['start_timestamp_ms']),
+        'bar_close_price': float(last_row['close_price']),
     }
 
 
@@ -191,6 +192,7 @@ def run_inference_cycle(symbol_id: str) -> None:
     payload: dict[str, object] = {
         'bar_start_trade_id': bar_metadata['bar_start_trade_id'],
         'bar_timestamp_ms': bar_metadata['bar_timestamp_ms'],
+        'bar_close_price': bar_metadata['bar_close_price'],
         'predictions': inference_result['predictions'],
         'policy': inference_result['policy'] if 'policy' in inference_result else None,
         'entry_hint': inference_result['entry_hint']

@@ -18,6 +18,7 @@ _INFERENCE_SNAPSHOT_KEYS = (
     'exit_transformer',
     'bar_start_trade_id',
     'bar_timestamp_ms',
+    'bar_close_price',
     'inference_completed_at_ms',
 )
 

@@ -262,6 +262,10 @@ body {
   color: #d1d4dc;
 }
 
+.inference-status-bar-anchor {
+  color: #9db4d8;
+}
+
 .inference-status-computing-label {
   color: #c4a535;
   font-weight: 600;
@@ -323,6 +327,12 @@ body {
   gap: 0.75rem;
   font-size: 0.85rem;
   color: #b2b5be;
+}
+
+.policy-bar-anchor {
+  margin-top: 0.45rem;
+  font-size: 0.82rem;
+  color: #9db4d8;
 }
 
 .policy-checkpoint {

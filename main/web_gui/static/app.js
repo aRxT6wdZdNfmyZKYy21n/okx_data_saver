@@ -228,6 +228,7 @@
   let lastInferenceNetworkError = null;
   let lastComputingStartedAtMs = null;
   let inferenceStatusTickTimer = null;
+  let lastInferenceBarProvenance = null;
   let latestX1Bar = null;
   let lastChartBarClose = null;
   let journalDefaults = {
@@ -999,6 +1000,75 @@
     inferencePanel.classList.toggle('inference-panel-stale', Boolean(isStale));
   }
 
+  function captureInferenceBarProvenance(response) {
+    if (response == null) {
+      lastInferenceBarProvenance = null;
+      return;
+    }
+    const barStartTradeId = response.bar_start_trade_id;
+    const barTimestampMs = response.bar_timestamp_ms;
+    if (barStartTradeId == null || barTimestampMs == null) {
+      lastInferenceBarProvenance = null;
+      return;
+    }
+    let barClosePrice = null;
+    if (response.bar_close_price != null) {
+      const closeValue = Number(response.bar_close_price);
+      if (Number.isFinite(closeValue) && closeValue > 0) {
+        barClosePrice = closeValue;
+      }
+    }
+    lastInferenceBarProvenance = {
+      bar_start_trade_id: Number(barStartTradeId),
+      bar_timestamp_ms: Number(barTimestampMs),
+      bar_close_price: barClosePrice,
+    };
+  }
+
+  function resolveInferenceBarClosePrice(provenance) {
+    if (provenance == null) {
+      return null;
+    }
+    if (provenance.bar_close_price != null) {
+      const closeValue = Number(provenance.bar_close_price);
+      if (Number.isFinite(closeValue) && closeValue > 0) {
+        return closeValue;
+      }
+    }
+    if (
+      latestX1Bar != null &&
+      Number(latestX1Bar.start_trade_id) === Number(provenance.bar_start_trade_id) &&
+      latestX1Bar.close_price != null
+    ) {
+      const chartClose = Number(latestX1Bar.close_price);
+      if (Number.isFinite(chartClose) && chartClose > 0) {
+        return chartClose;
+      }
+    }
+    return null;
+  }
+
+  function isInferenceBarBehindChart(provenance) {
+    if (provenance == null || latestX1Bar == null) {
+      return false;
+    }
+    return Number(provenance.bar_start_trade_id) < Number(latestX1Bar.start_trade_id);
+  }
+
+  function formatInferenceBarProvenanceText(provenance) {
+    if (provenance == null) {
+      return '';
+    }
+    const utcLabel = formatInferenceX1Utc(provenance.bar_timestamp_ms);
+    const closePrice = resolveInferenceBarClosePrice(provenance);
+    const closeLabel = closePrice != null ? closePrice.toFixed(2) : '—';
+    let text = `x1 ${utcLabel} @ ${closeLabel}`;
+    if (isInferenceBarBehindChart(provenance)) {
+      text = text + ' (не последний бар)';
+    }
+    return text;
+  }
+
   function renderInferenceStatusBar() {
     if (lastInferenceStatus == null) {
       inferenceStatusBar.classList.add('hidden');
@@ -1018,8 +1088,13 @@
 
     if (lastInferenceStatus === 'ok') {
       const ageLabel = formatRelativeTimeAgo(lastInferenceCompletedAtMs);
+      const barProvenanceText = formatInferenceBarProvenanceText(lastInferenceBarProvenance);
+      const barLine = barProvenanceText
+        ? `<span class="inference-status-bar-anchor">Бар инференса: <strong>${barProvenanceText}</strong></span>`
+        : '';
       inferenceStatusBar.innerHTML = `
         <span class="inference-status-age">Обновлено: <strong>${ageLabel}</strong></span>
+        ${barLine}
       `;
       return;
     }
@@ -1028,11 +1103,16 @@
       const ageLabel = formatRelativeTimeAgo(lastInferenceCompletedAtMs);
       const refreshDuration = formatDurationSince(lastComputingStartedAtMs);
       const hasSnapshot = Number.isFinite(lastInferenceCompletedAtMs);
+      const barProvenanceText = formatInferenceBarProvenanceText(lastInferenceBarProvenance);
+      const barLine = barProvenanceText
+        ? `<span class="inference-status-bar-anchor">Бар инференса: <strong>${barProvenanceText}</strong></span>`
+        : '';
       const snapshotLine = hasSnapshot
         ? `<span class="inference-status-age">Предсказания от <strong>${ageLabel}</strong></span>`
         : '<span class="inference-status-age">Первый offline-инференс ещё не готов</span>';
       inferenceStatusBar.innerHTML = `
         ${snapshotLine}
+        ${barLine}
         <span class="inference-status-computing-label">Обновление… (${refreshDuration})</span>
       `;
       return;
@@ -1041,8 +1121,13 @@
     if (lastInferenceStatus === 'network_error') {
       const ageLabel = formatRelativeTimeAgo(lastInferenceCompletedAtMs);
       const errorMessage = lastInferenceNetworkError || 'сеть недоступна';
+      const barProvenanceText = formatInferenceBarProvenanceText(lastInferenceBarProvenance);
+      const barLine = barProvenanceText
+        ? `<span class="inference-status-bar-anchor">Бар инференса: <strong>${barProvenanceText}</strong></span>`
+        : '';
       inferenceStatusBar.innerHTML = `
         <span class="inference-status-age">Обновлено: <strong>${ageLabel}</strong></span>
+        ${barLine}
         <span class="inference-status-network-error-label">${errorMessage}. Повтор через ${INFERENCE_REFRESH_INTERVAL_SEC} сек…</span>
       `;
     }
@@ -1152,6 +1237,10 @@
     }
 
     policySummary.classList.remove('hidden');
+    const barProvenanceText = formatInferenceBarProvenanceText(lastInferenceBarProvenance);
+    const barProvenanceHtml = barProvenanceText
+      ? `<div class="policy-bar-anchor">Вход модели: <strong>${barProvenanceText}</strong></div>`
+      : '';
     policySummary.innerHTML = `
       <div class="policy-card ${actionClass}">
         <div class="policy-action">${action}</div>
@@ -1160,6 +1249,7 @@
           <span>stack: <strong>${runLabel}</strong></span>
           <span>P(hold/long/short): ${holdPct}% / ${longPct}% / ${shortPct}%</span>
         </div>
+        ${barProvenanceHtml}
         ${entryHintHtml}
         <div class="policy-checkpoint" title="${checkpointPath}">base ckpt: ${checkpointPath}</div>
       </div>
@@ -1258,6 +1348,7 @@
         const status = response.status != null ? String(response.status) : 'ok';
         if (status === 'computing') {
           lastInferenceStatus = 'computing';
+          captureInferenceBarProvenance(response);
           lastComputingStartedAtMs = response.computing_started_at_ms != null
             ? Number(response.computing_started_at_ms)
             : (response.updated_at_ms != null ? Number(response.updated_at_ms) : null);
@@ -1325,6 +1416,7 @@
         }
         lastInferenceStatus = 'ok';
         lastInferenceNetworkError = null;
+        captureInferenceBarProvenance(response);
         lastInferenceCompletedAtMs = response.inference_completed_at_ms != null
           ? Number(response.inference_completed_at_ms)
           : (response.updated_at_ms != null ? Number(response.updated_at_ms) : null);
@@ -1477,6 +1569,16 @@
       .finally(() => {
         refreshX1BarInFlight = false;
       });
+  }
+
+  function refreshInferenceBarProvenanceDisplay() {
+    if (lastInferenceStatus == null) {
+      return;
+    }
+    renderInferenceStatusBar();
+    if (lastPolicy && symbolSelect.value) {
+      renderPolicy(lastPolicy, symbolSelect.value, lastEntryHint);
+    }
   }
 
   function refreshInferencePanel() {
@@ -3398,6 +3500,7 @@
         });
         applyBarsToChart(data, effectiveScale);
         updateLatestX1BarFromBarsData(data, effectiveScale);
+        refreshInferenceBarProvenanceDisplay();
         refreshTradeJournal(symbol);
       })
       .catch(e => {
