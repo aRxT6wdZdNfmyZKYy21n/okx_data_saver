@@ -549,12 +549,10 @@ def run_trade_research_export(symbol_id: str) -> None:
     dataset = _build_dataset(
         df,
         metadata,
-        real_bar_count,
     )
     train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
         df=df,
         metadata=metadata,
-        real_input_row_count=real_bar_count,
     )
     train_size_ratio = _train_size_ratio_for_export(metadata)
     train_size = int(len(train_dataset) * train_size_ratio)
