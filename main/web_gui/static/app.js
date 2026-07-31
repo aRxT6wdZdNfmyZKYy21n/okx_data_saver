@@ -143,6 +143,7 @@
   /** Серии линий non-overlapping trade research @ eval horizon */
   let tradeResearchSegments = [];
   let tradeResearchLineSeries = [];
+  let tradeResearchMarkerPrimitive = null;
   let extremaLineSeries = [];
   let refreshTimer = null;
   let inferenceRefreshTimer = null;
@@ -2413,6 +2414,14 @@
     if (!chart) return;
     tradeResearchLineSeries.forEach((series) => chart.removeSeries(series));
     tradeResearchLineSeries = [];
+    if (tradeResearchMarkerPrimitive != null) {
+      tradeResearchMarkerPrimitive.setMarkers([]);
+      tradeResearchMarkerPrimitive = null;
+    }
+  }
+
+  function isTradeResearchEntryPointSegment(segment) {
+    return segment.segment_kind === 'entry_point';
   }
 
   function buildCandleByTimeLookup() {
@@ -2541,30 +2550,46 @@
   function addTradeResearchLinesToChart() {
     if (!chart || !isTradeResearchEnabled()) {
       removeTradeResearchLineSeries();
-      return;
+      return 0;
     }
     removeTradeResearchLineSeries();
     if (candleDataByIndex.length === 0 || tradeResearchSegments.length === 0) {
-      return;
+      return 0;
     }
     const renderStartedMs = performance.now();
     console.time('[trade-research] js-prep');
     const drawSpecs = [];
+    const entryPointMarkers = [];
     let missingEntryCount = 0;
     let missingExitCount = 0;
     for (const segment of tradeResearchSegments) {
       const entryCandle = resolveSegmentChartCandle(segment.entry_timestamp_ms);
-      const exitCandle = resolveSegmentChartCandle(segment.exit_timestamp_ms);
       if (entryCandle == null) {
         missingEntryCount = missingEntryCount + 1;
         continue;
       }
+      const entryPrice = resolveTradeResearchSegmentEntryPrice(segment);
+      const predTargetClose = resolveTradeResearchSegmentPredTargetClose(segment);
+      if (isTradeResearchEntryPointSegment(segment)) {
+        entryPointMarkers.push({
+          time: entryCandle.time,
+          position: segment.action === 'long' ? 'belowBar' : 'aboveBar',
+          color: segment.action === 'long' ? '#26a69a' : '#ef5350',
+          shape: segment.action === 'long' ? 'arrowUp' : 'arrowDown',
+        });
+        continue;
+      }
+      const exitCandle = resolveSegmentChartCandle(segment.exit_timestamp_ms);
       if (exitCandle == null || exitCandle.time <= entryCandle.time) {
+        entryPointMarkers.push({
+          time: entryCandle.time,
+          position: segment.action === 'long' ? 'belowBar' : 'aboveBar',
+          color: segment.action === 'long' ? '#26a69a' : '#ef5350',
+          shape: segment.action === 'long' ? 'arrowUp' : 'arrowDown',
+        });
         missingExitCount = missingExitCount + 1;
         continue;
       }
-      const entryPrice = resolveTradeResearchSegmentEntryPrice(segment);
-      const predTargetClose = resolveTradeResearchSegmentPredTargetClose(segment);
       drawSpecs.push({
         entryTimeSec: entryCandle.time,
         exitTimeSec: exitCandle.time,
@@ -2575,7 +2600,9 @@
     }
     console.timeEnd('[trade-research] js-prep');
     const LineSeries = LightweightCharts.LineSeries;
-    if (!LineSeries) return;
+    if (!LineSeries) {
+      return entryPointMarkers.length;
+    }
     const opts = {
       priceScaleId: 'right',
       lineWidth: 2,
@@ -2592,11 +2619,20 @@
       tradeResearchLineSeries.push(series);
     }
     console.timeEnd('[trade-research] chart-add-series');
+    if (entryPointMarkers.length > 0 && candleSeries && LightweightCharts.createSeriesMarkers) {
+      tradeResearchMarkerPrimitive = LightweightCharts.createSeriesMarkers(
+        candleSeries,
+        entryPointMarkers,
+      );
+    }
+    const renderedSegmentCount = drawSpecs.length + entryPointMarkers.length;
     console.info(
       '[trade-research] render',
       {
         segments: tradeResearchSegments.length,
-        rendered: drawSpecs.length,
+        rendered: renderedSegmentCount,
+        renderedLines: drawSpecs.length,
+        renderedEntryPoints: entryPointMarkers.length,
         missingEntry: missingEntryCount,
         missingExit: missingExitCount,
         anchor: 'aligned_coarse_candle_time_pred_start_price_to_pred_target_price',
@@ -2605,6 +2641,7 @@
         chartCandles: candleDataByIndex.length,
       },
     );
+    return renderedSegmentCount;
   }
 
   function getVisibleStartTradeIdRange() {
@@ -2743,7 +2780,7 @@
           tradeResearchScale = tradeResearchEvalHorizon;
           updateTradeResearchUi();
         }
-        addTradeResearchLinesToChart();
+        const renderedSegmentCount = addTradeResearchLinesToChart();
         const artifactHorizon = payload.eval_horizon != null
           ? String(payload.eval_horizon)
           : tradeResearchEvalHorizon;
@@ -2853,10 +2890,16 @@
           statusText = statusText + ' — нет long/short в видимом окне';
         }
         const renderedLines = tradeResearchLineSeries.length;
-        if (tradeResearchSegments.length > 0 && renderedLines === 0) {
+        const renderedEntryPoints = renderedSegmentCount - renderedLines;
+        if (tradeResearchSegments.length > 0 && renderedSegmentCount === 0) {
           statusText = statusText + ' — линии не привязались к свечам (см. console [trade-research] render)';
-        } else if (renderedLines > 0 && renderedLines < tradeResearchSegments.length) {
-          statusText = statusText + ` — нарисовано ${renderedLines}/${tradeResearchSegments.length} линий`;
+        } else if (renderedSegmentCount > 0 && renderedSegmentCount < tradeResearchSegments.length) {
+          statusText = statusText + ` — нарисовано ${renderedSegmentCount}/${tradeResearchSegments.length}`;
+          if (renderedEntryPoints > 0) {
+            statusText = statusText + ` (${renderedLines} линий, ${renderedEntryPoints} маркеров)`;
+          } else {
+            statusText = statusText + ' линий';
+          }
         }
         setStatus(statusText);
       })

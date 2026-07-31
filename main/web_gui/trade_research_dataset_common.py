@@ -14,6 +14,53 @@ TRADE_RESEARCH_EXPORT_FORWARD_TARGET_PADDING_BARS = 0
 TRADE_RESEARCH_PAYLOAD_MODE_MIXED = 'mixed'
 
 
+def pnl_max_sample_index(dataset_length: int, horizon_steps: int) -> int:
+    return dataset_length - 1 - horizon_steps
+
+
+def sample_indices_for_display_grid(
+    dataset_length: int,
+    step_bars: int,
+) -> tuple[list[int], str | None]:
+    max_display_sample_index = dataset_length - 1
+    if max_display_sample_index < 0:
+        return [], 'dataset too short for display grid'
+
+    sample_indices = list(range(0, max_display_sample_index + 1, step_bars))
+    return sample_indices, None
+
+
+def sample_indices_for_pnl_grid(
+    dataset_length: int,
+    step_bars: int,
+    horizon_steps: int,
+) -> tuple[list[int], str | None]:
+    max_sample_index = pnl_max_sample_index(
+        dataset_length=dataset_length,
+        horizon_steps=horizon_steps,
+    )
+    if max_sample_index < 0:
+        return [], 'dataset too short for eval horizon'
+
+    sample_indices = list(range(0, max_sample_index + 1, step_bars))
+    return sample_indices, None
+
+
+def is_trade_research_entry_point_segment(
+    sample_index: int,
+    pnl_max_sample_index: int,
+    start_index: int,
+    horizon_steps: int,
+    level0_height: int,
+) -> bool:
+    if sample_index > pnl_max_sample_index:
+        return True
+    exit_bar_index = start_index + sample_index + horizon_steps
+    if exit_bar_index >= level0_height:
+        return True
+    return False
+
+
 def inference_tail_grid_sample_indices(
     grid_sample_indices: list[int],
     train_sample_index_by_inference_sample: dict[int, int],

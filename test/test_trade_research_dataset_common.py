@@ -6,8 +6,12 @@ from main.web_gui.trade_research_dataset_common import (
     inference_tail_grid_sample_indices,
     inference_tail_pnl_sample_indices,
     inference_tail_selection_note,
+    is_trade_research_entry_point_segment,
     last_real_sample_index,
+    pnl_max_sample_index,
     prepare_trade_research_raw_dataframe,
+    sample_indices_for_display_grid,
+    sample_indices_for_pnl_grid,
 )
 
 
@@ -89,3 +93,47 @@ def test_inference_tail_sample_indices() -> None:
         'inference tail 1 grid + 3 pnl samples (train_sample_index=-1)'
     )
     assert inference_tail_selection_note(0, 0) is None
+
+
+def test_display_grid_extends_past_pnl_grid() -> None:
+    dataset_length = 100000
+    horizon_steps = 1536
+    step_bars = 1536
+    pnl_max = pnl_max_sample_index(dataset_length, horizon_steps)
+    display_indices, _note = sample_indices_for_display_grid(dataset_length, step_bars)
+    pnl_indices, _pnl_note = sample_indices_for_pnl_grid(
+        dataset_length,
+        step_bars,
+        horizon_steps,
+    )
+    assert display_indices[-1] <= dataset_length - 1
+    assert display_indices[-1] > pnl_indices[-1]
+    assert len(display_indices) == len(pnl_indices) + 1
+
+
+def test_is_trade_research_entry_point_segment() -> None:
+    pnl_max = 98463
+    start_index = 1000
+    horizon_steps = 1536
+    level0_height = 200000
+    assert is_trade_research_entry_point_segment(
+        sample_index=99840,
+        pnl_max_sample_index=pnl_max,
+        start_index=start_index,
+        horizon_steps=horizon_steps,
+        level0_height=level0_height,
+    )
+    assert not is_trade_research_entry_point_segment(
+        sample_index=98304,
+        pnl_max_sample_index=pnl_max,
+        start_index=start_index,
+        horizon_steps=horizon_steps,
+        level0_height=level0_height,
+    )
+    assert is_trade_research_entry_point_segment(
+        sample_index=100,
+        pnl_max_sample_index=pnl_max,
+        start_index=start_index,
+        horizon_steps=horizon_steps,
+        level0_height=start_index + 100 + horizon_steps,
+    )

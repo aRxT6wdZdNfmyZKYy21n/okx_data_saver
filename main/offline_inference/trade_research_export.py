@@ -25,6 +25,8 @@ from main.web_gui.trade_research_dataset_common import (
     inference_tail_grid_sample_indices,
     inference_tail_pnl_sample_indices,
     inference_tail_selection_note,
+    is_trade_research_entry_point_segment,
+    pnl_max_sample_index,
     real_last_start_trade_id,
 )
 from main.web_gui.inference_service import (
@@ -45,7 +47,8 @@ from main.web_gui.trade_research_service import (
     _map_sample_indices_to_train,
     _raw_bar_metadata,
     _row_value,
-    _sample_indices_for_full_dataset,
+    _pnl_max_sample_index,
+    _sample_indices_for_display_grid,
     _sample_indices_for_pnl_backtest,
     horizon_steps_from_name,
     inference_row_from_batch_result,
@@ -158,6 +161,62 @@ def _append_export_row(
 
     for key in TRADE_RESEARCH_NPZ_INFERENCE_ROW_KEYS:
         rows[key].append(inference_row[key])
+
+
+def _bar_metadata_for_entry_point_sample(
+    sample_index: int,
+    start_index: int,
+    level0_to_raw: list[int],
+    raw_df: polars.DataFrame,
+) -> dict[str, float | int]:
+    entry_bar_index = start_index + sample_index
+    entry_raw_index = level0_to_raw[entry_bar_index]
+    entry_meta = _raw_bar_metadata(raw_df, entry_raw_index)
+    entry_start_trade_id = int(entry_meta['start_trade_id'])
+    entry_timestamp_ms = int(entry_meta['start_timestamp_ms'])
+    entry_open = float(entry_meta['open_price'])
+    entry_close = float(entry_meta['close_price'])
+    return {
+        'entry_start_trade_id': entry_start_trade_id,
+        'exit_start_trade_id': entry_start_trade_id,
+        'entry_timestamp_ms': entry_timestamp_ms,
+        'exit_timestamp_ms': entry_timestamp_ms,
+        'entry_open': entry_open,
+        'entry_close': entry_close,
+        'exit_close': entry_close,
+    }
+
+
+def _bar_metadata_for_export_sample(
+    sample_index: int,
+    start_index: int,
+    horizon_steps: int,
+    level0_to_raw: list[int],
+    raw_df: polars.DataFrame,
+    level0_height: int,
+    pnl_max_sample_index: int,
+) -> dict[str, float | int]:
+    if is_trade_research_entry_point_segment(
+        sample_index=sample_index,
+        pnl_max_sample_index=pnl_max_sample_index,
+        start_index=start_index,
+        horizon_steps=horizon_steps,
+        level0_height=level0_height,
+    ):
+        return _bar_metadata_for_entry_point_sample(
+            sample_index=sample_index,
+            start_index=start_index,
+            level0_to_raw=level0_to_raw,
+            raw_df=raw_df,
+        )
+    return _bar_metadata_for_sample(
+        sample_index=sample_index,
+        start_index=start_index,
+        horizon_steps=horizon_steps,
+        level0_to_raw=level0_to_raw,
+        raw_df=raw_df,
+        level0_height=level0_height,
+    )
 
 
 def _bar_metadata_for_sample(
@@ -689,14 +748,16 @@ def run_trade_research_export(
     level0_height = int(level0_df.height)
     level0_to_raw_row_indices = _build_level0_to_raw_row_indices(df, level0_df)
 
-    max_sample_index = dataset_length - 1 - horizon_steps
+    max_sample_index = pnl_max_sample_index(
+        dataset_length=dataset_length,
+        horizon_steps=horizon_steps,
+    )
     if max_sample_index < 0:
         raise RuntimeError('Dataset too short for eval horizon')
 
-    grid_sample_indices, sample_selection_note = _sample_indices_for_full_dataset(
+    grid_sample_indices, sample_selection_note = _sample_indices_for_display_grid(
         dataset_length=dataset_length,
         step_bars=step_bars,
-        horizon_steps=horizon_steps,
     )
     pnl_sample_indices = _sample_indices_for_pnl_backtest(
         max_sample_index=max_sample_index,
@@ -827,13 +888,14 @@ def run_trade_research_export(
 
     for sample_index in samples_to_infer:
         inference_result = inference_by_sample[sample_index]
-        bar_metadata = _bar_metadata_for_sample(
+        bar_metadata = _bar_metadata_for_export_sample(
             sample_index=sample_index,
             start_index=start_index,
             horizon_steps=horizon_steps,
             level0_to_raw=level0_to_raw_row_indices,
             raw_df=df,
             level0_height=level0_height,
+            pnl_max_sample_index=max_sample_index,
         )
         if sample_index in train_sample_index_by_inference_sample:
             train_sample_index = train_sample_index_by_inference_sample[sample_index]

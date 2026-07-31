@@ -11,14 +11,18 @@ from main.offline_inference.trade_research_npz_store import TradeResearchNpzStor
 from main.web_gui.trade_research_service import (
     OKX_ROUND_TRIP_TAKER_FEE_RATE,
     _next_cached_sample_index,
+    _pnl_max_sample_index,
     _pred_target_price,
-    _sample_indices_for_full_dataset,
+    _sample_indices_for_display_grid,
     _sample_indices_for_pnl_backtest,
     _segment_visible_by_start_trade_id,
     _trade_net_pnl_from_linear_return,
     backtest_metrics_response_prefix,
     horizon_steps_from_name,
     summarize_trade_pnls,
+)
+from main.web_gui.trade_research_dataset_common import (
+    is_trade_research_entry_point_segment,
 )
 
 logger = logging.getLogger(__name__)
@@ -331,11 +335,13 @@ def load_trade_research_response(
     pnl_stride = int(npz_data['pnl_stride'][0])
     eval_target_log2 = npz_data['eval_target_log2'].astype(np.float64)
 
-    max_sample_index = dataset_length - 1 - horizon_steps
-    grid_sample_indices, _grid_note = _sample_indices_for_full_dataset(
+    max_sample_index = _pnl_max_sample_index(
+        dataset_length=dataset_length,
+        horizon_steps=horizon_steps,
+    )
+    grid_sample_indices, _grid_note = _sample_indices_for_display_grid(
         dataset_length=dataset_length,
         step_bars=horizon_steps,
-        horizon_steps=horizon_steps,
     )
     mapped_grid_indices = [
         sample_index_value
@@ -354,8 +360,10 @@ def load_trade_research_response(
     pnl_grid_indices = [
         sample_index_value
         for sample_index_value in grid_sample_indices
-        if npz_store.has_sample(sample_index_value)
+        if sample_index_value <= max_sample_index
+        and npz_store.has_sample(sample_index_value)
     ]
+    level0_height = int(npz_data['level0_rows'][0])
 
     entry_start_trade_id = npz_data['entry_start_trade_id'].astype(np.int64)
     exit_start_trade_id = npz_data['exit_start_trade_id'].astype(np.int64)
@@ -553,9 +561,45 @@ def load_trade_research_response(
                 pred_eval_log2=pred_log2,
             )
 
+        segment_is_entry_point = is_trade_research_entry_point_segment(
+            sample_index=sample_index_value,
+            pnl_max_sample_index=max_sample_index,
+            start_index=start_index,
+            horizon_steps=horizon_steps,
+            level0_height=level0_height,
+        )
+        if segment_is_entry_point:
+            segments.append(
+                {
+                    'sample_index': int(sample_index_value),
+                    'segment_kind': 'entry_point',
+                    'entry_bar_index': int(entry_bar_index),
+                    'exit_bar_index': int(exit_bar_index),
+                    'entry_start_trade_id': entry_start,
+                    'exit_start_trade_id': entry_start,
+                    'entry_timestamp_ms': int(entry_timestamp_ms[row_index]),
+                    'exit_timestamp_ms': int(entry_timestamp_ms[row_index]),
+                    'entry_open': float(entry_open[row_index]),
+                    'entry_close': float(entry_close[row_index]),
+                    'exit_close': float(entry_close[row_index]),
+                    'pred_start_price': segment_pred_start_price,
+                    'pred_target_price': segment_pred_target_close,
+                    'pred_target_open': _pred_target_price(
+                        entry_price=float(entry_open[row_index]),
+                        pred_eval_log2=pred_log2,
+                    ),
+                    'pred_target_close': segment_pred_target_close,
+                    'pred_eval_log2': pred_log2,
+                    'policy_action': action,
+                    'action': recommended_action,
+                },
+            )
+            continue
+
         segments.append(
             {
                 'sample_index': int(sample_index_value),
+                'segment_kind': 'full_segment',
                 'entry_bar_index': int(entry_bar_index),
                 'exit_bar_index': int(exit_bar_index),
                 'entry_start_trade_id': entry_start,

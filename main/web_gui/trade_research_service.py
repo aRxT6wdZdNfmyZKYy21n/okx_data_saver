@@ -25,8 +25,11 @@ from main.web_gui.trade_research_dataset_common import (
     inference_tail_grid_sample_indices,
     inference_tail_pnl_sample_indices,
     inference_tail_selection_note,
+    is_trade_research_entry_point_segment,
+    pnl_max_sample_index,
     real_last_start_trade_id,
     sample_exit_on_real_bars,
+    sample_indices_for_display_grid,
 )
 from main.web_gui.inference_service import (
     _build_dataset,
@@ -219,17 +222,33 @@ def _prediction_key_for_horizon(horizon_name: str) -> str:
     return f'target_close_return_signed_log2_{horizon_name}'
 
 
+def _pnl_max_sample_index(dataset_length: int, horizon_steps: int) -> int:
+    return pnl_max_sample_index(
+        dataset_length=dataset_length,
+        horizon_steps=horizon_steps,
+    )
+
+
+def _sample_indices_for_display_grid(
+    dataset_length: int,
+    step_bars: int,
+) -> tuple[list[int], str | None]:
+    return sample_indices_for_display_grid(
+        dataset_length=dataset_length,
+        step_bars=step_bars,
+    )
+
+
 def _sample_indices_for_full_dataset(
     dataset_length: int,
     step_bars: int,
     horizon_steps: int,
 ) -> tuple[list[int], str | None]:
-    max_sample_index = dataset_length - 1 - horizon_steps
-    if max_sample_index < 0:
-        return [], 'dataset too short for eval horizon'
-
-    sample_indices = list(range(0, max_sample_index + 1, step_bars))
-    return sample_indices, None
+    return sample_indices_for_pnl_grid(
+        dataset_length=dataset_length,
+        step_bars=step_bars,
+        horizon_steps=horizon_steps,
+    )
 
 
 def _segment_visible_by_start_trade_id(
@@ -837,17 +856,19 @@ def run_trade_research(
     level0_height = int(level0_df.height)
     level0_to_raw_row_indices = _build_level0_to_raw_row_indices(df, level0_df)
 
-    max_sample_index = dataset_length - 1 - horizon_steps
+    max_sample_index = _pnl_max_sample_index(
+        dataset_length=dataset_length,
+        horizon_steps=horizon_steps,
+    )
     if max_sample_index < 0:
         raise HTTPException(
             status_code=422,
             detail='Trade research: dataset too short for one full horizon segment',
         )
 
-    sample_indices, sample_selection_note = _sample_indices_for_full_dataset(
+    sample_indices, sample_selection_note = _sample_indices_for_display_grid(
         dataset_length=dataset_length,
         step_bars=step_bars,
-        horizon_steps=horizon_steps,
     )
 
     pnl_stride = settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE
@@ -1053,13 +1074,8 @@ def run_trade_research(
 
             entry_bar_index = start_index + sample_index
             exit_bar_index = entry_bar_index + horizon_steps
-            if exit_bar_index >= level0_height:
-                continue
-
             entry_raw_index = level0_to_raw_row_indices[entry_bar_index]
-            exit_raw_index = level0_to_raw_row_indices[exit_bar_index]
             entry_meta = _raw_bar_metadata(df, entry_raw_index)
-            exit_meta = _raw_bar_metadata(df, exit_raw_index)
             entry_start_trade_id = int(entry_meta['start_trade_id'])
 
             segment_visible = _segment_visible_by_start_trade_id(
@@ -1072,7 +1088,6 @@ def run_trade_research(
 
             entry_close = float(entry_meta['close_price'])
             entry_open = float(entry_meta['open_price'])
-            exit_close = float(exit_meta['close_price'])
 
             pred_eval_log2 = 0.0
             if 'predictions' in inference_result:
@@ -1080,9 +1095,54 @@ def run_trade_research(
                 if prediction_key in predictions:
                     pred_eval_log2 = float(predictions[prediction_key])
 
+            pred_target_close = _pred_target_price(
+                entry_price=entry_close,
+                pred_eval_log2=pred_eval_log2,
+            )
+            pred_target_open = _pred_target_price(
+                entry_price=entry_open,
+                pred_eval_log2=pred_eval_log2,
+            )
+
+            if is_trade_research_entry_point_segment(
+                sample_index=sample_index,
+                pnl_max_sample_index=max_sample_index,
+                start_index=start_index,
+                horizon_steps=horizon_steps,
+                level0_height=level0_height,
+            ):
+                segments.append(
+                    {
+                        'sample_index': int(sample_index),
+                        'segment_kind': 'entry_point',
+                        'entry_bar_index': int(entry_bar_index),
+                        'exit_bar_index': int(exit_bar_index),
+                        'entry_start_trade_id': entry_start_trade_id,
+                        'exit_start_trade_id': entry_start_trade_id,
+                        'entry_timestamp_ms': int(entry_meta['start_timestamp_ms']),
+                        'exit_timestamp_ms': int(entry_meta['start_timestamp_ms']),
+                        'entry_open': entry_open,
+                        'entry_close': entry_close,
+                        'exit_close': entry_close,
+                        'pred_start_price': entry_close,
+                        'pred_target_price': pred_target_close,
+                        'pred_target_open': pred_target_open,
+                        'pred_target_close': pred_target_close,
+                        'pred_eval_log2': pred_eval_log2,
+                        'policy_action': action,
+                        'action': recommended_action,
+                    },
+                )
+                continue
+
+            exit_raw_index = level0_to_raw_row_indices[exit_bar_index]
+            exit_meta = _raw_bar_metadata(df, exit_raw_index)
+            exit_close = float(exit_meta['close_price'])
+
             segments.append(
                 {
                     'sample_index': int(sample_index),
+                    'segment_kind': 'full_segment',
                     'entry_bar_index': int(entry_bar_index),
                     'exit_bar_index': int(exit_bar_index),
                     'entry_start_trade_id': entry_start_trade_id,
@@ -1092,14 +1152,10 @@ def run_trade_research(
                     'entry_open': entry_open,
                     'entry_close': entry_close,
                     'exit_close': exit_close,
-                    'pred_target_open': _pred_target_price(
-                        entry_price=entry_open,
-                        pred_eval_log2=pred_eval_log2,
-                    ),
-                    'pred_target_close': _pred_target_price(
-                        entry_price=entry_close,
-                        pred_eval_log2=pred_eval_log2,
-                    ),
+                    'pred_start_price': entry_close,
+                    'pred_target_price': pred_target_close,
+                    'pred_target_open': pred_target_open,
+                    'pred_target_close': pred_target_close,
                     'pred_eval_log2': pred_eval_log2,
                     'policy_action': action,
                     'action': recommended_action,
