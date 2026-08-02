@@ -83,6 +83,8 @@ Sync callers (spawn workers, legacy services) use `fetch_last_bars_sync` / `get_
 
 Both `trading_bot` and `okx_data_saver` track **`trading_bot_dataset` branch `rc7`** (`.gitmodules` → `branch = rc7`).
 
+**Current geometry:** `rc7` ≥ **`c290cb7`** — split level0 features/targets (doc **061o** in sibling `trading_bot` repo: `docs/auto_ml/061o_split_level0_features_targets.md`).
+
 ```bash
 # After pulling trading_bot_dataset changes on rc7:
 cd okx_data_saver
