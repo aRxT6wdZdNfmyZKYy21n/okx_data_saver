@@ -56,6 +56,7 @@ from main.web_gui.trade_research_service import (
     npz_stack_matches_fingerprint,
 )
 from settings import settings
+from trading_bot_dataset.src.utils import _horizon_suffix_from_col
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +94,9 @@ def _target_log2_from_train_sample(
     target_cols = list(train_dataset.target_cols)
     targets_by_horizon: dict[str, float] = {}
     for target_col in target_cols:
-        prefix = 'target_close_return_signed_log2_'
-        if not str(target_col).startswith(prefix):
+        horizon_name = _horizon_suffix_from_col(str(target_col))
+        if horizon_name is None:
             continue
-        horizon_name = str(target_col)[len(prefix):]
         col_index = target_cols.index(target_col)
         targets_by_horizon[horizon_name] = float(target_values[col_index])
     for horizon_name in horizon_names:
