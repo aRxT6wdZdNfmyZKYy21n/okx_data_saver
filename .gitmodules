@@ -4,3 +4,4 @@
 [submodule "trading_bot_dataset"]
 	path = trading_bot_dataset
 	url = ssh://git@77.51.224.36:23/server/git/Repositories/trading_bot_dataset.git
+	branch = rc7

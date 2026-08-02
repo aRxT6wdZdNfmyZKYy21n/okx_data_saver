@@ -49,7 +49,7 @@ python3 -m main.trade_research_export --symbol BTC_USDT -v
 
 See `.env.example`:
 
-- `TRADING_BOT_ROOT` — for NPZ loader policy/gate post-processing (one-way import, no cycle)
+- `TRADING_BOT_ROOT` — path to `trading_bot` repo (`/mnt/hdd2/Repositories/trading_bot`). Required when dataset targets include `*_range_min` / `*_range_max`: submodule imports `src.tools.horizon_range_target_common` from that repo. Set in `.env`; `inference_service` and `trade_research_export` call `ensure_trading_bot_on_path()` before building `HybridTradeDataset`.
 - `INFERENCE_DAEMON_*` — symbol, interval (default 60s), bars limit (default 10M)
 - `WEB_GUI_INFERENCE_API_BASE_URL` — still used by daemon/export to call `inference_api`
 - `WEB_GUI_TRADE_JOURNAL_PATH` — micro-live journal JSON (default `data/trade_journal.json`; set per web_gui instance)
@@ -78,6 +78,23 @@ Raw x1 Polars DataFrames (not HybridTradeDataset tensors) are cached in Redis wi
 Waiters poll the cache until hit or acquire the lock. Toggle with `WEB_GUI_BARS_REDIS_CACHE_ENABLED` (default `true`). Default TTL is **60 seconds** (`BARS_REDIS_CACHE_TTL_SEC`), aligned with `INFERENCE_DAEMON_INTERVAL_SEC`. Redis `maxmemory` should be sized for ~10M-bar frames (24 GB is sufficient).
 
 Sync callers (spawn workers, legacy services) use `fetch_last_bars_sync` / `get_bars_for_api_sync`, which run the async Redis path via `asyncio.run`.
+
+## `trading_bot_dataset` submodule (rc7)
+
+Both `trading_bot` and `okx_data_saver` track **`trading_bot_dataset` branch `rc7`** (`.gitmodules` → `branch = rc7`).
+
+```bash
+# After pulling trading_bot_dataset changes on rc7:
+cd okx_data_saver
+git submodule update --init --remote trading_bot_dataset
+# or: cd trading_bot_dataset && git checkout rc7 && git pull
+
+cd ../trading_bot   # optional: keep parent pointer in sync
+git submodule update --init --remote trading_bot_dataset
+git add trading_bot_dataset && git commit -m "Bump trading_bot_dataset rc7"
+```
+
+Keep **`TRADING_BOT_ROOT`** pointed at the same machine’s `trading_bot` checkout (not an stale copy under `/home/debian/...`).
 
 ## Deploy notes
 

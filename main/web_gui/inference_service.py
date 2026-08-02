@@ -19,6 +19,12 @@ from trading_bot_dataset.src.volume_windows import extract_volume_windows_config
 logger = logging.getLogger(__name__)
 
 
+def _ensure_trading_bot_root_on_path() -> None:
+    from main.offline_inference.trading_bot_imports import ensure_trading_bot_on_path
+
+    ensure_trading_bot_on_path()
+
+
 def _volume_windows_config_from_metadata(metadata: dict) -> dict[str, object] | None:
     dataset_cfg = metadata['dataset_config']
     dataset_cfg_omega = OmegaConf.create(dataset_cfg)
@@ -39,6 +45,7 @@ def _build_dataset(
     df: polars.DataFrame,
     metadata: dict,
 ) -> HybridTradeDatasetInference:
+    _ensure_trading_bot_root_on_path()
     sequence_length = int(metadata['sequence_length'])
     dataset_cfg = metadata['dataset_config']
     model_cfg = metadata['model_config']
@@ -69,6 +76,7 @@ def _build_train_dataset(
     df: polars.DataFrame,
     metadata: dict,
 ) -> HybridTradeDataset:
+    _ensure_trading_bot_root_on_path()
     sequence_length = int(metadata['sequence_length'])
     dataset_cfg = metadata['dataset_config']
     model_cfg = metadata['model_config']
