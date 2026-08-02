@@ -25,3 +25,4 @@ TA-Lib
 fastapi
 uvicorn[standard]
 websockets
+tqdm

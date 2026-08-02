@@ -663,6 +663,10 @@ def _backfill_train_split_fields(
 def run_trade_research_export(
     symbol_id: str,
 ) -> None:
+    from main.offline_inference.trading_bot_imports import ensure_trading_bot_on_path
+
+    ensure_trading_bot_on_path()
+
     research_limit = settings.WEB_GUI_TRADE_RESEARCH_LIMIT
     pnl_stride = settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE
 

@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     INFERENCE_DAEMON_BARS_LIMIT: int = 10_000_000
 
     # Path to trading_bot repo for trade research NPZ post-processing (policy/gate)
-    TRADING_BOT_ROOT: str = '/home/debian/Repositories/trading_bot'
+    TRADING_BOT_ROOT: str = '/mnt/hdd2/Repositories/trading_bot'
 
     # Polars thread pool (leave headroom on 16-core host)
     POLARS_MAX_THREADS: int = 14
