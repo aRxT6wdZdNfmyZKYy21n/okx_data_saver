@@ -17,8 +17,7 @@ from main.web_gui.exit_transformer_service import (
 )
 from main.web_gui.inference_service import (
     fetch_inference_metadata,
-    prepare_x_seq_2d_from_df,
-    run_remote_inference_from_df,
+    run_remote_inference_and_x_seq_from_df,
 )
 from main.web_gui.trade_journal_service import (
     apply_mark_price_to_open_position,
@@ -150,8 +149,10 @@ def run_inference_cycle(symbol_id: str) -> None:
             f'(требуется минимум {required_rows}, получено {df.height})',
         )
 
-    inference_result = run_remote_inference_from_df(symbol_id=symbol_id, df=df)
-    x_seq = prepare_x_seq_2d_from_df(df)
+    inference_result, x_seq = run_remote_inference_and_x_seq_from_df(
+        symbol_id=symbol_id,
+        df=df,
+    )
     bar_metadata = _latest_bar_metadata(df)
 
     exit_policy_result: dict[str, object] | None = None

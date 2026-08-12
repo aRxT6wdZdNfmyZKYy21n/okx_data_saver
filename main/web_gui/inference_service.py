@@ -199,8 +199,18 @@ def _prepare_payload_dict_from_train_sample(
     }
 
 
-def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
-    metadata = fetch_inference_metadata()
+def x_seq_2d_from_payload_dict(payload_dict: dict) -> dict[str, object]:
+    x_seq_raw = payload_dict['x_seq']
+    if not isinstance(x_seq_raw, dict):
+        raise RuntimeError('Prepared payload x_seq must be a dict')
+    x_seq_2d: dict[str, object] = {}
+    for scale_name, scale_tensor in x_seq_raw.items():
+        tensor_2d = scale_tensor.squeeze(0).clone()
+        x_seq_2d[str(scale_name)] = tensor_2d
+    return x_seq_2d
+
+
+def _prepare_payload_dict_from_df(df: polars.DataFrame, metadata: dict) -> dict:
     real_bar_count = int(df.height)
     logger.info(
         'Dataset preparation start: rows=%d sequence_length=%d',
@@ -240,16 +250,20 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     )
 
 
+def prepare_inference_payload_from_df(df: polars.DataFrame) -> dict:
+    metadata = fetch_inference_metadata()
+    required_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
+    if df.height < required_rows:
+        raise RuntimeError(
+            'Инференс невозможен при таком количестве свечей x1 '
+            f'(требуется минимум {required_rows}, получено {df.height})',
+        )
+    return _prepare_payload_dict_from_df(df, metadata)
+
+
 def prepare_x_seq_2d_from_df(df: polars.DataFrame) -> dict[str, object]:
-    payload_dict = _prepare_payload_dict_from_df(df)
-    x_seq_raw = payload_dict['x_seq']
-    if not isinstance(x_seq_raw, dict):
-        raise RuntimeError('Prepared payload x_seq must be a dict')
-    x_seq_2d: dict[str, object] = {}
-    for scale_name, scale_tensor in x_seq_raw.items():
-        tensor_2d = scale_tensor.squeeze(0).clone()
-        x_seq_2d[str(scale_name)] = tensor_2d
-    return x_seq_2d
+    payload_dict = prepare_inference_payload_from_df(df)
+    return x_seq_2d_from_payload_dict(payload_dict)
 
 
 def _encode_payload(payload_dict: dict) -> bytes:
@@ -280,22 +294,13 @@ def run_remote_inference(symbol_id: str, limit: int) -> dict[str, object]:
         raise HTTPException(status_code=500, detail='Inference request failed') from exception
 
 
-def run_remote_inference_from_df(
+def run_remote_inference_from_payload_dict(
     symbol_id: str,
-    df: polars.DataFrame,
+    payload_dict: dict,
 ) -> dict[str, object]:
     if not settings.WEB_GUI_INFERENCE_ENABLED:
         raise RuntimeError('Inference is disabled')
 
-    metadata = fetch_inference_metadata()
-    required_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
-    if df.height < required_rows:
-        raise RuntimeError(
-            'Инференс невозможен при таком количестве свечей x1 '
-            f'(требуется минимум {required_rows}, получено {df.height})',
-        )
-
-    payload_dict = _prepare_payload_dict_from_df(df)
     encoded_payload = _encode_payload(payload_dict)
 
     logger.info('Payload size: %d', len(encoded_payload))
@@ -312,3 +317,27 @@ def run_remote_inference_from_df(
     if response.status_code >= 400:
         raise RuntimeError(response.text)
     return response.json()
+
+
+def run_remote_inference_from_df(
+    symbol_id: str,
+    df: polars.DataFrame,
+) -> dict[str, object]:
+    payload_dict = prepare_inference_payload_from_df(df)
+    return run_remote_inference_from_payload_dict(
+        symbol_id=symbol_id,
+        payload_dict=payload_dict,
+    )
+
+
+def run_remote_inference_and_x_seq_from_df(
+    symbol_id: str,
+    df: polars.DataFrame,
+) -> tuple[dict[str, object], dict[str, object]]:
+    payload_dict = prepare_inference_payload_from_df(df)
+    inference_result = run_remote_inference_from_payload_dict(
+        symbol_id=symbol_id,
+        payload_dict=payload_dict,
+    )
+    x_seq = x_seq_2d_from_payload_dict(payload_dict)
+    return inference_result, x_seq
