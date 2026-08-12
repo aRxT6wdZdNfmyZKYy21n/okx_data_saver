@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
 
     # Web GUI (okx_data_set_record_data_2 viewer)
-    WEB_GUI_RECORDS_LIMIT: int = 1024
+    WEB_GUI_RECORDS_LIMIT: int = 32768
     WEB_GUI_TRADE_RESEARCH_LIMIT: int = 10_000_000
     # Sample stride for sequential hybrid backtest PnL (1 = exact, 128 ≈ fast)
     WEB_GUI_TRADE_RESEARCH_PNL_STRIDE: int = 128

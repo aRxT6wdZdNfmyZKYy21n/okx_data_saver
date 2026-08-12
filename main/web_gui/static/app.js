@@ -130,7 +130,7 @@
     },
   };
 
-  let config = { defaultLimit: 1024, defaultScale: 'x32', refreshIntervalSec: 30 };
+  let config = { defaultLimit: 32768, defaultScale: 'x32', refreshIntervalSec: 30 };
   let chart = null;
   let candleSeries = null;
   let barsData = [];
