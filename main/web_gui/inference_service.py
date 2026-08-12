@@ -31,6 +31,52 @@ def _volume_windows_config_from_metadata(metadata: dict) -> dict[str, object] | 
     return extract_volume_windows_config(dataset_cfg_omega)
 
 
+def _hybrid_dataset_kwargs_from_metadata(metadata: dict) -> dict[str, object]:
+    sequence_length = int(metadata['sequence_length'])
+    dataset_cfg = metadata['dataset_config']
+    model_cfg = metadata['model_config']
+    model_cfg_omega = OmegaConf.create(
+        {
+            'params': {
+                'scale_features': model_cfg['scale_features'],
+            },
+        },
+    )
+    return {
+        'sequence_length': sequence_length,
+        'raw_columns': list(dataset_cfg['raw_cols']),
+        'static_columns': list(dataset_cfg['static_cols']),
+        'target_cols': list(dataset_cfg['target_cols']),
+        'aggregation_levels': list(dataset_cfg['aggregation_levels']),
+        'use_indicators': bool(dataset_cfg['use_indicators']),
+        'indicator_cols': list(dataset_cfg['indicator_cols']),
+        'model_config': model_cfg_omega,
+        'volume_windows_config': _volume_windows_config_from_metadata(metadata),
+        'range_hold_cap_multiplier': (
+            int(dataset_cfg['range_hold_cap_multiplier'])
+            if 'range_hold_cap_multiplier' in dataset_cfg
+            and dataset_cfg['range_hold_cap_multiplier'] is not None
+            else None
+        ),
+        'coarse_phase_mode': (
+            str(dataset_cfg['coarse_phase_mode'])
+            if 'coarse_phase_mode' in dataset_cfg
+            else 'fixed'
+        ),
+        'coarse_phase_offset': (
+            int(dataset_cfg['coarse_phase_offset'])
+            if 'coarse_phase_offset' in dataset_cfg
+            else 0
+        ),
+        'coarse_phase_offset_max': (
+            int(dataset_cfg['coarse_phase_offset_max'])
+            if 'coarse_phase_offset_max' in dataset_cfg
+            and dataset_cfg['coarse_phase_offset_max'] is not None
+            else None
+        ),
+    }
+
+
 def fetch_inference_metadata() -> dict:
     response = httpx.get(
         f'{settings.WEB_GUI_INFERENCE_API_BASE_URL}/metadata',
@@ -46,29 +92,10 @@ def _build_dataset(
     metadata: dict,
 ) -> HybridTradeDatasetInference:
     _ensure_trading_bot_root_on_path()
-    sequence_length = int(metadata['sequence_length'])
-    dataset_cfg = metadata['dataset_config']
-    model_cfg = metadata['model_config']
-
-    model_cfg_omega = OmegaConf.create(
-        {
-            'params': {
-                'scale_features': model_cfg['scale_features'],
-            },
-        },
-    )
-
+    dataset_kwargs = _hybrid_dataset_kwargs_from_metadata(metadata)
     return HybridTradeDatasetInference(
         dataframe=df,
-        sequence_length=sequence_length,
-        raw_columns=list(dataset_cfg['raw_cols']),
-        static_columns=list(dataset_cfg['static_cols']),
-        target_cols=list(dataset_cfg['target_cols']),
-        aggregation_levels=list(dataset_cfg['aggregation_levels']),
-        use_indicators=bool(dataset_cfg['use_indicators']),
-        indicator_cols=list(dataset_cfg['indicator_cols']),
-        model_config=model_cfg_omega,
-        volume_windows_config=_volume_windows_config_from_metadata(metadata),
+        **dataset_kwargs,
     )
 
 
@@ -77,28 +104,11 @@ def _build_train_dataset(
     metadata: dict,
 ) -> HybridTradeDataset:
     _ensure_trading_bot_root_on_path()
-    sequence_length = int(metadata['sequence_length'])
-    dataset_cfg = metadata['dataset_config']
-    model_cfg = metadata['model_config']
-    model_cfg_omega = OmegaConf.create(
-        {
-            'params': {
-                'scale_features': model_cfg['scale_features'],
-            },
-        },
-    )
+    dataset_kwargs = _hybrid_dataset_kwargs_from_metadata(metadata)
     return HybridTradeDataset(
         dataframe=df,
-        sequence_length=sequence_length,
-        raw_columns=list(dataset_cfg['raw_cols']),
-        static_columns=list(dataset_cfg['static_cols']),
-        target_cols=list(dataset_cfg['target_cols']),
-        aggregation_levels=list(dataset_cfg['aggregation_levels']),
-        use_indicators=bool(dataset_cfg['use_indicators']),
-        indicator_cols=list(dataset_cfg['indicator_cols']),
-        model_config=model_cfg_omega,
         inference_mode=False,
-        volume_windows_config=_volume_windows_config_from_metadata(metadata),
+        **dataset_kwargs,
     )
 
 
@@ -189,46 +199,6 @@ def _prepare_payload_dict_from_train_sample(
     }
 
 
-def _prepare_train_aligned_payload_dict(
-    df: polars.DataFrame,
-    metadata: dict,
-    inference_dataset: HybridTradeDatasetInference,
-    sample_index: int,
-) -> dict[str, object]:
-    train_dataset, _train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
-        df=df,
-        metadata=metadata,
-    )
-    start_index = int(inference_dataset.dataset.start_index)
-    level0_df = inference_dataset.dataset.aggregated_data[0]
-    inference_level0_to_raw = _build_level0_to_raw_row_indices(df, level0_df)
-    train_sample_index = _train_sample_index_for_inference_sample(
-        sample_index=sample_index,
-        start_index=start_index,
-        inference_level0_to_raw=inference_level0_to_raw,
-        raw_to_train_level0_row=raw_to_train_level0_row,
-    )
-    if train_sample_index is not None:
-        if train_sample_index >= 0 and train_sample_index < len(train_dataset):
-            logger.info(
-                'Train-mode payload: inference sample %d -> train sample %d',
-                sample_index,
-                train_sample_index,
-            )
-            return _prepare_payload_dict_from_train_sample(
-                train_dataset=train_dataset,
-                train_sample_index=train_sample_index,
-            )
-    logger.warning(
-        'No train-mode alignment for inference sample %d; using inference-mode tensors',
-        sample_index,
-    )
-    return _prepare_payload_dict_from_sample(
-        dataset=inference_dataset,
-        sample_index=sample_index,
-    )
-
-
 def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
     metadata = fetch_inference_metadata()
     real_bar_count = int(df.height)
@@ -264,10 +234,8 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame) -> dict:
         real_bar_count,
     )
 
-    return _prepare_train_aligned_payload_dict(
-        df=df,
-        metadata=metadata,
-        inference_dataset=inference_dataset,
+    return _prepare_payload_dict_from_sample(
+        dataset=inference_dataset,
         sample_index=last_index,
     )
 
