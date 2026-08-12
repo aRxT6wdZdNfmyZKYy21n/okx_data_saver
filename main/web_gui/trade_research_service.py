@@ -82,67 +82,33 @@ def inference_stack_fingerprint(
     if symbol_id not in checkpoint_path_by_symbol:
         raise RuntimeError(f'Metadata missing checkpoint for {symbol_id!r}')
 
+    trade_research_stack_by_symbol = metadata['trade_research_stack_by_symbol']
+    if symbol_id not in trade_research_stack_by_symbol:
+        raise RuntimeError(
+            f'Metadata missing trade_research_stack for {symbol_id!r}',
+        )
+    stack_entry = trade_research_stack_by_symbol[symbol_id]
+    if not isinstance(stack_entry, dict):
+        raise RuntimeError(
+            f'Invalid trade_research_stack metadata for {symbol_id!r}',
+        )
+    for key in ('run_label', 'eval_horizon', 'policy_path'):
+        if key not in stack_entry:
+            raise RuntimeError(
+                f'Metadata trade_research_stack missing {key!r} for {symbol_id!r}',
+            )
+
     entry_hint_mode = 'hybrid'
     if 'entry_hint_mode_by_symbol' in metadata:
         entry_hint_mode_by_symbol = metadata['entry_hint_mode_by_symbol']
         if symbol_id in entry_hint_mode_by_symbol:
             entry_hint_mode = str(entry_hint_mode_by_symbol[symbol_id])
 
-    policy_by_symbol = metadata['policy_by_symbol']
-    if symbol_id in policy_by_symbol:
-        policy_entry = policy_by_symbol[symbol_id]
-        if not isinstance(policy_entry, dict):
-            raise RuntimeError(f'Invalid policy metadata for {symbol_id!r}')
-
-        if 'eval_horizon' not in policy_entry:
-            raise RuntimeError(f'Metadata policy missing eval_horizon for {symbol_id!r}')
-        if 'run_label' not in policy_entry:
-            raise RuntimeError(f'Metadata policy missing run_label for {symbol_id!r}')
-        if 'policy_path' not in policy_entry:
-            raise RuntimeError(f'Metadata policy missing policy_path for {symbol_id!r}')
-
-        return {
-            'run_label': str(policy_entry['run_label']),
-            'checkpoint_path': str(checkpoint_path_by_symbol[symbol_id]),
-            'eval_horizon': str(policy_entry['eval_horizon']),
-            'policy_path': str(policy_entry['policy_path']),
-            'entry_hint_mode': entry_hint_mode,
-        }
-
-    eval_horizon: str | None = None
-    if 'entry_eval_horizon_by_symbol' in metadata:
-        entry_eval_horizon_by_symbol = metadata['entry_eval_horizon_by_symbol']
-        if symbol_id in entry_eval_horizon_by_symbol:
-            eval_horizon = str(entry_eval_horizon_by_symbol[symbol_id])
-    if eval_horizon is None:
-        if 'exit_stack_by_symbol' not in metadata:
-            raise RuntimeError(
-                f'Metadata missing policy and exit_stack for {symbol_id!r}',
-            )
-        exit_stack_by_symbol = metadata['exit_stack_by_symbol']
-        if symbol_id not in exit_stack_by_symbol:
-            raise RuntimeError(
-                f'Metadata missing policy and exit_stack for {symbol_id!r}',
-            )
-        exit_stack_entry = exit_stack_by_symbol[symbol_id]
-        if not isinstance(exit_stack_entry, dict):
-            raise RuntimeError(f'Invalid exit_stack metadata for {symbol_id!r}')
-        if 'eval_horizon' not in exit_stack_entry:
-            raise RuntimeError(
-                f'Metadata exit_stack missing eval_horizon for {symbol_id!r}',
-            )
-        eval_horizon = str(exit_stack_entry['eval_horizon'])
-
-    if 'profile' not in metadata:
-        raise RuntimeError(
-            f'Metadata missing policy for {symbol_id!r} and no profile for run_label',
-        )
-
     return {
-        'run_label': str(metadata['profile']),
+        'run_label': str(stack_entry['run_label']),
         'checkpoint_path': str(checkpoint_path_by_symbol[symbol_id]),
-        'eval_horizon': eval_horizon,
-        'policy_path': '',
+        'eval_horizon': str(stack_entry['eval_horizon']),
+        'policy_path': str(stack_entry['policy_path']),
         'entry_hint_mode': entry_hint_mode,
     }
 
