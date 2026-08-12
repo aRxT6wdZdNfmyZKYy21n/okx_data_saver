@@ -53,7 +53,19 @@ See `.env.example`:
 - `INFERENCE_DAEMON_*` — symbol, interval (default 60s), bars limit (default 10M)
 - `WEB_GUI_INFERENCE_API_BASE_URL` — still used by daemon/export to call `inference_api`
 - `WEB_GUI_TRADE_JOURNAL_PATH` — micro-live journal JSON (default `data/trade_journal.json`; set per web_gui instance)
-- `WEB_GUI_TRADE_JOURNAL_DEFAULT_EVAL_HORIZON` — journal UI default horizon (`x2048`, `x1536`, …)
+- `WEB_GUI_TRADE_JOURNAL_DEFAULT_EVAL_HORIZON` — journal UI default horizon (`x32` for L147 sign_only deploy; legacy fixed-H runs may use `x1536`, …)
+
+## Micro live — sign_only renew (L147 x32)
+
+When `inference_api` exposes `exit_stack_by_symbol.BTC_USDT.mode=rolling_h_renew_sign_only`:
+
+- **Entry** uses deploy eval horizon **`x32`** (from exit stack / policy), not the journal dropdown.
+- **Snapshot** stores `entry_predictions` keyed by `target_close_return_signed_log2_x32`.
+- **Progress** is per **32-bar segment** (not fixed `x1536`): segment bar count, renew count, bars until next checkpoint.
+- **Exit policy** card shows `sign_valid_renewed` / `sign_flip_at_checkpoint` from `POST /api/exit-policy` (exit stack stub; GBM disabled).
+
+Discard and re-open any journal position opened before this change (old rows used wrong `eval_horizon` → missing pred snapshot).
+
 - `POLARS_MAX_THREADS` — Polars thread pool cap (default 14)
 - `WEB_GUI_BARS_REDIS_CACHE_ENABLED`, `BARS_REDIS_*` — x1 bars Redis cache and refresh lock
 

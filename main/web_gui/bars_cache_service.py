@@ -158,10 +158,27 @@ async def fetch_last_bars_with_redis_cache(
             limit,
             offset,
         )
+        db_load_started_at = time.monotonic()
         dataframe = await load_from_db()
+        db_load_duration_ms = int((time.monotonic() - db_load_started_at) * 1000.0)
         if dataframe is None:
+            logger.info(
+                'Redis cache miss DB load done: symbol=%s limit=%d offset=%d rows=0 duration_ms=%d',
+                symbol_id.name,
+                limit,
+                offset,
+                db_load_duration_ms,
+            )
             return None
 
+        logger.info(
+            'Redis cache miss DB load done: symbol=%s limit=%d offset=%d rows=%d duration_ms=%d',
+            symbol_id.name,
+            limit,
+            offset,
+            int(dataframe.height),
+            db_load_duration_ms,
+        )
         await _save_cached_bars(
             symbol_id=symbol_id,
             limit=limit,

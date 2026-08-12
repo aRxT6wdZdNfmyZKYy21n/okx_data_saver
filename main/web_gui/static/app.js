@@ -258,7 +258,7 @@
   const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x1536', 'x2048', 'x4096', 'x8192', 'x16384', 'x32768', 'x65536', 'x131072', 'x262144'];
   const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
   const CVD_WINDOW_DEFAULT = 'x512';
-  const JOURNAL_EVAL_HORIZON_OPTIONS = ['x512', 'x1024', 'x1536', 'x2048', 'x3072', 'x4096'];
+  const JOURNAL_EVAL_HORIZON_OPTIONS = ['x32', 'x64', 'x512', 'x1024', 'x1536', 'x2048', 'x3072', 'x4096'];
   let tradeResearchEvalHorizon = 'x32';
   let tradeResearchScale = 'x32';
   let tradeResearchAvailableHorizons = [];
@@ -363,6 +363,44 @@
     return journalDefaults.eval_horizon;
   }
 
+  function resolveJournalEvalHorizon(symbol) {
+    const exitStack = getExitStackForSymbol(symbol);
+    if (
+      exitStack
+      && exitStack.mode === 'rolling_h_renew_sign_only'
+      && exitStack.eval_horizon
+    ) {
+      return String(exitStack.eval_horizon);
+    }
+    if (lastPolicy && lastPolicy.eval_horizon) {
+      return String(lastPolicy.eval_horizon);
+    }
+    if (lastEntryHint && lastEntryHint.eval_horizon) {
+      return String(lastEntryHint.eval_horizon);
+    }
+    return getJournalEvalHorizon();
+  }
+
+  function resolveDeployEvalHorizon(openPos, symbol) {
+    if (openPos && openPos.exit_stack_eval_horizon) {
+      return String(openPos.exit_stack_eval_horizon);
+    }
+    const exitStack = getExitStackForSymbol(symbol);
+    if (exitStack && exitStack.eval_horizon) {
+      return String(exitStack.eval_horizon);
+    }
+    if (openPos && openPos.entry_policy && openPos.entry_policy.eval_horizon) {
+      return String(openPos.entry_policy.eval_horizon);
+    }
+    if (lastPolicy && lastPolicy.eval_horizon) {
+      return String(lastPolicy.eval_horizon);
+    }
+    if (openPos && openPos.eval_horizon) {
+      return String(openPos.eval_horizon);
+    }
+    return resolveJournalEvalHorizon(symbol);
+  }
+
   function setJournalEvalHorizon(value) {
     if (!value) return;
     if (!JOURNAL_EVAL_HORIZON_OPTIONS.includes(value)) return;
@@ -401,9 +439,11 @@
   }
 
   function syncJournalSettingsDisabled(hasOpen) {
+    const symbol = symbolSelect.value;
+    const signOnlyRenew = exitStackUsesSignOnlyRenew(symbol);
     journalNotionalInput.disabled = hasOpen || journalActionPending !== null;
     journalFillPriceInput.disabled = journalActionPending !== null;
-    journalEvalHorizonSelect.disabled = hasOpen || journalActionPending !== null;
+    journalEvalHorizonSelect.disabled = hasOpen || journalActionPending !== null || signOnlyRenew;
     if (journalFillPriceLabel) {
       journalFillPriceLabel.textContent = hasOpen ? 'Цена выхода $' : 'Цена входа $';
     }
@@ -901,9 +941,9 @@
     return linearPct;
   }
 
-  function entryPredictionSnapshot(openPos) {
+  function entryPredictionSnapshot(openPos, symbol) {
     if (!openPos || !openPos.entry_predictions) return null;
-    const evalHorizon = openPos.eval_horizon || journalDefaults.eval_horizon;
+    const evalHorizon = resolveDeployEvalHorizon(openPos, symbol);
     const predictionKey = predictionKeyForHorizon(evalHorizon);
     const entryPredictions = openPos.entry_predictions;
     if (!(predictionKey in entryPredictions)) return null;
@@ -917,9 +957,9 @@
     };
   }
 
-  function currentPredictionSnapshot(openPos) {
+  function currentPredictionSnapshot(openPos, symbol) {
     if (!openPos || !lastPredictions) return null;
-    const evalHorizon = openPos.eval_horizon || journalDefaults.eval_horizon;
+    const evalHorizon = resolveDeployEvalHorizon(openPos, symbol);
     const predictionKey = predictionKeyForHorizon(evalHorizon);
     if (!(predictionKey in lastPredictions)) return null;
     const signedLog2 = Number(lastPredictions[predictionKey]);
@@ -931,8 +971,8 @@
     };
   }
 
-  function renderEntryPredictionMetrics(openPos, metrics) {
-    const entrySnap = entryPredictionSnapshot(openPos);
+  function renderEntryPredictionMetrics(openPos, metrics, symbol) {
+    const entrySnap = entryPredictionSnapshot(openPos, symbol);
     if (!entrySnap) {
       return `
         <div class="trade-journal-prediction-hint">
@@ -954,7 +994,7 @@
       ? Math.min(100, Math.max(0, capturePct))
       : 0;
 
-    const currentSnap = currentPredictionSnapshot(openPos);
+    const currentSnap = currentPredictionSnapshot(openPos, symbol);
     const currentPredLine = currentSnap
       ? `<span>Pred now (${currentSnap.evalHorizon}): <strong class="${pnlClass(currentSnap.expectedPct)}">${formatPct(currentSnap.expectedPct)}</strong></span>`
       : '';
@@ -1635,8 +1675,8 @@
       });
   }
 
-  function buildEntryJournalPayload(side) {
-    const evalHorizon = getJournalEvalHorizon();
+  function buildEntryJournalPayload(side, symbol) {
+    const evalHorizon = resolveJournalEvalHorizon(symbol);
     let entryPolicy = null;
     if (lastPolicy) {
       entryPolicy = {
@@ -1685,7 +1725,7 @@
       return {
         symbol_id: symbol,
         side: openPos.side,
-        eval_horizon: openPos.eval_horizon,
+        eval_horizon: resolveDeployEvalHorizon(openPos, symbol),
         bars_held: m.bars_elapsed,
         current_predictions: lastPredictions,
         exit_stack_mode: String(exitStack.mode),
@@ -1791,6 +1831,45 @@
         lastExitTransformer = null;
         return null;
       });
+  }
+
+  function renderSignOnlyRenewMetrics(openPos, m, symbol) {
+    const deployHorizon = resolveDeployEvalHorizon(openPos, symbol);
+    const intervalSteps = m.renew_interval_steps != null
+      ? Number(m.renew_interval_steps)
+      : Number(m.eval_horizon_steps);
+    const segmentBars = m.segment_bars_elapsed != null
+      ? Number(m.segment_bars_elapsed)
+      : Number(m.bars_elapsed);
+    const segmentsCompleted = m.segments_completed != null
+      ? Number(m.segments_completed)
+      : 0;
+    const barsUntilCheckpoint = m.bars_until_checkpoint != null
+      ? Number(m.bars_until_checkpoint)
+      : 0;
+    let renewState = 'between_renew_checkpoints';
+    if (lastExitPolicy && lastExitPolicy.exit_reason) {
+      renewState = String(lastExitPolicy.exit_reason);
+    } else if (m.bars_elapsed < (m.min_hold_steps != null ? Number(m.min_hold_steps) : intervalSteps)) {
+      renewState = 'before_min_hold';
+    }
+    const progressClass = m.at_renew_checkpoint ? 'at-target' : '';
+    const checkpointHint = m.at_renew_checkpoint
+      ? 'checkpoint — проверка знака pred'
+      : `до checkpoint: ${barsUntilCheckpoint} bar`;
+    return `
+        <div class="trade-journal-metrics trade-journal-sign-only-metrics">
+          <span>Exit: <strong>sign_only renew @ ${deployHorizon}</strong></span>
+          <span>Всего баров: <strong>${m.bars_elapsed}</strong></span>
+          <span>Сегмент: <strong>${segmentBars}</strong> / ${intervalSteps}</span>
+          <span>Продлений: <strong>${segmentsCompleted}</strong></span>
+          <span>${checkpointHint}</span>
+          <span>state: <strong>${renewState}</strong></span>
+        </div>
+        <div class="trade-journal-progress" title="${Number(m.progress_pct).toFixed(1)}% сегмента">
+          <div class="trade-journal-progress-bar ${progressClass}" style="width: ${Math.min(100, Number(m.progress_pct))}%"></div>
+        </div>
+    `;
   }
 
   function renderExitPolicyCard(exitPolicy) {
@@ -1970,12 +2049,16 @@
       maybeNotifyExitTransformerAlert(openPos, lastExitTransformer);
       updateExitOverlaySession(openPos);
       const progressClass = m.at_target_horizon ? 'at-target' : '';
-      const evalHorizonLabel = openPos.eval_horizon || `x${m.eval_horizon_steps}`;
-      alertHtml = m.at_target_horizon && !exitStackUsesSignOnlyRenew(symbol)
+      const evalHorizonLabel = resolveDeployEvalHorizon(openPos, symbol);
+      const signOnlyRenew = exitStackUsesSignOnlyRenew(symbol) || Boolean(m.sign_only_renew);
+      alertHtml = m.at_target_horizon && !signOnlyRenew
         ? `<div class="trade-journal-alert">⚠ Достигнут горизонт ${evalHorizonLabel} — по policy пора выходить</div>`
         : '';
-      if (exitStackUsesSignOnlyRenew(symbol) && lastExitPolicy && lastExitPolicy.suggest_close) {
+      if (signOnlyRenew && lastExitPolicy && lastExitPolicy.suggest_close) {
         alertHtml += `<div class="trade-journal-alert">⏹ Exit sign_only: pred flip @ checkpoint — рассмотри выход</div>`;
+      }
+      if (signOnlyRenew && lastExitPolicy && lastExitPolicy.at_renew_checkpoint && !lastExitPolicy.suggest_close) {
+        alertHtml += `<div class="trade-journal-alert">↻ sign_only renew @ ${evalHorizonLabel}: знак совпадает — сегмент продлён</div>`;
       }
       if (exitGbmEnabled && lastExitPolicy && lastExitPolicy.suggest_close
         && lastExitPolicy.mode !== 'rolling_h_renew_sign_only') {
@@ -2001,10 +2084,9 @@
       const givebackLine = m.giveback_net_return_pct != null
         ? `<span>Giveback: <strong class="${pnlClass(-m.giveback_pnl_usd)}">${formatPct(m.giveback_net_return_pct)} (${formatUsd(m.giveback_pnl_usd)})</strong></span>`
         : '';
-      metricsHtml = `
-        ${renderExitPolicyCard(lastExitPolicy)}
-        ${renderExitTransformerCard(lastExitTransformer)}
-        ${renderEntryPredictionMetrics(openPos, m)}
+      const renewMetricsHtml = signOnlyRenew
+        ? renderSignOnlyRenewMetrics(openPos, m, symbol)
+        : `
         <div class="trade-journal-metrics">
           <span>Бары: <strong>${m.bars_elapsed}</strong> / ${m.eval_horizon_steps}</span>
           <span>Осталось: <strong>${m.bars_remaining}</strong></span>
@@ -2018,6 +2100,22 @@
         </div>
         <div class="trade-journal-progress" title="${m.progress_pct.toFixed(1)}%">
           <div class="trade-journal-progress-bar ${progressClass}" style="width: ${Math.min(100, m.progress_pct)}%"></div>
+        </div>
+      `;
+      metricsHtml = `
+        ${renderExitPolicyCard(lastExitPolicy)}
+        ${renderExitTransformerCard(lastExitTransformer)}
+        ${renderEntryPredictionMetrics(openPos, m, symbol)}
+        ${renewMetricsHtml}
+        <div class="trade-journal-metrics">
+          <span>Entry: <strong>${Number(openPos.entry_price).toFixed(2)}</strong></span>
+          <span>Mark: <strong>${Number(m.mark_price).toFixed(2)}</strong></span>
+          <span>eval: <strong>${evalHorizonLabel}</strong></span>
+          <span>Unrealized: <strong class="${pnlClass(m.unrealized_pnl_usd)}">${formatPct(m.unrealized_net_return_pct)} (${formatUsd(m.unrealized_pnl_usd)})</strong></span>
+          ${mfeLine}
+          ${maeLine}
+          ${givebackLine}
+          <span>Notional: <strong>$${Number(openPos.notional_usd).toFixed(2)}</strong></span>
         </div>
       `;
     } else if (hasOpen) {
@@ -2190,8 +2288,9 @@
     setStatus('Запись входа…');
 
     const policyAction = lastPolicy && lastPolicy.action ? String(lastPolicy.action).toUpperCase() : null;
-    const evalHorizon = getJournalEvalHorizon();
-    const entrySnapshot = buildEntryJournalPayload(side);
+    const evalHorizon = resolveJournalEvalHorizon(symbol);
+    const entrySnapshot = buildEntryJournalPayload(side, symbol);
+    const exitStack = getExitStackForSymbol(symbol);
 
     API.tradeJournalEntry({
       symbol_id: symbol,
@@ -2205,6 +2304,13 @@
       notes: '',
       entry_policy: entrySnapshot.entryPolicy,
       entry_predictions: entrySnapshot.entryPredictions,
+      exit_stack_mode: exitStack && exitStack.mode ? String(exitStack.mode) : null,
+      exit_stack_eval_horizon: exitStack && exitStack.eval_horizon
+        ? String(exitStack.eval_horizon)
+        : null,
+      exit_stack_min_hold_steps: exitStack && exitStack.min_hold_steps != null
+        ? Number(exitStack.min_hold_steps)
+        : null,
     })
       .then((state) => {
         resetJournalFillFields();
@@ -3737,6 +3843,10 @@
       initCvdWindowDropdown();
       initJournalSettingsControls();
       initJournalSoundControls();
+      const initSymbol = symbolSelect.value;
+      if (initSymbol) {
+        setJournalEvalHorizon(resolveJournalEvalHorizon(initSymbol));
+      }
       requestNotificationPermissionIfNeeded();
       chartDiv.style.height = '100%';
       volumeCanvas.width = volumePanel.clientWidth;

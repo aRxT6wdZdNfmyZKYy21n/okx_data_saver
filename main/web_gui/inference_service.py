@@ -210,7 +210,22 @@ def x_seq_2d_from_payload_dict(payload_dict: dict) -> dict[str, object]:
     return x_seq_2d
 
 
-def _prepare_payload_dict_from_df(df: polars.DataFrame, metadata: dict) -> dict:
+def _bar_metadata_from_df_row(
+    df: polars.DataFrame,
+    row_index: int,
+) -> dict[str, int | float]:
+    row = df.row(row_index, named=True)
+    return {
+        'bar_start_trade_id': int(row['start_trade_id']),
+        'bar_timestamp_ms': int(row['start_timestamp_ms']),
+        'bar_close_price': float(row['close_price']),
+    }
+
+
+def _prepare_inference_context_from_df(
+    df: polars.DataFrame,
+    metadata: dict,
+) -> tuple[dict, dict[str, int | float]]:
     real_bar_count = int(df.height)
     logger.info(
         'Dataset preparation start: rows=%d sequence_length=%d',
@@ -237,17 +252,39 @@ def _prepare_payload_dict_from_df(df: polars.DataFrame, metadata: dict) -> dict:
         real_bar_count=real_bar_count,
     )
     raw_entry_row = level0_to_raw[start_index + last_index]
+    db_latest_row_index = real_bar_count - 1
+    entry_bar_metadata = _bar_metadata_from_df_row(df, raw_entry_row)
+    db_latest_bar_metadata = _bar_metadata_from_df_row(df, db_latest_row_index)
+    model_lag_bars = db_latest_row_index - raw_entry_row
     logger.info(
-        'Last real-bar sample: index=%d raw_row=%d (real_bar_count=%d)',
+        'Last real-bar sample: index=%d raw_row=%d (real_bar_count=%d) '
+        'model_lag_bars=%d level0_rows=%d',
         last_index,
         raw_entry_row,
         real_bar_count,
+        model_lag_bars,
+        level0_df.height,
     )
 
-    return _prepare_payload_dict_from_sample(
+    payload_dict = _prepare_payload_dict_from_sample(
         dataset=inference_dataset,
         sample_index=last_index,
     )
+    provenance: dict[str, int | float] = {
+        'sample_index': last_index,
+        'start_index': start_index,
+        'raw_entry_row': raw_entry_row,
+        'real_bar_count': real_bar_count,
+        'level0_rows': level0_df.height,
+        'model_lag_bars': model_lag_bars,
+        'bar_start_trade_id': entry_bar_metadata['bar_start_trade_id'],
+        'bar_timestamp_ms': entry_bar_metadata['bar_timestamp_ms'],
+        'bar_close_price': entry_bar_metadata['bar_close_price'],
+        'db_latest_start_trade_id': db_latest_bar_metadata['bar_start_trade_id'],
+        'db_latest_timestamp_ms': db_latest_bar_metadata['bar_timestamp_ms'],
+        'db_latest_close_price': db_latest_bar_metadata['bar_close_price'],
+    }
+    return payload_dict, provenance
 
 
 def prepare_inference_payload_from_df(df: polars.DataFrame) -> dict:
@@ -258,7 +295,8 @@ def prepare_inference_payload_from_df(df: polars.DataFrame) -> dict:
             'Инференс невозможен при таком количестве свечей x1 '
             f'(требуется минимум {required_rows}, получено {df.height})',
         )
-    return _prepare_payload_dict_from_df(df, metadata)
+    payload_dict, _provenance = _prepare_inference_context_from_df(df, metadata)
+    return payload_dict
 
 
 def prepare_x_seq_2d_from_df(df: polars.DataFrame) -> dict[str, object]:
@@ -333,11 +371,18 @@ def run_remote_inference_from_df(
 def run_remote_inference_and_x_seq_from_df(
     symbol_id: str,
     df: polars.DataFrame,
-) -> tuple[dict[str, object], dict[str, object]]:
-    payload_dict = prepare_inference_payload_from_df(df)
+) -> tuple[dict[str, object], dict[str, object], dict[str, int | float]]:
+    metadata = fetch_inference_metadata()
+    required_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
+    if df.height < required_rows:
+        raise RuntimeError(
+            'Инференс невозможен при таком количестве свечей x1 '
+            f'(требуется минимум {required_rows}, получено {df.height})',
+        )
+    payload_dict, provenance = _prepare_inference_context_from_df(df, metadata)
     inference_result = run_remote_inference_from_payload_dict(
         symbol_id=symbol_id,
         payload_dict=payload_dict,
     )
     x_seq = x_seq_2d_from_payload_dict(payload_dict)
-    return inference_result, x_seq
+    return inference_result, x_seq, provenance

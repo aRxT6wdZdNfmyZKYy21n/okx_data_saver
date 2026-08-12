@@ -193,6 +193,78 @@ def _open_position_with_mark_price_excursion(
     return enriched
 
 
+def compute_sign_only_renew_metrics(
+    bars_elapsed: int,
+    min_hold_steps: int,
+    check_interval_steps: int,
+    mark_price: float,
+    side: str,
+    entry_price: float,
+    notional_usd: float,
+    excursion: dict[str, float] | None,
+) -> dict[str, float | int | bool]:
+    if min_hold_steps <= 0:
+        raise ValueError(f'min_hold_steps must be positive, got: {min_hold_steps}')
+    if check_interval_steps <= 0:
+        raise ValueError(
+            f'check_interval_steps must be positive, got: {check_interval_steps}',
+        )
+
+    gross_pct = gross_return_pct(side, entry_price, mark_price)
+    unrealized_net_pct = net_return_pct(gross_pct, include_exit_fee=False)
+    metrics: dict[str, float | int | bool] = {
+        'bars_elapsed': bars_elapsed,
+        'sign_only_renew': True,
+        'min_hold_steps': min_hold_steps,
+        'renew_interval_steps': check_interval_steps,
+        'eval_horizon_steps': check_interval_steps,
+        'at_target_horizon': False,
+        'mark_price': mark_price,
+        'gross_return_pct': gross_pct * 100.0,
+        'unrealized_net_return_pct': unrealized_net_pct * 100.0,
+        'unrealized_pnl_usd': notional_usd * unrealized_net_pct,
+    }
+
+    if bars_elapsed < min_hold_steps:
+        metrics['segments_completed'] = 0
+        metrics['segment_bars_elapsed'] = bars_elapsed
+        metrics['bars_until_checkpoint'] = min_hold_steps - bars_elapsed
+        metrics['at_renew_checkpoint'] = False
+        metrics['bars_remaining'] = metrics['bars_until_checkpoint']
+        metrics['progress_pct'] = (
+            100.0 * bars_elapsed / min_hold_steps
+        )
+    else:
+        segments_completed = bars_elapsed // check_interval_steps
+        remainder = bars_elapsed % check_interval_steps
+        at_renew_checkpoint = remainder == 0
+        if at_renew_checkpoint:
+            segment_bars_elapsed = check_interval_steps
+            bars_until_checkpoint = 0
+        else:
+            segment_bars_elapsed = remainder
+            bars_until_checkpoint = check_interval_steps - remainder
+        metrics['segments_completed'] = segments_completed
+        metrics['segment_bars_elapsed'] = segment_bars_elapsed
+        metrics['bars_until_checkpoint'] = bars_until_checkpoint
+        metrics['at_renew_checkpoint'] = at_renew_checkpoint
+        metrics['bars_remaining'] = bars_until_checkpoint
+        metrics['progress_pct'] = (
+            100.0 * segment_bars_elapsed / check_interval_steps
+        )
+
+    if excursion is not None:
+        excursion_display = excursion_metrics_for_display(
+            side=side,
+            entry_price=entry_price,
+            notional_usd=notional_usd,
+            excursion=excursion,
+            current_gross_return=gross_pct,
+        )
+        metrics.update(excursion_display)
+    return metrics
+
+
 def compute_position_metrics(
     side: str,
     entry_price: float,
@@ -244,6 +316,9 @@ def open_position(
     notes: str,
     entry_policy: dict[str, Any] | None,
     entry_predictions: dict[str, float] | None,
+    exit_stack_mode: str | None,
+    exit_stack_eval_horizon: str | None,
+    exit_stack_min_hold_steps: int | None,
 ) -> dict[str, Any]:
     side_normalized = side.lower()
     if side_normalized not in ('long', 'short'):
@@ -278,6 +353,12 @@ def open_position(
             'excursion': _empty_excursion_state(entry_price),
             'opened_at_utc': now_iso,
         }
+        if exit_stack_mode is not None:
+            position['exit_stack_mode'] = exit_stack_mode
+        if exit_stack_eval_horizon is not None:
+            position['exit_stack_eval_horizon'] = exit_stack_eval_horizon
+        if exit_stack_min_hold_steps is not None:
+            position['exit_stack_min_hold_steps'] = exit_stack_min_hold_steps
         journal['open_position'] = position
         _save_journal_unlocked(journal)
         return position
@@ -374,15 +455,37 @@ def enrich_open_position(
     excursion = open_position_data['excursion'] if 'excursion' in open_position_data else _empty_excursion_state(
         float(open_position_data['entry_price']),
     )
-    metrics = compute_position_metrics(
-        side=open_position_data['side'],
-        entry_price=float(open_position_data['entry_price']),
-        notional_usd=float(open_position_data['notional_usd']),
-        eval_horizon_steps=int(open_position_data['eval_horizon_steps']),
-        bars_elapsed=bars_elapsed,
-        mark_price=mark_price,
-        excursion=excursion,
-    )
+    exit_stack_mode = None
+    if 'exit_stack_mode' in open_position_data:
+        exit_stack_mode = open_position_data['exit_stack_mode']
+    if exit_stack_mode == 'rolling_h_renew_sign_only':
+        min_hold_steps = int(open_position_data['exit_stack_min_hold_steps'])
+        if 'exit_stack_eval_horizon' in open_position_data:
+            check_interval_steps = parse_eval_horizon_steps(
+                str(open_position_data['exit_stack_eval_horizon']),
+            )
+        else:
+            check_interval_steps = int(open_position_data['eval_horizon_steps'])
+        metrics = compute_sign_only_renew_metrics(
+            bars_elapsed=bars_elapsed,
+            min_hold_steps=min_hold_steps,
+            check_interval_steps=check_interval_steps,
+            mark_price=mark_price,
+            side=open_position_data['side'],
+            entry_price=float(open_position_data['entry_price']),
+            notional_usd=float(open_position_data['notional_usd']),
+            excursion=excursion,
+        )
+    else:
+        metrics = compute_position_metrics(
+            side=open_position_data['side'],
+            entry_price=float(open_position_data['entry_price']),
+            notional_usd=float(open_position_data['notional_usd']),
+            eval_horizon_steps=int(open_position_data['eval_horizon_steps']),
+            bars_elapsed=bars_elapsed,
+            mark_price=mark_price,
+            excursion=excursion,
+        )
     enriched = dict(open_position_data)
     enriched['metrics'] = metrics
     return enriched

@@ -69,6 +69,7 @@ def _fetch_last_bars_from_db_sync(
     limit: int,
     offset: int,
 ) -> polars.DataFrame | None:
+    db_read_started_at = time.monotonic()
     total = limit + offset
     logger.info(
         'DB read start: fetch_last_bars symbol=%s limit=%d offset=%d',
@@ -104,16 +105,20 @@ def _fetch_last_bars_from_db_sync(
         return None
 
     if df.height == 0:
+        db_read_duration_ms = int((time.monotonic() - db_read_started_at) * 1000.0)
         logger.info(
-            'DB read done: fetch_last_bars symbol=%s rows=0',
+            'DB read done: fetch_last_bars symbol=%s rows=0 duration_ms=%d',
             symbol_id.name,
+            db_read_duration_ms,
         )
         return None
 
+    db_read_duration_ms = int((time.monotonic() - db_read_started_at) * 1000.0)
     logger.info(
-        'DB read done: fetch_last_bars symbol=%s rows=%d',
+        'DB read done: fetch_last_bars symbol=%s rows=%d duration_ms=%d',
         symbol_id.name,
         int(df.height),
+        db_read_duration_ms,
     )
     return _cast_bars_dataframe_types(df)
 

@@ -337,6 +337,9 @@ class TradeJournalEntryRequest(BaseModel):
     notes: str = ''
     entry_policy: dict | None = None
     entry_predictions: dict[str, float] | None = None
+    exit_stack_mode: str | None = None
+    exit_stack_eval_horizon: str | None = None
+    exit_stack_min_hold_steps: int | None = None
 
 
 class TradeJournalExitRequest(BaseModel):

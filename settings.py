@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     WEB_GUI_EXIT_TRANSFORMER_ENABLED: bool = False
     # Per-instance trade journal (micro live 020); relative paths are under repo root
     WEB_GUI_TRADE_JOURNAL_PATH: str = 'data/trade_journal.json'
-    WEB_GUI_TRADE_JOURNAL_DEFAULT_EVAL_HORIZON: str = 'x2048'
+    WEB_GUI_TRADE_JOURNAL_DEFAULT_EVAL_HORIZON: str = 'x32'
 
     # Offline inference daemon (writes data/inference/{symbol}/latest_inference.json)
     INFERENCE_DAEMON_SYMBOL: str = 'BTC_USDT'

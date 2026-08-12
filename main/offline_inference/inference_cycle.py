@@ -1,4 +1,5 @@
 import logging
+import time
 import traceback
 
 from enumerations import SymbolId
@@ -36,13 +37,43 @@ def _linear_metric_from_pct(value: float | int) -> float:
     return numeric / 100.0
 
 
-def _latest_bar_metadata(df) -> dict[str, int | float]:
+def _log_inference_db_fetch(symbol_id: str, df) -> None:
+    now_ms = int(time.time() * 1000.0)
     last_row = df.row(df.height - 1, named=True)
-    return {
-        'bar_start_trade_id': int(last_row['start_trade_id']),
-        'bar_timestamp_ms': int(last_row['start_timestamp_ms']),
-        'bar_close_price': float(last_row['close_price']),
-    }
+    latest_timestamp_ms = int(last_row['start_timestamp_ms'])
+    logger.info(
+        'Inference daemon DB fetch: symbol=%s rows=%d latest_start_trade_id=%d '
+        'latest_timestamp_ms=%d db_age_ms=%d',
+        symbol_id,
+        df.height,
+        int(last_row['start_trade_id']),
+        latest_timestamp_ms,
+        now_ms - latest_timestamp_ms,
+    )
+
+
+def _log_inference_entry_provenance(
+    symbol_id: str,
+    provenance: dict[str, int | float],
+) -> None:
+    now_ms = int(time.time() * 1000.0)
+    entry_timestamp_ms = int(provenance['bar_timestamp_ms'])
+    db_latest_timestamp_ms = int(provenance['db_latest_timestamp_ms'])
+    logger.info(
+        'Inference daemon model entry: symbol=%s sample_index=%d raw_row=%d/%d '
+        'level0_rows=%d model_lag_bars=%d entry_start_trade_id=%d entry_age_ms=%d '
+        'db_latest_start_trade_id=%d db_latest_age_ms=%d',
+        symbol_id,
+        int(provenance['sample_index']),
+        int(provenance['raw_entry_row']),
+        int(provenance['real_bar_count']),
+        int(provenance['level0_rows']),
+        int(provenance['model_lag_bars']),
+        int(provenance['bar_start_trade_id']),
+        now_ms - entry_timestamp_ms,
+        int(provenance['db_latest_start_trade_id']),
+        now_ms - db_latest_timestamp_ms,
+    )
 
 
 def _build_exit_payloads(
@@ -141,6 +172,8 @@ def run_inference_cycle(symbol_id: str) -> None:
     if df is None:
         raise RuntimeError('Недостаточно данных для инференса')
 
+    _log_inference_db_fetch(symbol_id=symbol_id, df=df)
+
     metadata = fetch_inference_metadata()
     required_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
     if df.height < required_rows:
@@ -149,11 +182,14 @@ def run_inference_cycle(symbol_id: str) -> None:
             f'(требуется минимум {required_rows}, получено {df.height})',
         )
 
-    inference_result, x_seq = run_remote_inference_and_x_seq_from_df(
+    inference_result, x_seq, entry_provenance = run_remote_inference_and_x_seq_from_df(
         symbol_id=symbol_id,
         df=df,
     )
-    bar_metadata = _latest_bar_metadata(df)
+    _log_inference_entry_provenance(
+        symbol_id=symbol_id,
+        provenance=entry_provenance,
+    )
 
     exit_policy_result: dict[str, object] | None = None
     exit_transformer_result: dict[str, object] | None = None
@@ -191,9 +227,9 @@ def run_inference_cycle(symbol_id: str) -> None:
             )
 
     payload: dict[str, object] = {
-        'bar_start_trade_id': bar_metadata['bar_start_trade_id'],
-        'bar_timestamp_ms': bar_metadata['bar_timestamp_ms'],
-        'bar_close_price': bar_metadata['bar_close_price'],
+        'bar_start_trade_id': entry_provenance['bar_start_trade_id'],
+        'bar_timestamp_ms': entry_provenance['bar_timestamp_ms'],
+        'bar_close_price': entry_provenance['bar_close_price'],
         'predictions': inference_result['predictions'],
         'policy': inference_result['policy'] if 'policy' in inference_result else None,
         'entry_hint': inference_result['entry_hint']

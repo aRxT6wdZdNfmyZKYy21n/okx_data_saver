@@ -199,6 +199,15 @@ def _worker_trade_journal_bars_elapsed(
 def _worker_trade_journal_entry(payload: dict) -> dict:
     entry_policy = payload['entry_policy']
     entry_predictions = payload['entry_predictions']
+    exit_stack_mode = None
+    if 'exit_stack_mode' in payload:
+        exit_stack_mode = payload['exit_stack_mode']
+    exit_stack_eval_horizon = None
+    if 'exit_stack_eval_horizon' in payload:
+        exit_stack_eval_horizon = payload['exit_stack_eval_horizon']
+    exit_stack_min_hold_steps = None
+    if 'exit_stack_min_hold_steps' in payload:
+        exit_stack_min_hold_steps = payload['exit_stack_min_hold_steps']
     open_position(
         symbol_id=payload['symbol_id'],
         side=payload['side'],
@@ -211,6 +220,9 @@ def _worker_trade_journal_entry(payload: dict) -> dict:
         notes=payload['notes'],
         entry_policy=entry_policy,
         entry_predictions=entry_predictions,
+        exit_stack_mode=exit_stack_mode,
+        exit_stack_eval_horizon=exit_stack_eval_horizon,
+        exit_stack_min_hold_steps=exit_stack_min_hold_steps,
     )
     return _build_trade_journal_api_response_with_db_bars_elapsed(
         symbol_id_str=payload['symbol_id'],
