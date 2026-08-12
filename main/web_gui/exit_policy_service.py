@@ -25,29 +25,51 @@ def build_exit_policy_disabled_response() -> dict[str, object]:
 
 
 def run_remote_exit_policy(payload: dict[str, object]) -> dict[str, object]:
-    if not settings.WEB_GUI_EXIT_GBM_ENABLED:
+    use_exit_stack = False
+    if 'exit_stack_mode' in payload:
+        use_exit_stack = bool(payload['exit_stack_mode'])
+    if not settings.WEB_GUI_EXIT_GBM_ENABLED and not use_exit_stack:
         return build_exit_policy_disabled_response()
     if not settings.WEB_GUI_INFERENCE_ENABLED:
         raise HTTPException(status_code=503, detail='Inference is disabled')
 
     symbol_id = str(payload['symbol_id'])
+    request_body: dict[str, object] = {
+        'symbol': symbol_id,
+        'side': payload['side'],
+        'eval_horizon': payload['eval_horizon'],
+        'bars_held': payload['bars_held'],
+    }
+    if 'current_predictions' in payload:
+        request_body['current_predictions'] = payload['current_predictions']
+    if use_exit_stack:
+        if 'entry_predictions' in payload:
+            request_body['entry_predictions'] = payload['entry_predictions']
+        if 'entry_policy' in payload:
+            request_body['entry_policy'] = payload['entry_policy']
+        if 'current_policy' in payload:
+            request_body['current_policy'] = payload['current_policy']
+        if 'unrealized_linear' in payload:
+            request_body['unrealized_linear'] = payload['unrealized_linear']
+        if 'mfe_linear' in payload:
+            request_body['mfe_linear'] = payload['mfe_linear']
+        if 'mae_linear' in payload:
+            request_body['mae_linear'] = payload['mae_linear']
+        if 'giveback_linear' in payload:
+            request_body['giveback_linear'] = payload['giveback_linear']
+    else:
+        request_body['entry_predictions'] = payload['entry_predictions']
+        request_body['current_predictions'] = payload['current_predictions']
+        request_body['entry_policy'] = payload['entry_policy']
+        request_body['current_policy'] = payload['current_policy']
+        request_body['unrealized_linear'] = payload['unrealized_linear']
+        request_body['mfe_linear'] = payload['mfe_linear']
+        request_body['mae_linear'] = payload['mae_linear']
+        request_body['giveback_linear'] = payload['giveback_linear']
     try:
         response = httpx.post(
             f'{settings.WEB_GUI_INFERENCE_API_BASE_URL}/exit-policy',
-            json={
-                'symbol': symbol_id,
-                'side': payload['side'],
-                'eval_horizon': payload['eval_horizon'],
-                'bars_held': payload['bars_held'],
-                'entry_predictions': payload['entry_predictions'],
-                'current_predictions': payload['current_predictions'],
-                'entry_policy': payload['entry_policy'],
-                'current_policy': payload['current_policy'],
-                'unrealized_linear': payload['unrealized_linear'],
-                'mfe_linear': payload['mfe_linear'],
-                'mae_linear': payload['mae_linear'],
-                'giveback_linear': payload['giveback_linear'],
-            },
+            json=request_body,
             timeout=30.0,
         )
         if response.status_code == 404:

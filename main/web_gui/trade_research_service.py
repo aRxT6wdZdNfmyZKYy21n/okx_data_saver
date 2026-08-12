@@ -382,6 +382,11 @@ def _hybrid_backtest_allows_entry(
             return False
         recommended_action = str(entry_hint['recommended_action'])
         return recommended_action in ('long', 'short')
+    if hint_mode == 'sign_fee_band':
+        if 'recommended_action' not in entry_hint:
+            return False
+        recommended_action = str(entry_hint['recommended_action'])
+        return recommended_action in ('long', 'short')
     raise RuntimeError(f'Unknown entry_hint hint_mode: {hint_mode!r}')
 
 

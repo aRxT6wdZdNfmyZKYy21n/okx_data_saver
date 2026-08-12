@@ -213,6 +213,9 @@
   let policyBySymbol = {};
   let exitPolicyBySymbol = {};
   let exitTransformerBySymbol = {};
+  let exitStackBySymbol = {};
+  let entryHintModeBySymbol = {};
+  let entryConfidenceMarginBySymbol = {};
   let exitGbmEnabled = false;
   let exitTransformerEnabled = false;
   let checkpointPathBySymbol = {};
@@ -720,6 +723,29 @@
     previousExitGbmSuggestClose = true;
   }
 
+  function maybeNotifyExitStackSignOnlyAlert(openPos, exitPolicy, symbol) {
+    if (!exitStackUsesSignOnlyRenew(symbol)) {
+      return;
+    }
+    if (!openPos || !exitPolicy) {
+      return;
+    }
+    if (exitPolicy.mode !== 'rolling_h_renew_sign_only') {
+      return;
+    }
+    const suggestClose = Boolean(exitPolicy.suggest_close);
+    if (!suggestClose) {
+      return;
+    }
+    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
+    const sideLabel = String(openPos.side || '').toUpperCase();
+    const title = 'Micro live: sign_only renew → CLOSE';
+    const body = `${sideLabel} ${openPos.symbol_id} — pred sign flip @ x32 checkpoint`;
+    playExitGbmAlertSound();
+    showExitGbmBrowserNotification(title, body);
+    exitGbmAlertPositionId = positionId;
+  }
+
   function showExitGbmBrowserNotification(title, body) {
     if (!('Notification' in window)) return;
     if (Notification.permission !== 'granted') return;
@@ -1177,6 +1203,10 @@
       const blockReason = entryHint.block_reason ? String(entryHint.block_reason) : '';
       const hintMode = entryHint.hint_mode ? String(entryHint.hint_mode) : 'snr_only';
       const isHybrid = hintMode === 'hybrid_gate_snr';
+      const isSignFeeBand = hintMode === 'sign_fee_band';
+      const marginLinear = entryHint.entry_threshold_linear != null
+        ? Number(entryHint.entry_threshold_linear)
+        : null;
       const holdProb = entryHint.hold_probability != null
         ? Number(entryHint.hold_probability).toFixed(2)
         : null;
@@ -1185,9 +1215,11 @@
         : null;
       const gbmBlocks = Boolean(entryHint.gbm_blocks_entry);
       const snrBlocks = Boolean(entryHint.snr_blocks_entry);
-      const title = isHybrid
+      const title = isSignFeeBand
+        ? `Entry hint @ ${evalHorizon} (sign_fee_band, threshold=${marginLinear != null ? formatPct(marginLinear * 100) : '—'}, rmse=${rmsePct}%)`
+        : (isHybrid
         ? `Entry hint @ ${evalHorizon} (hybrid P(hold)≥${holdThreshold} ∨ SNR≥${snrThreshold}, rmse=${rmsePct}%)`
-        : `Entry hint @ ${evalHorizon} (SNR≥${snrThreshold}, rmse=${rmsePct}%)`;
+        : `Entry hint @ ${evalHorizon} (SNR≥${snrThreshold}, rmse=${rmsePct}%)`);
       const hybridMeta = isHybrid && holdProb != null
         ? `<span>P(hold): <strong>${holdProb}</strong>${gbmBlocks ? ' ⛔' : ''}</span>`
         : '';
@@ -1632,14 +1664,38 @@
     return limitInput.value ? parseInt(limitInput.value, 10) : config.defaultLimit;
   }
 
+  function getExitStackForSymbol(symbol) {
+    return exitStackBySymbol[symbol] || null;
+  }
+
+  function exitStackUsesSignOnlyRenew(symbol) {
+    const exitStack = getExitStackForSymbol(symbol);
+    if (!exitStack || !exitStack.mode) {
+      return false;
+    }
+    return String(exitStack.mode) === 'rolling_h_renew_sign_only';
+  }
+
   function buildExitPolicyPayload(symbol, openPos) {
     if (!openPos || !openPos.side || !openPos.metrics) return null;
+    const m = openPos.metrics;
+    const exitStack = getExitStackForSymbol(symbol);
+    if (exitStack) {
+      if (!lastPredictions) return null;
+      return {
+        symbol_id: symbol,
+        side: openPos.side,
+        eval_horizon: openPos.eval_horizon,
+        bars_held: m.bars_elapsed,
+        current_predictions: lastPredictions,
+        exit_stack_mode: String(exitStack.mode),
+      };
+    }
     if (!lastPredictions || !openPos.entry_predictions || !openPos.entry_policy) return null;
     if (!lastPolicy || !lastPolicy.probabilities) return null;
     if (!openPos.entry_policy.probabilities) return null;
     if (!exitPolicyBySymbol[symbol]) return null;
 
-    const m = openPos.metrics;
     const linearMetric = (value) => {
       const n = Number(value);
       if (!Number.isFinite(n)) return 0;
@@ -1695,7 +1751,8 @@
   }
 
   function refreshExitPolicy(symbol, openPos) {
-    if (!exitGbmEnabled) {
+    const exitStack = getExitStackForSymbol(symbol);
+    if (!exitGbmEnabled && !exitStack) {
       lastExitPolicy = null;
       return Promise.resolve(null);
     }
@@ -1737,7 +1794,31 @@
   }
 
   function renderExitPolicyCard(exitPolicy) {
-    if (!exitPolicy || exitPolicy.close_probability == null) return '';
+    if (!exitPolicy) return '';
+    if (exitPolicy.mode === 'rolling_h_renew_sign_only') {
+      const action = String(exitPolicy.action || 'hold').toUpperCase();
+      const runLabel = exitPolicy.run_label || 'rolling_h_renew_sign_only';
+      const barsHeld = exitPolicy.bars_held != null ? exitPolicy.bars_held : '—';
+      const minHold = exitPolicy.min_hold_steps != null ? exitPolicy.min_hold_steps : '—';
+      const predLinear = exitPolicy.pred_eval_linear != null
+        ? formatPct(Number(exitPolicy.pred_eval_linear) * 100)
+        : '—';
+      const reason = exitPolicy.exit_reason ? String(exitPolicy.exit_reason) : '—';
+      let actionClass = 'exit-policy-hold';
+      if (action === 'CLOSE') actionClass = 'exit-policy-close';
+      return `
+      <div class="exit-policy-card ${actionClass}">
+        <div class="exit-policy-action">Exit sign_only @ x32: ${action}</div>
+        <div class="exit-policy-meta">
+          <span>pred: <strong>${predLinear}</strong></span>
+          <span>reason: <strong>${reason}</strong></span>
+          <span>stack: <strong>${runLabel}</strong></span>
+          <span>бары: <strong>${barsHeld}</strong> (min ${minHold})</span>
+        </div>
+      </div>
+    `;
+    }
+    if (exitPolicy.close_probability == null) return '';
 
     const pClose = Number(exitPolicy.close_probability);
     const threshold = Number(exitPolicy.close_probability_threshold);
@@ -1883,16 +1964,21 @@
     let alertHtml = '';
     if (hasOpen && openPos.metrics) {
       const m = openPos.metrics;
-      maybeNotifyHorizonAlert(openPos, m.at_target_horizon);
+      maybeNotifyHorizonAlert(openPos, m.at_target_horizon && !exitStackUsesSignOnlyRenew(symbol));
       maybeNotifyExitGbmAlert(openPos, lastExitPolicy);
+      maybeNotifyExitStackSignOnlyAlert(openPos, lastExitPolicy, symbol);
       maybeNotifyExitTransformerAlert(openPos, lastExitTransformer);
       updateExitOverlaySession(openPos);
       const progressClass = m.at_target_horizon ? 'at-target' : '';
       const evalHorizonLabel = openPos.eval_horizon || `x${m.eval_horizon_steps}`;
-      alertHtml = m.at_target_horizon
+      alertHtml = m.at_target_horizon && !exitStackUsesSignOnlyRenew(symbol)
         ? `<div class="trade-journal-alert">⚠ Достигнут горизонт ${evalHorizonLabel} — по policy пора выходить</div>`
         : '';
-      if (exitGbmEnabled && lastExitPolicy && lastExitPolicy.suggest_close) {
+      if (exitStackUsesSignOnlyRenew(symbol) && lastExitPolicy && lastExitPolicy.suggest_close) {
+        alertHtml += `<div class="trade-journal-alert">⏹ Exit sign_only: pred flip @ checkpoint — рассмотри выход</div>`;
+      }
+      if (exitGbmEnabled && lastExitPolicy && lastExitPolicy.suggest_close
+        && lastExitPolicy.mode !== 'rolling_h_renew_sign_only') {
         const thresholdPct = (Number(lastExitPolicy.close_probability_threshold) * 100).toFixed(1);
         const pClosePct = (Number(lastExitPolicy.close_probability) * 100).toFixed(1);
         alertHtml += `<div class="trade-journal-alert">⏹ Exit GBM: P(close)=${pClosePct}% ≥ ${thresholdPct}% — рассмотри ранний выход</div>`;
@@ -3629,6 +3715,9 @@
       policyBySymbol = config.policyBySymbol || {};
       exitPolicyBySymbol = config.exitPolicyBySymbol || {};
       exitTransformerBySymbol = config.exitTransformerBySymbol || {};
+      exitStackBySymbol = config.exitStackBySymbol || {};
+      entryHintModeBySymbol = config.entryHintModeBySymbol || {};
+      entryConfidenceMarginBySymbol = config.entryConfidenceMarginBySymbol || {};
       exitGbmEnabled = Boolean(config.exitGbmEnabled);
       exitTransformerEnabled = Boolean(config.exitTransformerEnabled);
       checkpointPathBySymbol = config.checkpointPathBySymbol || {};

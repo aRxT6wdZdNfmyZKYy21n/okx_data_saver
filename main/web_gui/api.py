@@ -94,6 +94,21 @@ async def get_config() -> dict:
         if 'exit_transformer_by_symbol' in metadata
         else {}
     )
+    exit_stack_by_symbol = (
+        metadata['exit_stack_by_symbol']
+        if 'exit_stack_by_symbol' in metadata
+        else {}
+    )
+    entry_hint_mode_by_symbol = (
+        metadata['entry_hint_mode_by_symbol']
+        if 'entry_hint_mode_by_symbol' in metadata
+        else {}
+    )
+    entry_confidence_margin_by_symbol = (
+        metadata['entry_confidence_margin_by_symbol']
+        if 'entry_confidence_margin_by_symbol' in metadata
+        else {}
+    )
     trade_research_eval_horizon = DEFAULT_EVAL_HORIZON
     try:
         trade_research_eval_horizon = eval_horizon_from_metadata(
@@ -114,6 +129,9 @@ async def get_config() -> dict:
         'policyBySymbol': policy_by_symbol,
         'exitPolicyBySymbol': exit_policy_by_symbol,
         'exitTransformerBySymbol': exit_transformer_by_symbol,
+        'exitStackBySymbol': exit_stack_by_symbol,
+        'entryHintModeBySymbol': entry_hint_mode_by_symbol,
+        'entryConfidenceMarginBySymbol': entry_confidence_margin_by_symbol,
         'checkpointPathBySymbol': checkpoint_path_by_symbol,
         'chartShowLimit': CHART_SHOW_LIMIT,
         'tradeResearchEvalHorizon': trade_research_eval_horizon,
