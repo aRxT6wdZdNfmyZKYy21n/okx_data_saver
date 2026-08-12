@@ -32,6 +32,7 @@ from main.web_gui.trade_research_dataset_common import (
     real_last_start_trade_id,
     sample_exit_on_real_bars,
     sample_indices_for_display_grid,
+    sample_indices_for_pnl_grid,
 )
 from main.web_gui.inference_service import (
     _build_dataset,
