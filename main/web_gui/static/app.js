@@ -130,7 +130,7 @@
     },
   };
 
-  let config = { defaultLimit: 10000000, defaultScale: 'x1536', refreshIntervalSec: 30 };
+  let config = { defaultLimit: 1024, defaultScale: 'x32', refreshIntervalSec: 30 };
   let chart = null;
   let candleSeries = null;
   let barsData = [];
@@ -236,7 +236,7 @@
   let lastChartBarClose = null;
   let journalDefaults = {
     notional_usd: 7,
-    eval_horizon: 'x1536',
+    eval_horizon: 'x32',
     round_trip_fee_rate: 0.001,
   };
   let previousAtTargetHorizon = false;
@@ -259,8 +259,8 @@
   const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
   const CVD_WINDOW_DEFAULT = 'x512';
   const JOURNAL_EVAL_HORIZON_OPTIONS = ['x512', 'x1024', 'x1536', 'x2048', 'x3072', 'x4096'];
-  let tradeResearchEvalHorizon = 'x1536';
-  let tradeResearchScale = 'x1536';
+  let tradeResearchEvalHorizon = 'x32';
+  let tradeResearchScale = 'x32';
   let tradeResearchAvailableHorizons = [];
 
   function updateTradeResearchUi() {
@@ -2317,7 +2317,7 @@
             opt.textContent = l;
             scaleSelect.appendChild(opt);
           });
-          const defaultScale = config.defaultScale != null ? String(config.defaultScale) : 'x1536';
+          const defaultScale = config.defaultScale != null ? String(config.defaultScale) : 'x32';
           if (scales.includes(defaultScale)) {
             scaleSelect.value = defaultScale;
           }

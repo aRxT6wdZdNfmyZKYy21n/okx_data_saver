@@ -47,7 +47,7 @@ from settings import settings
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EVAL_HORIZON = 'x1536'
+DEFAULT_EVAL_HORIZON = 'x32'
 DEFAULT_STEP_BARS = 1536
 BATCH_CHUNK_SIZE = 32
 BATCH_HTTP_TIMEOUT_SEC = 600.0

@@ -50,9 +50,9 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title='OKX Data Set Web GUI', version='0.1.0')
 
-# Дефолтное число баров для GUI = WEB_GUI_RECORDS_LIMIT (обычно 10M).
+# Дефолтное число баров для GUI (хвост графика).
 DEFAULT_BARS_LIMIT = settings.WEB_GUI_RECORDS_LIMIT
-DEFAULT_CHART_SCALE = 'x1536'
+DEFAULT_CHART_SCALE = 'x32'
 
 
 @app.get('/api/symbols')
@@ -110,11 +110,13 @@ async def get_config() -> dict:
         else {}
     )
     trade_research_eval_horizon = DEFAULT_EVAL_HORIZON
+    default_scale = DEFAULT_CHART_SCALE
     try:
         trade_research_eval_horizon = eval_horizon_from_metadata(
             metadata,
             settings.INFERENCE_DAEMON_SYMBOL,
         )
+        default_scale = trade_research_eval_horizon
     except RuntimeError:
         pass
     trade_research_available_horizons = list_trade_research_horizons(
@@ -122,7 +124,7 @@ async def get_config() -> dict:
     )
     return {
         'defaultLimit': DEFAULT_BARS_LIMIT,
-        'defaultScale': DEFAULT_CHART_SCALE,
+        'defaultScale': default_scale,
         'refreshIntervalSec': settings.WEB_GUI_REFRESH_INTERVAL_SEC,
         'inferenceMinRows': inference_min_rows,
         'inferenceErrorBySymbolAndHorizon': metadata['error_by_symbol_and_horizon'],
