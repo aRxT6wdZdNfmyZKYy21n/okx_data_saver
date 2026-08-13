@@ -44,6 +44,11 @@ from main.web_gui.request_workers import (
     _worker_trade_journal_exit,
     _worker_trade_research_from_artifact,
 )
+from main.web_gui.static_assets import (
+    compute_static_asset_version,
+    render_index_html,
+    static_dir_path,
+)
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -126,6 +131,7 @@ async def get_config() -> dict:
         'defaultLimit': DEFAULT_BARS_LIMIT,
         'defaultScale': default_scale,
         'refreshIntervalSec': settings.WEB_GUI_REFRESH_INTERVAL_SEC,
+        'assetVersion': compute_static_asset_version(static_dir_path()),
         'inferenceMinRows': inference_min_rows,
         'inferenceErrorBySymbolAndHorizon': metadata['error_by_symbol_and_horizon'],
         'policyBySymbol': policy_by_symbol,
@@ -142,6 +148,13 @@ async def get_config() -> dict:
         'tradeResearchPnlStride': settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE,
         'exitGbmEnabled': settings.WEB_GUI_EXIT_GBM_ENABLED,
         'exitTransformerEnabled': settings.WEB_GUI_EXIT_TRANSFORMER_ENABLED,
+    }
+
+
+@app.get('/api/asset-version')
+def get_asset_version() -> dict[str, str]:
+    return {
+        'assetVersion': compute_static_asset_version(static_dir_path()),
     }
 
 
@@ -503,16 +516,19 @@ def mount_static(static_dir: str) -> None:
 
 
 # Монтируем static при загрузке модуля (работает и при запуске через uvicorn main.web_gui.api:app)
-_static_dir = os.path.join(os.path.dirname(__file__), 'static')
+_static_dir = static_dir_path()
 mount_static(_static_dir)
+
+_INDEX_NO_CACHE_HEADERS = {
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    'Pragma': 'no-cache',
+}
 
 
 @app.get('/', response_class=HTMLResponse)
-def index() -> str:
-    """Главная страница — отдаём index.html из static."""
-    static_dir = os.path.join(os.path.dirname(__file__), 'static')
-    index_path = os.path.join(static_dir, 'index.html')
-    if os.path.isfile(index_path):
-        with open(index_path, encoding='utf-8') as f:
-            return f.read()
-    return '<html><body><p>OKX Data Set Web GUI. Place index.html in main/web_gui/static/</p></body></html>'
+def index() -> HTMLResponse:
+    """Главная страница — index.html с подставленной версией статики."""
+    return HTMLResponse(
+        content=render_index_html(_static_dir),
+        headers=_INDEX_NO_CACHE_HEADERS,
+    )

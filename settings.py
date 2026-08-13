@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     # Per-instance trade journal (micro live 020); relative paths are under repo root
     WEB_GUI_TRADE_JOURNAL_PATH: str = 'data/trade_journal.json'
     WEB_GUI_TRADE_JOURNAL_DEFAULT_EVAL_HORIZON: str = 'x32'
+    # Optional override for ?v= on app.js/style.css (default: max mtime of static files)
+    WEB_GUI_ASSET_VERSION: str | None = None
 
     # Offline inference daemon (writes data/inference/{symbol}/latest_inference.json)
     INFERENCE_DAEMON_SYMBOL: str = 'BTC_USDT'

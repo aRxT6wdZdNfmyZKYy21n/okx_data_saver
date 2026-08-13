@@ -150,6 +150,7 @@
   let journalRefreshTimer = null;
   let journalBarsElapsedTimer = null;
   let x1BarRefreshTimer = null;
+  let assetVersionPollTimer = null;
   let loadBarsInFlight = false;
   let loadBarsRequestSeq = 0;
   let activeLoadBarsRequestId = 0;
@@ -179,6 +180,7 @@
   const X1_BAR_REFRESH_INTERVAL_SEC = 60;
   const EXIT_CLOSE_BEEP_INTERVAL_MS = 5000;
   const EXIT_CLOSE_NOTIFICATION_INTERVAL_MS = 30000;
+  const ASSET_VERSION_POLL_INTERVAL_SEC = 60;
   const scaleSelect = document.getElementById('scale');
   const symbolSelect = document.getElementById('symbol');
   const limitInput = document.getElementById('limit');
@@ -3959,6 +3961,45 @@
     x1BarRefreshTimer = null;
   }
 
+  function resolveLoadedAssetVersion() {
+    const meta = document.querySelector('meta[name="okx-asset-version"]');
+    if (meta && meta.content) {
+      return String(meta.content);
+    }
+    return null;
+  }
+
+  function stopAssetVersionPoll() {
+    if (assetVersionPollTimer) {
+      clearInterval(assetVersionPollTimer);
+      assetVersionPollTimer = null;
+    }
+  }
+
+  function startAssetVersionPoll(loadedAssetVersion) {
+    stopAssetVersionPoll();
+    if (!loadedAssetVersion) {
+      return;
+    }
+    assetVersionPollTimer = setInterval(async () => {
+      try {
+        const payload = await API.get('./api/asset-version');
+        const serverAssetVersion = payload && payload.assetVersion != null
+          ? String(payload.assetVersion)
+          : null;
+        if (serverAssetVersion && serverAssetVersion !== loadedAssetVersion) {
+          guiLog('asset_version_changed', {
+            loaded: loadedAssetVersion,
+            server: serverAssetVersion,
+          });
+          window.location.reload();
+        }
+      } catch (exception) {
+        guiLog('asset_version_poll_failed', exception.message);
+      }
+    }, ASSET_VERSION_POLL_INTERVAL_SEC * 1000);
+  }
+
   function startIndependentRefreshTimers() {
     stopIndependentRefreshTimers();
     inferenceRefreshTimer = setInterval(
@@ -4071,6 +4112,10 @@
         limitInput.placeholder = config.defaultLimit;
         limitInput.value = config.defaultLimit;
       }
+      const loadedAssetVersion = config.assetVersion != null
+        ? String(config.assetVersion)
+        : resolveLoadedAssetVersion();
+      startAssetVersionPoll(loadedAssetVersion);
       await initDropdowns();
       initCvdWindowDropdown();
       initJournalSettingsControls();

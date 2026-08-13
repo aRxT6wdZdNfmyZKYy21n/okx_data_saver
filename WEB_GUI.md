@@ -37,10 +37,21 @@
 |----------|----------|--------------|------------|
 | **Лимит записей** | Сколько последних **баров** (строк таблицы) загружать | 1_000_000 | `WEB_GUI_RECORDS_LIMIT=500000` |
 | **Интервал обновления (сек)** | Автообновление данных на фронте | 30 | `WEB_GUI_REFRESH_INTERVAL_SEC=60` |
+| **Версия статики (cache busting)** | Подстановка `?v=` в `app.js` / `style.css`; по умолчанию — max mtime файлов | auto (mtime) | `WEB_GUI_ASSET_VERSION=20260813a` |
 | **Список масштабов** | x1, x2, …, x2048 (см. ниже) | x1…x2048 | Опционально в конфиге |
 | **Уровни теории Доу** | 1–5 для final_tensors (если реализуем) | — | В конфиге |
 
 Рекомендуется расширить `settings.py` (pydantic-settings) и при необходимости добавить конфиг-файл (YAML/JSON) для веб-приложения.
+
+### Cache busting (без Ctrl+F5 после деплоя)
+
+После `git pull` и restart web GUI не нужен hard refresh при каждом обновлении фронта:
+
+1. **`GET /`** — отдаёт `index.html` с подставленной версией (`main/web_gui/static_assets.py`), заголовки `Cache-Control: no-store`.
+2. **Статика** — абсолютные URL `/static/app.js?v=<version>`, `/static/style.css?v=<version>`. Версия = `max(mtime)` у `app.js`, `style.css`, `index.html`, либо `WEB_GUI_ASSET_VERSION` из env.
+3. **Открытые вкладки** — `app.js` опрашивает `GET /api/asset-version` каждые 60 с; при смене версии — `location.reload()`.
+
+Один раз после первого включения механизма может понадобиться обычный F5 (если в кэше остался старый `index.html` без `?v=`). Дальше достаточно restart сервиса; симлинки с random id не используются.
 
 ---
 
