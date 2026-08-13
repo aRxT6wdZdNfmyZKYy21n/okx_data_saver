@@ -1467,7 +1467,7 @@
           }
 
           if (predictions) {
-            lastExitPolicy = response.exit_policy || lastExitPolicy;
+            applyInferenceExitPolicy(response.exit_policy, symbol);
             lastExitTransformer = response.exit_transformer || lastExitTransformer;
             renderInference(
               predictions,
@@ -1523,7 +1523,7 @@
           ? Number(response.inference_completed_at_ms)
           : (response.updated_at_ms != null ? Number(response.updated_at_ms) : null);
         lastComputingStartedAtMs = null;
-        lastExitPolicy = response.exit_policy || null;
+        applyInferenceExitPolicy(response.exit_policy, symbol);
         lastExitTransformer = response.exit_transformer || null;
         renderInference(
           response.predictions,
@@ -1747,6 +1747,39 @@
     return String(exitStack.mode) === 'rolling_h_renew_sign_only';
   }
 
+  function exitPolicyIsSignOnly(exitPolicy) {
+    return Boolean(
+      exitPolicy
+      && exitPolicy.mode === 'rolling_h_renew_sign_only',
+    );
+  }
+
+  function exitPolicyIsRenderable(exitPolicy) {
+    if (!exitPolicy) {
+      return false;
+    }
+    if (exitPolicyIsSignOnly(exitPolicy)) {
+      return true;
+    }
+    return exitPolicy.close_probability != null;
+  }
+
+  function applyInferenceExitPolicy(incoming, symbol) {
+    if (exitPolicyIsRenderable(incoming)) {
+      lastExitPolicy = incoming;
+      return;
+    }
+    if (exitStackUsesSignOnlyRenew(symbol) && exitPolicyIsSignOnly(lastExitPolicy)) {
+      return;
+    }
+    if (exitGbmEnabled && exitPolicyIsRenderable(lastExitPolicy)) {
+      return;
+    }
+    lastExitPolicy = incoming || null;
+  }
+
+  let refreshExitPolicyRequestSeq = 0;
+
   function buildExitPolicyPayload(symbol, openPos) {
     if (!openPos || !openPos.side || !openPos.metrics) return null;
     const m = openPos.metrics;
@@ -1829,18 +1862,21 @@
     }
     const payload = buildExitPolicyPayload(symbol, openPos);
     if (!payload) {
-      lastExitPolicy = null;
-      return Promise.resolve(null);
+      return Promise.resolve(lastExitPolicy);
     }
+    const requestSeq = refreshExitPolicyRequestSeq + 1;
+    refreshExitPolicyRequestSeq = requestSeq;
     return API.exitPolicy(payload)
       .then(result => {
-        lastExitPolicy = result;
-        return result;
+        if (requestSeq !== refreshExitPolicyRequestSeq) {
+          return lastExitPolicy;
+        }
+        if (exitPolicyIsRenderable(result)) {
+          lastExitPolicy = result;
+        }
+        return lastExitPolicy;
       })
-      .catch(() => {
-        lastExitPolicy = null;
-        return null;
-      });
+      .catch(() => lastExitPolicy);
   }
 
   function refreshExitTransformer(symbol, openPos, barsLimit) {
@@ -2010,6 +2046,7 @@
       && (exitGbmEnabled || getExitStackForSymbol(symbol))
       && lastPredictions;
     if (shouldRefreshExitPolicy) {
+      renderTradeJournal(state, symbol);
       return refreshExitPolicy(symbol, openPos).then(() => {
         renderTradeJournal(state, symbol);
         if (
