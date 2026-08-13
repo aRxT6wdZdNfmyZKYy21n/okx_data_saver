@@ -48,7 +48,7 @@
 После `git pull` и restart web GUI не нужен hard refresh при каждом обновлении фронта:
 
 1. **`GET /`** — отдаёт `index.html` с подставленной версией (`main/web_gui/static_assets.py`), заголовки `Cache-Control: no-store`.
-2. **Статика** — абсолютные URL `/static/app.js?v=<version>`, `/static/style.css?v=<version>`. Версия = `max(mtime)` у `app.js`, `style.css`, `index.html`, либо `WEB_GUI_ASSET_VERSION` из env.
+2. **Статика** — относительные URL `./static/app.js?v=<version>`, `./static/style.css?v=<version>` (важно за reverse proxy с префиксом location). Версия = `max(mtime)` у `app.js`, `style.css`, `index.html`, либо `WEB_GUI_ASSET_VERSION` из env.
 3. **Открытые вкладки** — `app.js` опрашивает `GET /api/asset-version` каждые 60 с; при смене версии — `location.reload()`.
 
 Один раз после первого включения механизма может понадобиться обычный F5 (если в кэше остался старый `index.html` без `?v=`). Дальше достаточно restart сервиса; симлинки с random id не используются.
