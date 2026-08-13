@@ -2075,6 +2075,20 @@
 
   let refreshExitPolicyRequestSeq = 0;
 
+  function resolveRenewSegmentEvaluatedForExitPolicy(openPos) {
+    let renewSegment = openPositionRenewSegmentEvaluated(openPos);
+    if (
+      lastExitPolicy
+      && lastExitPolicy.last_renew_segment_evaluated != null
+    ) {
+      const exitPolicyRenewSegment = Number(lastExitPolicy.last_renew_segment_evaluated);
+      if (exitPolicyRenewSegment > renewSegment) {
+        renewSegment = exitPolicyRenewSegment;
+      }
+    }
+    return renewSegment;
+  }
+
   function buildExitPolicyPayload(symbol, openPos) {
     if (!openPos || !openPos.side || !openPos.metrics) return null;
     const m = openPos.metrics;
