@@ -55,6 +55,8 @@
 
 **Счётчик баров (micro live):** UI держит монотонный кэш `bars_elapsed` (источники — `GET /api/trade-journal/bars-elapsed` раз в 30 с и `exit_policy.bars_held` из inference artifact). Параллельные refresh журнала не откатывают счётчик; карточка exit и строка «Всего баров» показывают одно значение. Entry/exit/discard инвалидируют in-flight GET (`journalApplyGeneration`); stale read не может «переоткрыть» закрытую позицию; callback `refreshExitPolicy` не рендерит устаревший snapshot state.
 
+**Sign_only renew — цвета UI:** синий progress = счёт до checkpoint; оранжевый pulsing = момент checkpoint (ожидание pred); зелёный info + карточка «HOLD · renew OK» = знак совпал, сегмент продлён (не exit); красный = pred flip → CLOSE.
+
 ---
 
 ## 4. Масштабы (агрегация баров)

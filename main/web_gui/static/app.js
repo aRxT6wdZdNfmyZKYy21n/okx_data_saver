@@ -2197,6 +2197,87 @@
       });
   }
 
+  function formatSignOnlyExitReason(exitReason) {
+    const reason = String(exitReason || '');
+    if (reason === 'before_min_hold') {
+      return 'до min hold';
+    }
+    if (reason === 'between_renew_checkpoints') {
+      return 'между checkpoint';
+    }
+    if (reason === 'sign_valid_renewed') {
+      return 'знак OK · renew';
+    }
+    if (reason === 'sign_flip_at_checkpoint') {
+      return 'разворот pred';
+    }
+    if (!reason) {
+      return '—';
+    }
+    return reason;
+  }
+
+  function resolveSignOnlyRenewUi(lastExitPolicy, metrics) {
+    if (lastExitPolicy && lastExitPolicy.suggest_close) {
+      return {
+        phase: 'close',
+        stateLabel: 'разворот pred',
+        stateClass: 'renew-state-close',
+        progressClass: 'renew-close',
+        checkpointHint: 'flip @ checkpoint — CLOSE',
+        infoHtml: (
+          '<div class="trade-journal-alert trade-journal-alert-close">'
+          + '⏹ Pred flip @ checkpoint — рассмотри выход (не renew)'
+          + '</div>'
+        ),
+      };
+    }
+    if (lastExitPolicy && lastExitPolicy.exit_reason === 'sign_valid_renewed') {
+      const segmentNumber = lastExitPolicy.current_renew_segment != null
+        ? Number(lastExitPolicy.current_renew_segment)
+        : null;
+      const renewText = segmentNumber != null
+        ? `✓ Renew OK — сегмент #${segmentNumber}, pred в сторону сделки · держим`
+        : '✓ Renew OK — pred в сторону сделки · держим';
+      return {
+        phase: 'renewed',
+        stateLabel: 'знак OK · renew',
+        stateClass: 'renew-state-renewed',
+        progressClass: 'renew-ok',
+        checkpointHint: 'renew OK · новый сегмент',
+        infoHtml: `<div class="trade-journal-info">${renewText}</div>`,
+      };
+    }
+    if (
+      metrics
+      && (metrics.pending_segment_eval || metrics.at_renew_checkpoint)
+    ) {
+      return {
+        phase: 'checkpoint',
+        stateLabel: 'checkpoint',
+        stateClass: 'renew-state-checkpoint',
+        progressClass: 'renew-checkpoint',
+        checkpointHint: 'checkpoint — проверка pred…',
+        infoHtml: '',
+      };
+    }
+    const barsUntilCheckpoint = metrics && metrics.bars_until_checkpoint != null
+      ? Number(metrics.bars_until_checkpoint)
+      : null;
+    return {
+      phase: 'counting',
+      stateLabel: metrics && Number(metrics.bars_elapsed) < Number(metrics.min_hold_steps || 0)
+        ? 'до min hold'
+        : 'между checkpoint',
+      stateClass: '',
+      progressClass: '',
+      checkpointHint: barsUntilCheckpoint != null
+        ? `до checkpoint: ${barsUntilCheckpoint} bar`
+        : 'до checkpoint',
+      infoHtml: '',
+    };
+  }
+
   function renderSignOnlyRenewMetrics(openPos, m, symbol) {
     const deployHorizon = resolveDeployEvalHorizon(openPos, symbol);
     const intervalSteps = m.renew_interval_steps != null
@@ -2212,19 +2293,16 @@
     const segmentsCompleted = m.segments_completed != null
       ? Number(m.segments_completed)
       : 0;
-    const barsUntilCheckpoint = m.bars_until_checkpoint != null
-      ? Number(m.bars_until_checkpoint)
-      : 0;
-    let renewState = 'between_renew_checkpoints';
+    const renewUi = resolveSignOnlyRenewUi(lastExitPolicy, m);
+    let renewState = renewUi.stateLabel;
     if (lastExitPolicy && lastExitPolicy.exit_reason) {
-      renewState = String(lastExitPolicy.exit_reason);
+      renewState = formatSignOnlyExitReason(lastExitPolicy.exit_reason);
     } else if (totalBarsElapsed < (m.min_hold_steps != null ? Number(m.min_hold_steps) : intervalSteps)) {
-      renewState = 'before_min_hold';
+      renewState = 'до min hold';
     }
-    const progressClass = m.pending_segment_eval || m.at_renew_checkpoint ? 'at-target' : '';
-    const checkpointHint = (m.pending_segment_eval || m.at_renew_checkpoint)
-      ? 'checkpoint — проверка знака pred'
-      : `до checkpoint: ${barsUntilCheckpoint} bar`;
+    const stateClass = renewUi.stateClass;
+    const progressClass = renewUi.progressClass;
+    const checkpointHint = renewUi.checkpointHint;
     return `
         <div class="trade-journal-metrics trade-journal-sign-only-metrics">
           <span>Exit: <strong>sign_only renew @ ${deployHorizon}</strong></span>
@@ -2232,7 +2310,7 @@
           <span>Сегмент: <strong>${segmentBars}</strong> / ${intervalSteps}</span>
           <span>Продлений: <strong>${segmentsCompleted}</strong></span>
           <span>${checkpointHint}</span>
-          <span>state: <strong>${renewState}</strong></span>
+          <span>state: <strong class="${stateClass}">${renewState}</strong></span>
         </div>
         <div class="trade-journal-progress" title="${Number(m.progress_pct).toFixed(1)}% сегмента">
           <div class="trade-journal-progress-bar ${progressClass}" style="width: ${Math.min(100, Number(m.progress_pct))}%"></div>
@@ -2252,12 +2330,19 @@
       const predLinear = exitPolicy.pred_eval_linear != null
         ? formatPct(Number(exitPolicy.pred_eval_linear) * 100)
         : '—';
-      const reason = exitPolicy.exit_reason ? String(exitPolicy.exit_reason) : '—';
+      const reason = formatSignOnlyExitReason(exitPolicy.exit_reason);
       let actionClass = 'exit-policy-hold';
-      if (action === 'CLOSE') actionClass = 'exit-policy-close';
+      let actionLabel = `Exit sign_only @ x32: ${action}`;
+      if (action === 'CLOSE') {
+        actionClass = 'exit-policy-close-flip';
+        actionLabel = 'Exit sign_only @ x32: CLOSE · pred flip';
+      } else if (exitPolicy.exit_reason === 'sign_valid_renewed') {
+        actionClass = 'exit-policy-renewed';
+        actionLabel = 'Exit sign_only @ x32: HOLD · renew OK';
+      }
       return `
       <div class="exit-policy-card ${actionClass}">
-        <div class="exit-policy-action">Exit sign_only @ x32: ${action}</div>
+        <div class="exit-policy-action">${actionLabel}</div>
         <div class="exit-policy-meta">
           <span>pred: <strong>${predLinear}</strong></span>
           <span>reason: <strong>${reason}</strong></span>
@@ -2483,14 +2568,12 @@
       const progressClass = m.at_target_horizon ? 'at-target' : '';
       const evalHorizonLabel = resolveDeployEvalHorizon(openPos, symbol);
       const signOnlyRenew = exitStackUsesSignOnlyRenew(symbol) || Boolean(m.sign_only_renew);
+      const renewUi = signOnlyRenew ? resolveSignOnlyRenewUi(lastExitPolicy, m) : null;
       alertHtml = m.at_target_horizon && !signOnlyRenew
         ? `<div class="trade-journal-alert">⚠ Достигнут горизонт ${evalHorizonLabel} — по policy пора выходить</div>`
         : '';
-      if (signOnlyRenew && lastExitPolicy && lastExitPolicy.suggest_close) {
-        alertHtml += `<div class="trade-journal-alert">⏹ Exit sign_only: pred flip @ checkpoint — рассмотри выход</div>`;
-      }
-      if (signOnlyRenew && lastExitPolicy && lastExitPolicy.at_renew_checkpoint && !lastExitPolicy.suggest_close) {
-        alertHtml += `<div class="trade-journal-alert">↻ sign_only renew @ ${evalHorizonLabel}: знак совпадает — сегмент продлён</div>`;
+      if (renewUi && renewUi.infoHtml) {
+        alertHtml += renewUi.infoHtml;
       }
       if (exitGbmEnabled && lastExitPolicy && lastExitPolicy.suggest_close
         && lastExitPolicy.mode !== 'rolling_h_renew_sign_only') {
