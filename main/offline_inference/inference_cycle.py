@@ -23,7 +23,9 @@ from main.web_gui.inference_service import (
 from main.web_gui.trade_journal_service import (
     apply_mark_price_to_open_position,
     compute_position_metrics,
+    compute_sign_only_renew_metrics,
     get_journal_state,
+    parse_eval_horizon_steps,
 )
 from settings import settings
 
@@ -96,45 +98,97 @@ def _build_exit_payloads(
     if not isinstance(current_policy, dict):
         raise RuntimeError('Inference policy must be a dict')
 
-    if 'entry_predictions' not in open_position_data:
-        return None, None
-    if 'entry_policy' not in open_position_data:
-        return None, None
+    exit_stack_mode: str | None = None
+    if 'exit_stack_mode' in open_position_data:
+        exit_stack_mode = str(open_position_data['exit_stack_mode'])
+    sign_only_exit = exit_stack_mode == 'rolling_h_renew_sign_only'
 
-    entry_predictions = open_position_data['entry_predictions']
-    entry_policy = open_position_data['entry_policy']
-    if not isinstance(entry_predictions, dict):
-        return None, None
-    if not isinstance(entry_policy, dict):
-        return None, None
+    entry_predictions: dict[str, object] | None = None
+    entry_policy: dict[str, object] | None = None
+    if not sign_only_exit:
+        if 'entry_predictions' not in open_position_data:
+            return None, None
+        if 'entry_policy' not in open_position_data:
+            return None, None
+        entry_predictions_raw = open_position_data['entry_predictions']
+        entry_policy_raw = open_position_data['entry_policy']
+        if not isinstance(entry_predictions_raw, dict):
+            return None, None
+        if not isinstance(entry_policy_raw, dict):
+            return None, None
+        entry_predictions = entry_predictions_raw
+        entry_policy = entry_policy_raw
 
-    metrics = compute_position_metrics(
-        side=str(open_position_data['side']),
-        entry_price=float(open_position_data['entry_price']),
-        notional_usd=float(open_position_data['notional_usd']),
-        eval_horizon_steps=int(open_position_data['eval_horizon_steps']),
-        bars_elapsed=bars_elapsed,
-        mark_price=mark_price,
-        excursion=open_position_data['excursion']
-        if 'excursion' in open_position_data
-        else None,
-    )
+    if sign_only_exit:
+        min_hold_steps = int(open_position_data['exit_stack_min_hold_steps'])
+        if 'exit_stack_eval_horizon' in open_position_data:
+            check_interval_steps = parse_eval_horizon_steps(
+                str(open_position_data['exit_stack_eval_horizon']),
+            )
+        else:
+            check_interval_steps = int(open_position_data['eval_horizon_steps'])
+        metrics = compute_sign_only_renew_metrics(
+            bars_elapsed=bars_elapsed,
+            min_hold_steps=min_hold_steps,
+            check_interval_steps=check_interval_steps,
+            mark_price=mark_price,
+            side=str(open_position_data['side']),
+            entry_price=float(open_position_data['entry_price']),
+            notional_usd=float(open_position_data['notional_usd']),
+            excursion=open_position_data['excursion']
+            if 'excursion' in open_position_data
+            else None,
+        )
+    else:
+        metrics = compute_position_metrics(
+            side=str(open_position_data['side']),
+            entry_price=float(open_position_data['entry_price']),
+            notional_usd=float(open_position_data['notional_usd']),
+            eval_horizon_steps=int(open_position_data['eval_horizon_steps']),
+            bars_elapsed=bars_elapsed,
+            mark_price=mark_price,
+            excursion=open_position_data['excursion']
+            if 'excursion' in open_position_data
+            else None,
+        )
 
-    common_payload: dict[str, object] = {
-        'symbol_id': symbol_id,
-        'side': open_position_data['side'],
-        'eval_horizon': open_position_data['eval_horizon'],
-        'bars_held': metrics['bars_elapsed'],
-        'entry_predictions': entry_predictions,
-        'current_predictions': current_predictions,
-        'unrealized_linear': _linear_metric_from_pct(metrics['unrealized_net_return_pct']),
-        'mfe_linear': _linear_metric_from_pct(metrics['mfe_net_return_pct']),
-        'mae_linear': _linear_metric_from_pct(metrics['mae_net_return_pct']),
-        'giveback_linear': _linear_metric_from_pct(metrics['giveback_net_return_pct']),
-    }
+    common_payload: dict[str, object] | None = None
+    if entry_predictions is not None and entry_policy is not None:
+        common_payload = {
+            'symbol_id': symbol_id,
+            'side': open_position_data['side'],
+            'eval_horizon': open_position_data['eval_horizon'],
+            'bars_held': metrics['bars_elapsed'],
+            'entry_predictions': entry_predictions,
+            'current_predictions': current_predictions,
+            'unrealized_linear': _linear_metric_from_pct(
+                metrics['unrealized_net_return_pct'],
+            ),
+            'mfe_linear': _linear_metric_from_pct(metrics['mfe_net_return_pct']),
+            'mae_linear': _linear_metric_from_pct(metrics['mae_net_return_pct']),
+            'giveback_linear': _linear_metric_from_pct(
+                metrics['giveback_net_return_pct'],
+            ),
+        }
 
     exit_policy_result: dict[str, object] | None = None
-    if settings.WEB_GUI_EXIT_GBM_ENABLED:
+    if sign_only_exit:
+        if 'exit_stack_eval_horizon' in open_position_data:
+            deploy_eval_horizon = str(open_position_data['exit_stack_eval_horizon'])
+        else:
+            deploy_eval_horizon = str(open_position_data['eval_horizon'])
+        exit_policy_payload = {
+            'symbol_id': symbol_id,
+            'side': open_position_data['side'],
+            'eval_horizon': deploy_eval_horizon,
+            'bars_held': metrics['bars_elapsed'],
+            'current_predictions': current_predictions,
+            'exit_stack_mode': exit_stack_mode,
+        }
+        exit_policy_result = run_remote_exit_policy(exit_policy_payload)
+    elif settings.WEB_GUI_EXIT_GBM_ENABLED:
+        if common_payload is None:
+            return None, None
         if 'probabilities' not in current_policy:
             raise RuntimeError('Inference policy missing probabilities for exit GBM')
         if 'probabilities' not in entry_policy:
@@ -154,11 +208,14 @@ def _build_exit_payloads(
 
     exit_transformer_result: dict[str, object] | None = None
     if settings.WEB_GUI_EXIT_TRANSFORMER_ENABLED:
-        exit_transformer_payload = dict(common_payload)
-        exit_transformer_result = run_remote_exit_transformer_with_x_seq(
-            payload=exit_transformer_payload,
-            x_seq=x_seq,
-        )
+        if common_payload is None:
+            exit_transformer_result = build_exit_transformer_disabled_response()
+        else:
+            exit_transformer_payload = dict(common_payload)
+            exit_transformer_result = run_remote_exit_transformer_with_x_seq(
+                payload=exit_transformer_payload,
+                x_seq=x_seq,
+            )
     else:
         exit_transformer_result = build_exit_transformer_disabled_response()
 

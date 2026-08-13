@@ -244,6 +244,8 @@
   let horizonAlertPositionId = null;
   let previousExitGbmSuggestClose = false;
   let exitGbmAlertPositionId = null;
+  let signOnlyCloseLatchPositionId = null;
+  let signOnlyAlertSequence = 0;
   let previousExitTransformerSuggestClose = false;
   let exitTransformerAlertPositionId = null;
   let exitOverlaySession = null;
@@ -639,6 +641,7 @@
   function resetExitGbmAlertState() {
     previousExitGbmSuggestClose = false;
     exitGbmAlertPositionId = null;
+    signOnlyCloseLatchPositionId = null;
     lastExitPolicy = null;
   }
 
@@ -763,8 +766,23 @@
     previousExitGbmSuggestClose = true;
   }
 
+  function showExitStackSignOnlyBrowserNotification(title, body) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    signOnlyAlertSequence += 1;
+    try {
+      new Notification(title, {
+        body,
+        tag: `okx-micro-live-sign-only-${signOnlyAlertSequence}`,
+      });
+    } catch (_) {
+      // no-op
+    }
+  }
+
   function maybeNotifyExitStackSignOnlyAlert(openPos, exitPolicy, symbol) {
     if (!exitStackUsesSignOnlyRenew(symbol)) {
+      signOnlyCloseLatchPositionId = null;
       return;
     }
     if (!openPos || !exitPolicy) {
@@ -773,16 +791,27 @@
     if (exitPolicy.mode !== 'rolling_h_renew_sign_only') {
       return;
     }
+    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
     const suggestClose = Boolean(exitPolicy.suggest_close);
-    if (!suggestClose) {
+    if (suggestClose) {
+      signOnlyCloseLatchPositionId = positionId;
+    } else if (
+      exitPolicy.at_renew_checkpoint
+      && exitPolicy.exit_reason === 'sign_valid_renewed'
+    ) {
+      if (signOnlyCloseLatchPositionId === positionId) {
+        signOnlyCloseLatchPositionId = null;
+      }
       return;
     }
-    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
+    if (signOnlyCloseLatchPositionId !== positionId) {
+      return;
+    }
     const sideLabel = String(openPos.side || '').toUpperCase();
     const title = 'Micro live: sign_only renew → CLOSE';
     const body = `${sideLabel} ${openPos.symbol_id} — pred sign flip @ x32 checkpoint`;
     playExitGbmAlertSound();
-    showExitGbmBrowserNotification(title, body);
+    showExitStackSignOnlyBrowserNotification(title, body);
     exitGbmAlertPositionId = positionId;
   }
 
@@ -1447,6 +1476,7 @@
               entryHint,
               true,
             );
+            rerenderTradeJournalIfOpen(symbol);
             renderInferenceStatusBar();
             startInferenceStatusTick();
             return;
@@ -1502,6 +1532,7 @@
           response.entry_hint || null,
           false,
         );
+        rerenderTradeJournalIfOpen(symbol);
         renderInferenceStatusBar();
         startInferenceStatusTick();
       })
@@ -1973,8 +2004,24 @@
   function applyJournalState(state, symbol) {
     syncJournalBarsElapsedFromState(state);
     applyJournalDefaultsFromState(state);
-    renderTradeJournal(state, symbol);
     const openPos = state.open_position;
+    const shouldRefreshExitPolicy = openPos
+      && openPos.symbol_id === symbol
+      && (exitGbmEnabled || getExitStackForSymbol(symbol))
+      && lastPredictions;
+    if (shouldRefreshExitPolicy) {
+      return refreshExitPolicy(symbol, openPos).then(() => {
+        renderTradeJournal(state, symbol);
+        if (
+          openPos
+          && openPos.entry_start_trade_id != null
+          && lastJournalBarsElapsed == null
+        ) {
+          pollJournalBarsElapsed(symbol, Number(openPos.entry_start_trade_id));
+        }
+      });
+    }
+    renderTradeJournal(state, symbol);
     if (
       openPos
       && openPos.symbol_id === symbol
@@ -1983,6 +2030,18 @@
     ) {
       pollJournalBarsElapsed(symbol, Number(openPos.entry_start_trade_id));
     }
+    return Promise.resolve();
+  }
+
+  function rerenderTradeJournalIfOpen(symbol) {
+    if (!lastJournalState || !journalHasOpenPosition || !symbol) {
+      return;
+    }
+    const openPos = lastJournalState.open_position;
+    if (!openPos || openPos.symbol_id !== symbol) {
+      return;
+    }
+    renderTradeJournal(lastJournalState, symbol);
   }
 
   function refreshTradeJournal(symbol) {
@@ -2025,6 +2084,9 @@
     lastJournalState = state;
     const openPos = state.open_position;
     journalHasOpenPosition = Boolean(openPos);
+    if (!openPos) {
+      signOnlyCloseLatchPositionId = null;
+    }
     if (openPos) {
       resetEntryAllowedAlertState();
     }
