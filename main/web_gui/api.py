@@ -355,14 +355,16 @@ class ExitPolicyRequest(BaseModel):
     side: str
     eval_horizon: str
     bars_held: int = Field(..., ge=0)
-    entry_predictions: dict[str, float]
-    current_predictions: dict[str, float]
-    entry_policy: dict
-    current_policy: dict
-    unrealized_linear: float
-    mfe_linear: float
-    mae_linear: float
-    giveback_linear: float
+    entry_predictions: dict[str, float] | None = None
+    current_predictions: dict[str, float] | None = None
+    entry_policy: dict | None = None
+    current_policy: dict | None = None
+    unrealized_linear: float | None = None
+    mfe_linear: float | None = None
+    mae_linear: float | None = None
+    giveback_linear: float | None = None
+    exit_stack_mode: str | None = None
+    last_renew_segment_evaluated: int | None = None
 
 
 class ExitTransformerRequest(BaseModel):
@@ -386,12 +388,14 @@ async def post_exit_policy(body: ExitPolicyRequest) -> dict:
     except KeyError:
         raise HTTPException(422, detail=f'Unknown symbol_id: {body.symbol_id}')
 
-    if not settings.WEB_GUI_EXIT_GBM_ENABLED:
+    use_exit_stack = body.exit_stack_mode is not None
+    if not settings.WEB_GUI_EXIT_GBM_ENABLED and not use_exit_stack:
         return build_exit_policy_disabled_response()
 
+    payload = body.model_dump(exclude_none=True)
     return await run_in_spawned_process_async(
         _worker_exit_policy,
-        body.model_dump(),
+        payload,
         pool_kind='heavy',
     )
 

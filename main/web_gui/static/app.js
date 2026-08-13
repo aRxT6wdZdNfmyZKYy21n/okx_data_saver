@@ -177,6 +177,8 @@
   const JOURNAL_REFRESH_INTERVAL_SEC = 15;
   const JOURNAL_BARS_ELAPSED_INTERVAL_SEC = 30;
   const X1_BAR_REFRESH_INTERVAL_SEC = 60;
+  const EXIT_CLOSE_BEEP_INTERVAL_MS = 5000;
+  const EXIT_CLOSE_NOTIFICATION_INTERVAL_MS = 30000;
   const scaleSelect = document.getElementById('scale');
   const symbolSelect = document.getElementById('symbol');
   const limitInput = document.getElementById('limit');
@@ -244,8 +246,22 @@
   let horizonAlertPositionId = null;
   let previousExitGbmSuggestClose = false;
   let exitGbmAlertPositionId = null;
-  let signOnlyCloseLatchPositionId = null;
   let signOnlyAlertSequence = 0;
+  let exitCloseAlertTimer = null;
+  const exitAlertBeepAtMs = {
+    sign_only_close: 0,
+    gbm_close: 0,
+    transformer_close: 0,
+    horizon: 0,
+    policy_flip: 0,
+  };
+  const exitAlertNotifyAtMs = {
+    sign_only_close: 0,
+    gbm_close: 0,
+    transformer_close: 0,
+    horizon: 0,
+    policy_flip: 0,
+  };
   let previousExitTransformerSuggestClose = false;
   let exitTransformerAlertPositionId = null;
   let exitOverlaySession = null;
@@ -641,8 +657,72 @@
   function resetExitGbmAlertState() {
     previousExitGbmSuggestClose = false;
     exitGbmAlertPositionId = null;
-    signOnlyCloseLatchPositionId = null;
     lastExitPolicy = null;
+    resetExitAlertTimingState();
+  }
+
+  function resetExitAlertTimingState() {
+    Object.keys(exitAlertBeepAtMs).forEach((key) => {
+      exitAlertBeepAtMs[key] = 0;
+    });
+    Object.keys(exitAlertNotifyAtMs).forEach((key) => {
+      exitAlertNotifyAtMs[key] = 0;
+    });
+  }
+
+  function shouldExitAlertBeep(alertKey) {
+    const now = Date.now();
+    if (now - exitAlertBeepAtMs[alertKey] < EXIT_CLOSE_BEEP_INTERVAL_MS) {
+      return false;
+    }
+    exitAlertBeepAtMs[alertKey] = now;
+    return true;
+  }
+
+  function shouldExitAlertNotify(alertKey) {
+    const now = Date.now();
+    if (now - exitAlertNotifyAtMs[alertKey] < EXIT_CLOSE_NOTIFICATION_INTERVAL_MS) {
+      return false;
+    }
+    exitAlertNotifyAtMs[alertKey] = now;
+    return true;
+  }
+
+  function stopExitCloseAlertTimer() {
+    if (exitCloseAlertTimer) {
+      clearInterval(exitCloseAlertTimer);
+      exitCloseAlertTimer = null;
+    }
+  }
+
+  function startExitCloseAlertTimer() {
+    if (exitCloseAlertTimer) {
+      return;
+    }
+    exitCloseAlertTimer = setInterval(() => {
+      if (!journalHasOpenPosition || !lastJournalState) {
+        stopExitCloseAlertTimer();
+        return;
+      }
+      const symbol = symbolSelect.value;
+      const openPos = lastJournalState.open_position;
+      if (!openPos || openPos.symbol_id !== symbol) {
+        return;
+      }
+      runExitAlertChecks(openPos, symbol);
+    }, EXIT_CLOSE_BEEP_INTERVAL_MS);
+  }
+
+  function runExitAlertChecks(openPos, symbol) {
+    if (!openPos || !openPos.metrics) {
+      return;
+    }
+    const m = openPos.metrics;
+    maybeNotifyHorizonAlert(openPos, m.at_target_horizon && !exitStackUsesSignOnlyRenew(symbol));
+    maybeNotifyExitGbmAlert(openPos, lastExitPolicy);
+    maybeNotifyExitStackSignOnlyAlert(openPos, lastExitPolicy, symbol);
+    maybeNotifyExitTransformerAlert(openPos, lastExitTransformer);
+    maybeNotifyPolicyFlipAlert(openPos, symbol);
   }
 
   function resetExitTransformerAlertState() {
@@ -735,12 +815,31 @@
     playTone(1319, 0.2, 0.16, 0.09);
   }
 
+  function playSignOnlyCloseAlertSound() {
+    if (!isJournalSoundEnabled()) return;
+    unlockAudio();
+    playTone(880, 0.1, 0, 0.12);
+    playTone(880, 0.1, 0.15, 0.12);
+    playTone(1319, 0.22, 0.32, 0.12);
+  }
+
+  function playPolicyFlipAlertSound() {
+    if (!isJournalSoundEnabled()) return;
+    unlockAudio();
+    playTone(740, 0.12, 0, 0.1);
+    playTone(988, 0.18, 0.18, 0.1);
+  }
+
   function maybeNotifyExitGbmAlert(openPos, exitPolicy) {
     if (!exitGbmEnabled) {
       previousExitGbmSuggestClose = false;
       return;
     }
     if (!openPos || !exitPolicy) {
+      previousExitGbmSuggestClose = false;
+      return;
+    }
+    if (exitPolicy.mode === 'rolling_h_renew_sign_only') {
       previousExitGbmSuggestClose = false;
       return;
     }
@@ -757,8 +856,10 @@
     const title = 'Micro live: Exit GBM → CLOSE';
     const body = `${sideLabel} ${openPos.symbol_id} — P(close)=${(Number(pClose) * 100).toFixed(1)}% ≥ ${(Number(threshold) * 100).toFixed(1)}%`;
 
-    if (!previousExitGbmSuggestClose) {
+    if (shouldExitAlertBeep('gbm_close')) {
       playExitGbmAlertSound();
+    }
+    if (shouldExitAlertNotify('gbm_close')) {
       showExitGbmBrowserNotification(title, body);
     }
 
@@ -782,7 +883,6 @@
 
   function maybeNotifyExitStackSignOnlyAlert(openPos, exitPolicy, symbol) {
     if (!exitStackUsesSignOnlyRenew(symbol)) {
-      signOnlyCloseLatchPositionId = null;
       return;
     }
     if (!openPos || !exitPolicy) {
@@ -791,27 +891,19 @@
     if (exitPolicy.mode !== 'rolling_h_renew_sign_only') {
       return;
     }
-    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
-    const suggestClose = Boolean(exitPolicy.suggest_close);
-    if (suggestClose) {
-      signOnlyCloseLatchPositionId = positionId;
-    } else if (
-      exitPolicy.at_renew_checkpoint
-      && exitPolicy.exit_reason === 'sign_valid_renewed'
-    ) {
-      if (signOnlyCloseLatchPositionId === positionId) {
-        signOnlyCloseLatchPositionId = null;
-      }
-      return;
-    }
-    if (signOnlyCloseLatchPositionId !== positionId) {
+    if (!Boolean(exitPolicy.suggest_close)) {
       return;
     }
     const sideLabel = String(openPos.side || '').toUpperCase();
     const title = 'Micro live: sign_only renew → CLOSE';
-    const body = `${sideLabel} ${openPos.symbol_id} — pred sign flip @ x32 checkpoint`;
-    playExitGbmAlertSound();
-    showExitStackSignOnlyBrowserNotification(title, body);
+    const body = `${sideLabel} ${openPos.symbol_id} — pred sign flip @ checkpoint`;
+    if (shouldExitAlertBeep('sign_only_close')) {
+      playSignOnlyCloseAlertSound();
+    }
+    if (shouldExitAlertNotify('sign_only_close')) {
+      showExitStackSignOnlyBrowserNotification(title, body);
+    }
+    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
     exitGbmAlertPositionId = positionId;
   }
 
@@ -854,13 +946,40 @@
     const title = 'Micro live: Exit Transformer v2 → CLOSE';
     const body = `${sideLabel} ${openPos.symbol_id} — Δpnl=${formatPct(Number(deltaPnl) * 100)} > ${formatPct(Number(threshold) * 100)}`;
 
-    if (!previousExitTransformerSuggestClose) {
+    if (shouldExitAlertBeep('transformer_close')) {
       playExitTransformerAlertSound();
+    }
+    if (shouldExitAlertNotify('transformer_close')) {
       showExitTransformerBrowserNotification(title, body);
     }
 
     exitTransformerAlertPositionId = positionId;
     previousExitTransformerSuggestClose = true;
+  }
+
+  function maybeNotifyPolicyFlipAlert(openPos, symbol) {
+    if (!openPos || !openPos.side) {
+      return;
+    }
+    const policySideNow = policyActionToSide(lastPolicy && lastPolicy.action);
+    if (!policySideNow || policySideNow === openPos.side) {
+      return;
+    }
+    const sideLabel = String(openPos.side || '').toUpperCase();
+    const title = 'Micro live: policy flip — рассмотри exit';
+    const body = `${sideLabel} ${openPos.symbol_id} — policy → ${policySideNow.toUpperCase()}`;
+    if (shouldExitAlertBeep('policy_flip')) {
+      playPolicyFlipAlertSound();
+    }
+    if (shouldExitAlertNotify('policy_flip')) {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(title, { body, tag: 'okx-micro-live-policy-flip' });
+        } catch (_) {
+          // no-op
+        }
+      }
+    }
   }
 
   function showExitTransformerBrowserNotification(title, body) {
@@ -886,13 +1005,15 @@
     const body = `${sideLabel} ${openPos.symbol_id} — счётчик баров достиг горизонта, закрой позицию на бирже.`;
 
     const isFirstCrossThisSession = !previousAtTargetHorizon && !isFirstJournalLoad;
-    if (isFirstCrossThisSession) {
-      playHorizonReachedSound();
-    } else {
-      playHorizonOverdueSound();
+    if (shouldExitAlertBeep('horizon')) {
+      if (isFirstCrossThisSession) {
+        playHorizonReachedSound();
+      } else {
+        playHorizonOverdueSound();
+      }
     }
 
-    if (!previousAtTargetHorizon) {
+    if (shouldExitAlertNotify('horizon')) {
       showHorizonBrowserNotification(title, body);
     }
 
@@ -1767,6 +1888,10 @@
   function applyInferenceExitPolicy(incoming, symbol) {
     if (exitPolicyIsRenderable(incoming)) {
       lastExitPolicy = incoming;
+      if (journalHasOpenPosition && lastJournalState && lastJournalState.open_position) {
+        runExitAlertChecks(lastJournalState.open_position, symbol);
+        startExitCloseAlertTimer();
+      }
       return;
     }
     if (exitStackUsesSignOnlyRenew(symbol) && exitPolicyIsSignOnly(lastExitPolicy)) {
@@ -1876,6 +2001,10 @@
         }
         if (exitPolicyIsRenderable(result)) {
           lastExitPolicy = result;
+        }
+        if (journalHasOpenPosition && lastJournalState && lastJournalState.open_position) {
+          runExitAlertChecks(lastJournalState.open_position, symbol);
+          startExitCloseAlertTimer();
         }
         return lastExitPolicy;
       })
@@ -2125,7 +2254,10 @@
     const openPos = state.open_position;
     journalHasOpenPosition = Boolean(openPos);
     if (!openPos) {
-      signOnlyCloseLatchPositionId = null;
+      stopExitCloseAlertTimer();
+      resetExitAlertTimingState();
+    } else {
+      startExitCloseAlertTimer();
     }
     if (openPos) {
       resetEntryAllowedAlertState();
@@ -2145,10 +2277,7 @@
     let alertHtml = '';
     if (hasOpen && openPos.metrics) {
       const m = openPos.metrics;
-      maybeNotifyHorizonAlert(openPos, m.at_target_horizon && !exitStackUsesSignOnlyRenew(symbol));
-      maybeNotifyExitGbmAlert(openPos, lastExitPolicy);
-      maybeNotifyExitStackSignOnlyAlert(openPos, lastExitPolicy, symbol);
-      maybeNotifyExitTransformerAlert(openPos, lastExitTransformer);
+      runExitAlertChecks(openPos, symbol);
       updateExitOverlaySession(openPos);
       const progressClass = m.at_target_horizon ? 'at-target' : '';
       const evalHorizonLabel = resolveDeployEvalHorizon(openPos, symbol);
@@ -3823,6 +3952,7 @@
     if (journalRefreshTimer) clearInterval(journalRefreshTimer);
     if (journalBarsElapsedTimer) clearInterval(journalBarsElapsedTimer);
     if (x1BarRefreshTimer) clearInterval(x1BarRefreshTimer);
+    stopExitCloseAlertTimer();
     inferenceRefreshTimer = null;
     journalRefreshTimer = null;
     journalBarsElapsedTimer = null;
