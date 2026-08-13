@@ -10,6 +10,7 @@ import traceback
 import types
 from pathlib import Path
 
+import numpy as np
 import polars
 from omegaconf import OmegaConf
 
@@ -27,9 +28,9 @@ def _install_dataset_package(package_dir: Path) -> None:
 
 def _build_level0_to_raw_row_indices(
     raw_df: polars.DataFrame,
-    level0_df: polars.DataFrame,
+    level0_close_price_log2: np.ndarray,
 ) -> list[int]:
-    level0_log2 = level0_df['close_price_log2'].to_numpy()
+    level0_log2 = level0_close_price_log2.astype(np.float64)
     raw_log2 = raw_df['close_price'].log(base=2).to_numpy()
 
     raw_indices: list[int] = []
@@ -146,8 +147,10 @@ def main() -> None:
         volume_windows_config=volume_windows_config,
     )
 
-    level0_df = train_dataset.aggregated_data[0]
-    level0_to_raw = _build_level0_to_raw_row_indices(raw_df, level0_df)
+    level0_to_raw = _build_level0_to_raw_row_indices(
+        raw_df=raw_df,
+        level0_close_price_log2=train_dataset.level0_close_price_log2_numpy(),
+    )
     sample_trade_ids = _sample_start_trade_ids(
         raw_df=raw_df,
         start_index=int(train_dataset.start_index),

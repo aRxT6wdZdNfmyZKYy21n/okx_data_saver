@@ -31,7 +31,7 @@ from main.web_gui.trade_research_dataset_common import (
 )
 from main.web_gui.inference_service import (
     _build_dataset,
-    _build_level0_to_raw_row_indices,
+    _build_level0_to_raw_row_indices_from_dataset,
     _build_train_level0_context,
     _prepare_payload_dict_from_sample,
     _prepare_payload_dict_from_train_sample,
@@ -734,7 +734,7 @@ def run_trade_research_export(
         df,
         metadata,
     )
-    train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
+    train_dataset, raw_to_train_level0_row = _build_train_level0_context(
         df=df,
         metadata=metadata,
     )
@@ -746,11 +746,13 @@ def run_trade_research_export(
         'Dataset preparation done: samples=%d start_index=%d level0_rows=%d',
         dataset_length,
         start_index,
-        int(train_level0_df.height),
+        dataset.dataset.level0_row_count(),
     )
-    level0_df = dataset.dataset.aggregated_data[0]
-    level0_height = int(level0_df.height)
-    level0_to_raw_row_indices = _build_level0_to_raw_row_indices(df, level0_df)
+    level0_height = int(dataset.dataset.level0_row_count())
+    level0_to_raw_row_indices = _build_level0_to_raw_row_indices_from_dataset(
+        raw_df=df,
+        dataset=dataset.dataset,
+    )
 
     max_sample_index = pnl_max_sample_index(
         dataset_length=dataset_length,

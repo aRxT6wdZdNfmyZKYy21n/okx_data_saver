@@ -36,7 +36,7 @@ from main.web_gui.trade_research_dataset_common import (
 )
 from main.web_gui.inference_service import (
     _build_dataset,
-    _build_level0_to_raw_row_indices,
+    _build_level0_to_raw_row_indices_from_dataset,
     _build_train_level0_context,
     _encode_payload,
     _prepare_payload_dict_from_sample,
@@ -45,6 +45,7 @@ from main.web_gui.inference_service import (
     fetch_inference_metadata,
 )
 from settings import settings
+from trading_bot_dataset.src.dataset import HybridTradeDataset
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +325,7 @@ def _realized_linear_return_train_aligned(
     inference_entry_bar_index: int,
     horizon_steps: int,
     inference_level0_to_raw: list[int],
-    train_level0_df: polars.DataFrame,
+    train_dataset: HybridTradeDataset,
     raw_to_train_level0_row: dict[int, int],
 ) -> float | None:
     raw_entry_row = inference_level0_to_raw[inference_entry_bar_index]
@@ -332,10 +333,11 @@ def _realized_linear_return_train_aligned(
         return None
     train_entry_row = raw_to_train_level0_row[raw_entry_row]
     train_exit_row = train_entry_row + horizon_steps
-    if train_exit_row >= int(train_level0_df.height):
+    if train_exit_row >= train_dataset.level0_row_count():
         return None
-    entry_log2 = float(train_level0_df['close_price_log2'][train_entry_row])
-    exit_log2 = float(train_level0_df['close_price_log2'][train_exit_row])
+    level0_log2 = train_dataset.level0_close_price_log2_numpy()
+    entry_log2 = float(level0_log2[train_entry_row])
+    exit_log2 = float(level0_log2[train_exit_row])
     return math.pow(2.0, exit_log2 - entry_log2) - 1.0
 
 
@@ -596,7 +598,7 @@ def _trade_pnl_for_sample(
     horizon_steps: int,
     start_index: int,
     inference_level0_to_raw: list[int],
-    train_level0_df: polars.DataFrame,
+    train_dataset: HybridTradeDataset,
     raw_to_train_level0_row: dict[int, int],
     real_bar_count: int | None,
 ) -> float | None:
@@ -618,7 +620,7 @@ def _trade_pnl_for_sample(
         inference_entry_bar_index=entry_bar_index,
         horizon_steps=horizon_steps,
         inference_level0_to_raw=inference_level0_to_raw,
-        train_level0_df=train_level0_df,
+        train_dataset=train_dataset,
         raw_to_train_level0_row=raw_to_train_level0_row,
     )
     if realized_linear_return is None:
@@ -655,7 +657,7 @@ def _compute_grid_hybrid_backtest_sum(
     horizon_steps: int,
     start_index: int,
     inference_level0_to_raw: list[int],
-    train_level0_df: polars.DataFrame,
+    train_dataset: HybridTradeDataset,
     raw_to_train_level0_row: dict[int, int],
     visible_min_start_trade_id: int | None,
     visible_max_start_trade_id: int | None,
@@ -680,7 +682,7 @@ def _compute_grid_hybrid_backtest_sum(
             horizon_steps=horizon_steps,
             start_index=start_index,
             inference_level0_to_raw=inference_level0_to_raw,
-            train_level0_df=train_level0_df,
+            train_dataset=train_dataset,
             raw_to_train_level0_row=raw_to_train_level0_row,
             real_bar_count=real_bar_count,
         )
@@ -712,7 +714,7 @@ def _compute_sequential_hybrid_backtest(
     horizon_steps: int,
     start_index: int,
     inference_level0_to_raw: list[int],
-    train_level0_df: polars.DataFrame,
+    train_dataset: HybridTradeDataset,
     raw_to_train_level0_row: dict[int, int],
     visible_min_start_trade_id: int | None,
     visible_max_start_trade_id: int | None,
@@ -755,7 +757,7 @@ def _compute_sequential_hybrid_backtest(
             horizon_steps=horizon_steps,
             start_index=start_index,
             inference_level0_to_raw=inference_level0_to_raw,
-            train_level0_df=train_level0_df,
+            train_dataset=train_dataset,
             raw_to_train_level0_row=raw_to_train_level0_row,
             real_bar_count=real_bar_count,
         )
@@ -856,15 +858,17 @@ def run_trade_research(
         df,
         metadata,
     )
-    train_dataset, train_level0_df, raw_to_train_level0_row = _build_train_level0_context(
+    train_dataset, raw_to_train_level0_row = _build_train_level0_context(
         df=df,
         metadata=metadata,
     )
     start_index = int(dataset.dataset.start_index)
     dataset_length = len(dataset)
-    level0_df = dataset.dataset.aggregated_data[0]
-    level0_height = int(level0_df.height)
-    level0_to_raw_row_indices = _build_level0_to_raw_row_indices(df, level0_df)
+    level0_height = int(dataset.dataset.level0_row_count())
+    level0_to_raw_row_indices = _build_level0_to_raw_row_indices_from_dataset(
+        raw_df=df,
+        dataset=dataset.dataset,
+    )
 
     max_sample_index = _pnl_max_sample_index(
         dataset_length=dataset_length,
@@ -1036,7 +1040,7 @@ def run_trade_research(
             horizon_steps=horizon_steps,
             start_index=start_index,
             inference_level0_to_raw=level0_to_raw_row_indices,
-            train_level0_df=train_level0_df,
+            train_dataset=train_dataset,
             raw_to_train_level0_row=raw_to_train_level0_row,
             visible_min_start_trade_id=visible_min_start_trade_id,
             visible_max_start_trade_id=visible_max_start_trade_id,
@@ -1056,7 +1060,7 @@ def run_trade_research(
             horizon_steps=horizon_steps,
             start_index=start_index,
             inference_level0_to_raw=level0_to_raw_row_indices,
-            train_level0_df=train_level0_df,
+            train_dataset=train_dataset,
             raw_to_train_level0_row=raw_to_train_level0_row,
             visible_min_start_trade_id=visible_min_start_trade_id,
             visible_max_start_trade_id=visible_max_start_trade_id,

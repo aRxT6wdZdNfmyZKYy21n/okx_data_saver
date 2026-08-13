@@ -3,6 +3,7 @@ import pickle
 import traceback
 
 import httpx
+import numpy as np
 import polars
 from fastapi import HTTPException
 from omegaconf import OmegaConf
@@ -114,9 +115,9 @@ def _build_train_dataset(
 
 def _build_level0_to_raw_row_indices(
     raw_df: polars.DataFrame,
-    level0_df: polars.DataFrame,
+    level0_close_price_log2: np.ndarray,
 ) -> list[int]:
-    level0_log2 = level0_df['close_price_log2'].to_numpy()
+    level0_log2 = level0_close_price_log2.astype(np.float64)
     raw_log2 = raw_df['close_price'].log(base=2).to_numpy()
 
     raw_indices: list[int] = []
@@ -140,17 +141,29 @@ def _build_level0_to_raw_row_indices(
     return raw_indices
 
 
+def _build_level0_to_raw_row_indices_from_dataset(
+    raw_df: polars.DataFrame,
+    dataset: HybridTradeDataset,
+) -> list[int]:
+    return _build_level0_to_raw_row_indices(
+        raw_df=raw_df,
+        level0_close_price_log2=dataset.level0_close_price_log2_numpy(),
+    )
+
+
 def _build_train_level0_context(
     df: polars.DataFrame,
     metadata: dict,
-) -> tuple[HybridTradeDataset, polars.DataFrame, dict[int, int]]:
+) -> tuple[HybridTradeDataset, dict[int, int]]:
     train_dataset = _build_train_dataset(df=df, metadata=metadata)
-    train_level0_df = train_dataset.aggregated_data[0]
-    train_level0_to_raw = _build_level0_to_raw_row_indices(df, train_level0_df)
+    train_level0_to_raw = _build_level0_to_raw_row_indices_from_dataset(
+        raw_df=df,
+        dataset=train_dataset,
+    )
     raw_to_train_level0_row: dict[int, int] = {}
     for train_row, raw_row in enumerate(train_level0_to_raw):
         raw_to_train_level0_row[raw_row] = train_row
-    return train_dataset, train_level0_df, raw_to_train_level0_row
+    return train_dataset, raw_to_train_level0_row
 
 
 def _train_sample_index_for_inference_sample(
@@ -243,8 +256,11 @@ def _prepare_inference_context_from_df(
         start_index,
     )
 
-    level0_df = inference_dataset.dataset.aggregated_data[0]
-    level0_to_raw = _build_level0_to_raw_row_indices(df, level0_df)
+    hybrid_dataset = inference_dataset.dataset
+    level0_to_raw = _build_level0_to_raw_row_indices_from_dataset(
+        raw_df=df,
+        dataset=hybrid_dataset,
+    )
     last_index = last_real_sample_index(
         dataset_length=len(inference_dataset),
         start_index=start_index,
@@ -263,7 +279,7 @@ def _prepare_inference_context_from_df(
         raw_entry_row,
         real_bar_count,
         model_lag_bars,
-        level0_df.height,
+        hybrid_dataset.level0_row_count(),
     )
 
     payload_dict = _prepare_payload_dict_from_sample(
@@ -275,7 +291,7 @@ def _prepare_inference_context_from_df(
         'start_index': start_index,
         'raw_entry_row': raw_entry_row,
         'real_bar_count': real_bar_count,
-        'level0_rows': level0_df.height,
+        'level0_rows': hybrid_dataset.level0_row_count(),
         'model_lag_bars': model_lag_bars,
         'bar_start_trade_id': entry_bar_metadata['bar_start_trade_id'],
         'bar_timestamp_ms': entry_bar_metadata['bar_timestamp_ms'],
