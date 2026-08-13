@@ -1854,6 +1854,14 @@
     if (lastJournalBarsElapsed != null) {
       params.bars_elapsed = String(lastJournalBarsElapsed);
     }
+    if (
+      lastExitPolicy
+      && lastExitPolicy.last_renew_segment_evaluated != null
+    ) {
+      params.last_renew_segment_evaluated = String(
+        lastExitPolicy.last_renew_segment_evaluated,
+      );
+    }
     return params;
   }
 
@@ -2052,6 +2060,7 @@
       if (journalHasOpenPosition && lastJournalState && lastJournalState.open_position) {
         runExitAlertChecks(lastJournalState.open_position, symbol);
         startExitCloseAlertTimer();
+        syncJournalRenewSegmentAfterExitPolicy(symbol, incoming);
       }
       return;
     }
@@ -2248,10 +2257,10 @@
         infoHtml: `<div class="trade-journal-info">${renewText}</div>`,
       };
     }
-    if (
-      metrics
-      && (metrics.pending_segment_eval || metrics.at_renew_checkpoint)
-    ) {
+    const atCheckpoint = lastExitPolicy && lastExitPolicy.at_renew_checkpoint != null
+      ? Boolean(lastExitPolicy.at_renew_checkpoint)
+      : Boolean(metrics && (metrics.pending_segment_eval || metrics.at_renew_checkpoint));
+    if (atCheckpoint) {
       return {
         phase: 'checkpoint',
         stateLabel: 'checkpoint',
@@ -2264,11 +2273,14 @@
     const barsUntilCheckpoint = metrics && metrics.bars_until_checkpoint != null
       ? Number(metrics.bars_until_checkpoint)
       : null;
+    const betweenLabel = lastExitPolicy && lastExitPolicy.exit_reason === 'between_renew_checkpoints'
+      ? 'между checkpoint'
+      : (metrics && Number(metrics.bars_elapsed) < Number(metrics.min_hold_steps || 0)
+        ? 'до min hold'
+        : 'между checkpoint');
     return {
       phase: 'counting',
-      stateLabel: metrics && Number(metrics.bars_elapsed) < Number(metrics.min_hold_steps || 0)
-        ? 'до min hold'
-        : 'между checkpoint',
+      stateLabel: betweenLabel,
       stateClass: '',
       progressClass: '',
       checkpointHint: barsUntilCheckpoint != null
@@ -2276,6 +2288,32 @@
         : 'до checkpoint',
       infoHtml: '',
     };
+  }
+
+  function openPositionRenewSegmentEvaluated(openPos) {
+    if (!openPos || openPos.last_renew_segment_evaluated == null) {
+      return -1;
+    }
+    return Number(openPos.last_renew_segment_evaluated);
+  }
+
+  function syncJournalRenewSegmentAfterExitPolicy(symbol, exitPolicy) {
+    if (
+      !exitPolicy
+      || exitPolicy.last_renew_segment_evaluated == null
+      || !lastJournalState
+      || !lastJournalState.open_position
+      || lastJournalState.open_position.symbol_id !== symbol
+    ) {
+      return Promise.resolve();
+    }
+    const openPos = lastJournalState.open_position;
+    const prevRenewSegment = openPositionRenewSegmentEvaluated(openPos);
+    const nextRenewSegment = Number(exitPolicy.last_renew_segment_evaluated);
+    if (nextRenewSegment === prevRenewSegment) {
+      return Promise.resolve();
+    }
+    return fetchAndApplyTradeJournal(symbol);
   }
 
   function renderSignOnlyRenewMetrics(openPos, m, symbol) {
@@ -2294,12 +2332,7 @@
       ? Number(m.segments_completed)
       : 0;
     const renewUi = resolveSignOnlyRenewUi(lastExitPolicy, m);
-    let renewState = renewUi.stateLabel;
-    if (lastExitPolicy && lastExitPolicy.exit_reason) {
-      renewState = formatSignOnlyExitReason(lastExitPolicy.exit_reason);
-    } else if (totalBarsElapsed < (m.min_hold_steps != null ? Number(m.min_hold_steps) : intervalSteps)) {
-      renewState = 'до min hold';
-    }
+    const renewState = renewUi.stateLabel;
     const stateClass = renewUi.stateClass;
     const progressClass = renewUi.progressClass;
     const checkpointHint = renewUi.checkpointHint;
@@ -2456,23 +2489,31 @@
       const applyGeneration = journalApplyGeneration;
       const entryStartTradeId = openPos.entry_start_trade_id;
       renderTradeJournal(state, symbol);
-      return refreshExitPolicy(symbol, openPos).then(() => {
+      return refreshExitPolicy(symbol, openPos).then((exitPolicy) => {
         if (applyGeneration !== journalApplyGeneration) {
           return;
         }
         if (journalMutationPending) {
           return;
         }
-        if (!lastJournalState || !lastJournalState.open_position) {
-          return;
-        }
-        if (Number(lastJournalState.open_position.entry_start_trade_id) !== Number(entryStartTradeId)) {
-          return;
-        }
-        renderTradeJournal(lastJournalState, symbol);
-        if (lastJournalBarsElapsed == null) {
-          pollJournalBarsElapsed(symbol, Number(entryStartTradeId));
-        }
+        return syncJournalRenewSegmentAfterExitPolicy(symbol, exitPolicy).then(() => {
+          if (applyGeneration !== journalApplyGeneration) {
+            return;
+          }
+          if (journalMutationPending) {
+            return;
+          }
+          if (!lastJournalState || !lastJournalState.open_position) {
+            return;
+          }
+          if (Number(lastJournalState.open_position.entry_start_trade_id) !== Number(entryStartTradeId)) {
+            return;
+          }
+          renderTradeJournal(lastJournalState, symbol);
+          if (lastJournalBarsElapsed == null) {
+            pollJournalBarsElapsed(symbol, Number(entryStartTradeId));
+          }
+        });
       });
     }
     renderTradeJournal(state, symbol);

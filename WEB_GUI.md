@@ -57,6 +57,8 @@
 
 **Sign_only renew — цвета UI:** синий progress = счёт до checkpoint; оранжевый pulsing = момент checkpoint (ожидание pred); зелёный info + карточка «HOLD · renew OK» = знак совпал, сегмент продлён (не exit); красный = pred flip → CLOSE.
 
+**Sign_only renew — источник state:** exit_policy (`at_renew_checkpoint`, `exit_reason`, `last_renew_segment_evaluated`) — primary для UI; journal metrics — fallback. GET `/api/trade-journal` принимает `last_renew_segment_evaluated` от клиента (max с journal) чтобы progress не залипал в checkpoint при рассинхроне.
+
 ---
 
 ## 4. Масштабы (агрегация баров)

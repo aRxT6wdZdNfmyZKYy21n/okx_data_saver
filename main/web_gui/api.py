@@ -439,6 +439,11 @@ def get_trade_journal(
         ge=0,
         description='Cached bars elapsed from client (DB count via /bars-elapsed)',
     ),
+    last_renew_segment_evaluated: int | None = Query(
+        None,
+        ge=-1,
+        description='Renew segment cursor from latest exit_policy (max with journal)',
+    ),
 ) -> dict:
     try:
         SymbolId[symbol_id]
@@ -450,6 +455,7 @@ def get_trade_journal(
         mark_price=mark_price,
         bars_elapsed=bars_elapsed,
         persist_mark_price=False,
+        client_last_renew_segment_evaluated=last_renew_segment_evaluated,
     )
 
 

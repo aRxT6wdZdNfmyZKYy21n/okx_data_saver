@@ -201,6 +201,16 @@ def resolve_last_renew_segment_evaluated(
     return int(open_position_data['last_renew_segment_evaluated'])
 
 
+def _resolve_effective_last_renew_segment_evaluated(
+    open_position_data: dict[str, Any],
+    client_last_renew_segment_evaluated: int | None,
+) -> int:
+    journal_last_renew = resolve_last_renew_segment_evaluated(open_position_data)
+    if client_last_renew_segment_evaluated is None:
+        return journal_last_renew
+    return max(journal_last_renew, client_last_renew_segment_evaluated)
+
+
 def apply_last_renew_segment_evaluated(
     last_renew_segment_evaluated: int,
 ) -> None:
@@ -489,6 +499,7 @@ def enrich_open_position(
     open_position_data: dict[str, Any],
     bars_elapsed: int,
     mark_price: float,
+    client_last_renew_segment_evaluated: int | None,
 ) -> dict[str, Any]:
     excursion = open_position_data['excursion'] if 'excursion' in open_position_data else _empty_excursion_state(
         float(open_position_data['entry_price']),
@@ -513,8 +524,9 @@ def enrich_open_position(
             entry_price=float(open_position_data['entry_price']),
             notional_usd=float(open_position_data['notional_usd']),
             excursion=excursion,
-            last_renew_segment_evaluated=resolve_last_renew_segment_evaluated(
+            last_renew_segment_evaluated=_resolve_effective_last_renew_segment_evaluated(
                 open_position_data,
+                client_last_renew_segment_evaluated,
             ),
         )
     else:
@@ -536,6 +548,7 @@ def build_journal_response(
     journal: dict[str, Any],
     bars_elapsed: int | None,
     mark_price: float | None,
+    client_last_renew_segment_evaluated: int | None,
 ) -> dict[str, Any]:
     open_position_data = journal['open_position']
     enriched_open = None
@@ -545,6 +558,7 @@ def build_journal_response(
             open_position_data,
             effective_bars_elapsed,
             mark_price,
+            client_last_renew_segment_evaluated,
         )
 
     closed = journal['closed_trades']
@@ -569,6 +583,7 @@ def build_trade_journal_api_response(
     mark_price: float | None,
     bars_elapsed: int | None,
     persist_mark_price: bool,
+    client_last_renew_segment_evaluated: int | None,
 ) -> dict[str, Any]:
     journal = get_journal_state()
     open_position_data = journal['open_position']
@@ -588,4 +603,9 @@ def build_trade_journal_api_response(
                 ),
                 'closed_trades': journal['closed_trades'],
             }
-    return build_journal_response(journal, bars_elapsed, mark_price)
+    return build_journal_response(
+        journal,
+        bars_elapsed,
+        mark_price,
+        client_last_renew_segment_evaluated,
+    )

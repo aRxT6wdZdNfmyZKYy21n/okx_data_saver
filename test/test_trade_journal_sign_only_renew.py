@@ -73,3 +73,37 @@ def test_sign_only_renew_pending_after_poll_jump() -> None:
     assert metrics['current_renew_segment'] == 9
     assert metrics['pending_segment_eval'] is True
     assert metrics['at_renew_checkpoint'] is True
+
+
+def test_sign_only_renew_between_checkpoints_bar_81() -> None:
+    metrics = compute_sign_only_renew_metrics(
+        bars_elapsed=81,
+        min_hold_steps=32,
+        check_interval_steps=32,
+        mark_price=101.0,
+        side='long',
+        entry_price=100.0,
+        notional_usd=100.0,
+        excursion=None,
+        last_renew_segment_evaluated=2,
+    )
+    assert metrics['segments_completed'] == 2
+    assert metrics['segment_bars_elapsed'] == 17
+    assert metrics['bars_until_checkpoint'] == 15
+    assert metrics['at_renew_checkpoint'] is False
+    assert metrics['pending_segment_eval'] is False
+
+
+def test_stale_renew_cursor_triggers_false_checkpoint() -> None:
+    metrics = compute_sign_only_renew_metrics(
+        bars_elapsed=81,
+        min_hold_steps=32,
+        check_interval_steps=32,
+        mark_price=101.0,
+        side='long',
+        entry_price=100.0,
+        notional_usd=100.0,
+        excursion=None,
+        last_renew_segment_evaluated=1,
+    )
+    assert metrics['at_renew_checkpoint'] is True

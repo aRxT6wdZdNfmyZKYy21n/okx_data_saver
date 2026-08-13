@@ -181,6 +181,7 @@ def _build_trade_journal_api_response_with_db_bars_elapsed(
         mark_price=mark_price,
         bars_elapsed=bars_elapsed,
         persist_mark_price=True,
+        client_last_renew_segment_evaluated=None,
     )
 
 
@@ -249,4 +250,4 @@ def _worker_trade_journal_exit(payload: dict) -> dict:
 
 def _worker_trade_journal_discard() -> dict:
     discard_open_position()
-    return build_journal_response(get_journal_state(), None, None)
+    return build_journal_response(get_journal_state(), None, None, None)
