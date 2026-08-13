@@ -175,6 +175,8 @@
   let lastJournalBarsElapsed = null;
   let lastJournalBarsElapsedEntryStartTradeId = null;
   let tradeJournalRequestSeq = 0;
+  let journalApplyGeneration = 0;
+  let journalMutationPending = false;
   let journalBarsRefetchTimer = null;
   const INFERENCE_REFRESH_INTERVAL_SEC = 10;
   const INFERENCE_FETCH_TIMEOUT_MS = 30000;
@@ -1746,6 +1748,46 @@
     }
   }
 
+  function invalidatePendingJournalReads() {
+    journalApplyGeneration += 1;
+    tradeJournalRequestSeq += 1;
+    if (journalBarsRefetchTimer) {
+      clearTimeout(journalBarsRefetchTimer);
+      journalBarsRefetchTimer = null;
+    }
+  }
+
+  function beginJournalMutation() {
+    invalidatePendingJournalReads();
+    journalMutationPending = true;
+  }
+
+  function finishJournalMutation(state, symbol) {
+    journalMutationPending = false;
+    invalidatePendingJournalReads();
+    applyJournalState(state, symbol);
+  }
+
+  function shouldRejectStaleJournalRead(incoming) {
+    if (!lastJournalState) {
+      return false;
+    }
+    const prevOpen = lastJournalState.open_position;
+    const nextOpen = incoming.open_position;
+    const prevClosed = Number(lastJournalState.closed_trades_count || 0);
+    const nextClosed = Number(incoming.closed_trades_count || 0);
+    if (!prevOpen && nextOpen) {
+      return true;
+    }
+    if (prevOpen && !nextOpen && nextClosed <= prevClosed) {
+      return true;
+    }
+    if (nextClosed < prevClosed) {
+      return true;
+    }
+    return false;
+  }
+
   function advanceJournalBarsElapsed(entryStartTradeId, nextBarsElapsed) {
     const entryId = Number(entryStartTradeId);
     const next = Number(nextBarsElapsed);
@@ -1784,14 +1826,21 @@
   }
 
   function scheduleJournalRefetchForBarsAdvance(symbol) {
-    if (!symbol) {
+    if (!symbol || !journalHasOpenPosition || journalMutationPending) {
       return;
     }
     if (journalBarsRefetchTimer) {
       clearTimeout(journalBarsRefetchTimer);
     }
+    const scheduledGeneration = journalApplyGeneration;
     journalBarsRefetchTimer = setTimeout(() => {
       journalBarsRefetchTimer = null;
+      if (scheduledGeneration !== journalApplyGeneration) {
+        return;
+      }
+      if (!journalHasOpenPosition || journalMutationPending) {
+        return;
+      }
       fetchAndApplyTradeJournal(symbol);
     }, 100);
   }
@@ -1809,11 +1858,24 @@
   }
 
   function fetchAndApplyTradeJournal(symbol) {
+    if (journalMutationPending) {
+      return Promise.resolve(lastJournalState);
+    }
+    const readGeneration = journalApplyGeneration;
     const requestSeq = tradeJournalRequestSeq + 1;
     tradeJournalRequestSeq = requestSeq;
     return API.tradeJournal(buildTradeJournalParams(symbol))
       .then(state => {
         if (requestSeq !== tradeJournalRequestSeq) {
+          return lastJournalState;
+        }
+        if (readGeneration !== journalApplyGeneration) {
+          return lastJournalState;
+        }
+        if (journalMutationPending) {
+          return lastJournalState;
+        }
+        if (shouldRejectStaleJournalRead(state)) {
           return lastJournalState;
         }
         applyJournalState(state, symbol);
@@ -1822,15 +1884,22 @@
   }
 
   function pollJournalBarsElapsed(symbol, entryStartTradeId) {
-    if (refreshBarsElapsedInFlight) {
+    if (refreshBarsElapsedInFlight || journalMutationPending || !journalHasOpenPosition) {
       return Promise.resolve();
     }
+    const pollGeneration = journalApplyGeneration;
     refreshBarsElapsedInFlight = true;
     return API.tradeJournalBarsElapsed({
       symbol_id: symbol,
       entry_start_trade_id: String(entryStartTradeId),
     })
       .then(data => {
+        if (pollGeneration !== journalApplyGeneration) {
+          return;
+        }
+        if (journalMutationPending || !journalHasOpenPosition) {
+          return;
+        }
         if (data.bars_elapsed == null) {
           return;
         }
@@ -1852,7 +1921,7 @@
 
   function refreshLatestX1Bar() {
     const symbol = symbolSelect.value;
-    if (!symbol || refreshX1BarInFlight) {
+    if (!symbol || refreshX1BarInFlight || journalMutationPending) {
       return Promise.resolve();
     }
     refreshX1BarInFlight = true;
@@ -1958,6 +2027,9 @@
   }
 
   function applyInferenceExitPolicy(incoming, symbol) {
+    if (!journalHasOpenPosition || journalMutationPending) {
+      return;
+    }
     if (
       incoming
       && incoming.bars_held != null
@@ -2296,15 +2368,25 @@
       && (exitGbmEnabled || getExitStackForSymbol(symbol))
       && lastPredictions;
     if (shouldRefreshExitPolicy) {
+      const applyGeneration = journalApplyGeneration;
+      const entryStartTradeId = openPos.entry_start_trade_id;
       renderTradeJournal(state, symbol);
       return refreshExitPolicy(symbol, openPos).then(() => {
-        renderTradeJournal(state, symbol);
-        if (
-          openPos
-          && openPos.entry_start_trade_id != null
-          && lastJournalBarsElapsed == null
-        ) {
-          pollJournalBarsElapsed(symbol, Number(openPos.entry_start_trade_id));
+        if (applyGeneration !== journalApplyGeneration) {
+          return;
+        }
+        if (journalMutationPending) {
+          return;
+        }
+        if (!lastJournalState || !lastJournalState.open_position) {
+          return;
+        }
+        if (Number(lastJournalState.open_position.entry_start_trade_id) !== Number(entryStartTradeId)) {
+          return;
+        }
+        renderTradeJournal(lastJournalState, symbol);
+        if (lastJournalBarsElapsed == null) {
+          pollJournalBarsElapsed(symbol, Number(entryStartTradeId));
         }
       });
     }
@@ -2332,7 +2414,7 @@
   }
 
   function refreshTradeJournal(symbol) {
-    if (!symbol || refreshJournalInFlight) {
+    if (!symbol || refreshJournalInFlight || journalMutationPending) {
       return Promise.resolve();
     }
     refreshJournalInFlight = true;
@@ -2353,7 +2435,7 @@
 
   function refreshJournalBarsElapsedOnly() {
     const symbol = symbolSelect.value;
-    if (!symbol || !journalHasOpenPosition || !lastJournalState) {
+    if (!symbol || !journalHasOpenPosition || !lastJournalState || journalMutationPending) {
       return Promise.resolve();
     }
     const openPos = lastJournalState.open_position;
@@ -2636,6 +2718,7 @@
     const pendingMessage = side === 'long' ? 'Входим LONG…' : 'Входим SHORT…';
     setJournalActionPending({ actionKey, message: pendingMessage });
     setStatus('Запись входа…');
+    beginJournalMutation();
 
     const policyAction = lastPolicy && lastPolicy.action ? String(lastPolicy.action).toUpperCase() : null;
     const evalHorizon = resolveJournalEvalHorizon(symbol);
@@ -2669,10 +2752,11 @@
         resetExitTransformerAlertState();
         resetExitOverlaySession();
         setJournalActionPending(null);
-        applyJournalState(state, symbol);
+        finishJournalMutation(state, symbol);
         setStatus('Вход записан');
       })
       .catch(e => {
+        journalMutationPending = false;
         setJournalActionPending(null);
         setStatus('Entry: ' + parseErrorDetail(e.message), true);
       });
@@ -2691,6 +2775,7 @@
     }
     setJournalActionPending({ actionKey: 'exit', message: 'Выходим…' });
     setStatus('Запись выхода…');
+    beginJournalMutation();
 
     API.tradeJournalExit({
       exit_price: exitPrice,
@@ -2705,11 +2790,14 @@
         resetExitGbmAlertState();
         resetExitTransformerAlertState();
         resetExitOverlaySession();
+        resetJournalBarsElapsedCache();
+        lastExitPolicy = null;
         setJournalActionPending(null);
-        applyJournalState(state, symbol);
+        finishJournalMutation(state, symbol);
         setStatus('Выход записан');
       })
       .catch(e => {
+        journalMutationPending = false;
         setJournalActionPending(null);
         setStatus('Exit: ' + parseErrorDetail(e.message), true);
       });
@@ -2720,6 +2808,7 @@
     if (!window.confirm('Сбросить открытую позицию без записи в историю?')) return;
     setJournalActionPending({ actionKey: 'discard', message: 'Сброс…' });
     setStatus('Сброс позиции…');
+    beginJournalMutation();
 
     API.tradeJournalDiscardOpen()
       .then((state) => {
@@ -2728,11 +2817,14 @@
         resetExitGbmAlertState();
         resetExitTransformerAlertState();
         resetExitOverlaySession();
+        resetJournalBarsElapsedCache();
+        lastExitPolicy = null;
         setJournalActionPending(null);
-        applyJournalState(state, symbol);
+        finishJournalMutation(state, symbol);
         setStatus('Позиция сброшена');
       })
       .catch(e => {
+        journalMutationPending = false;
         setJournalActionPending(null);
         setStatus('Discard: ' + parseErrorDetail(e.message), true);
       });

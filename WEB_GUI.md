@@ -53,7 +53,7 @@
 
 Один раз после первого включения механизма может понадобиться обычный F5 (если в кэше остался старый `index.html` без `?v=`). Дальше достаточно restart сервиса; симлинки с random id не используются.
 
-**Счётчик баров (micro live):** UI держит монотонный кэш `bars_elapsed` (источники — `GET /api/trade-journal/bars-elapsed` раз в 30 с и `exit_policy.bars_held` из inference artifact). Параллельные refresh журнала не откатывают счётчик; карточка exit и строка «Всего баров» показывают одно значение.
+**Счётчик баров (micro live):** UI держит монотонный кэш `bars_elapsed` (источники — `GET /api/trade-journal/bars-elapsed` раз в 30 с и `exit_policy.bars_held` из inference artifact). Параллельные refresh журнала не откатывают счётчик; карточка exit и строка «Всего баров» показывают одно значение. Entry/exit/discard инвалидируют in-flight GET (`journalApplyGeneration`); stale read не может «переоткрыть» закрытую позицию; callback `refreshExitPolicy` не рендерит устаревший snapshot state.
 
 ---
 
