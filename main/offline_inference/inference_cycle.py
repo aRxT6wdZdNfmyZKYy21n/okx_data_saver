@@ -26,6 +26,7 @@ from main.web_gui.trade_journal_service import (
     compute_sign_only_renew_metrics,
     get_journal_state,
     parse_eval_horizon_steps,
+    resolve_last_renew_segment_evaluated,
 )
 from settings import settings
 
@@ -138,6 +139,9 @@ def _build_exit_payloads(
             excursion=open_position_data['excursion']
             if 'excursion' in open_position_data
             else None,
+            last_renew_segment_evaluated=resolve_last_renew_segment_evaluated(
+                open_position_data,
+            ),
         )
     else:
         metrics = compute_position_metrics(
@@ -184,6 +188,9 @@ def _build_exit_payloads(
             'bars_held': metrics['bars_elapsed'],
             'current_predictions': current_predictions,
             'exit_stack_mode': exit_stack_mode,
+            'last_renew_segment_evaluated': resolve_last_renew_segment_evaluated(
+                open_position_data,
+            ),
         }
         exit_policy_result = run_remote_exit_policy(exit_policy_payload)
     elif settings.WEB_GUI_EXIT_GBM_ENABLED:

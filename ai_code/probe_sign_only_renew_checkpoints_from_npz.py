@@ -42,12 +42,17 @@ def _evaluate_sign_only_checkpoint(
     min_hold_steps: int,
     check_interval_steps: int,
     pred_log2: float,
-) -> tuple[bool, str, float]:
+    last_renew_segment_evaluated: int,
+) -> tuple[bool, str, float, int]:
     pred_linear = math.pow(2.0, pred_log2) - 1.0
-    at_renew_checkpoint = (
+    current_renew_segment = bars_held // check_interval_steps
+    pending_segment_eval = (
         bars_held >= min_hold_steps
-        and bars_held % check_interval_steps == 0
+        and current_renew_segment > last_renew_segment_evaluated
     )
+    updated_last_renew_segment_evaluated = last_renew_segment_evaluated
+    if pending_segment_eval:
+        updated_last_renew_segment_evaluated = current_renew_segment
     if side == 'long':
         sign_still_valid = pred_linear > 0.0
     elif side == 'short':
@@ -56,12 +61,27 @@ def _evaluate_sign_only_checkpoint(
         raise ValueError(f'side must be long or short, got: {side!r}')
 
     if bars_held < min_hold_steps:
-        return False, 'before_min_hold', pred_linear
-    if not at_renew_checkpoint:
-        return False, 'between_renew_checkpoints', pred_linear
+        return False, 'before_min_hold', pred_linear, last_renew_segment_evaluated
+    if not pending_segment_eval:
+        return (
+            False,
+            'between_renew_checkpoints',
+            pred_linear,
+            last_renew_segment_evaluated,
+        )
     if sign_still_valid:
-        return False, 'sign_valid_renewed', pred_linear
-    return True, 'sign_flip_at_checkpoint', pred_linear
+        return (
+            False,
+            'sign_valid_renewed',
+            pred_linear,
+            updated_last_renew_segment_evaluated,
+        )
+    return (
+        True,
+        'sign_flip_at_checkpoint',
+        pred_linear,
+        updated_last_renew_segment_evaluated,
+    )
 
 
 def _nearest_row_for_target_sample(
@@ -92,6 +112,7 @@ def probe_sign_only_renew_checkpoints(
 
     checkpoint_rows: list[dict[str, object]] = []
     close_bars: list[int] = []
+    last_renew_segment_evaluated = -1
     for bars_held in range(min_hold_steps, max_bars + 1, check_interval_steps):
         target_sample_index = entry_sample_index + bars_held
         row_index = _nearest_row_for_target_sample(
@@ -99,12 +120,18 @@ def probe_sign_only_renew_checkpoints(
             sample_index=sample_index,
         )
         pred_log2 = float(pred_x32[row_index])
-        suggest_close, exit_reason, pred_linear = _evaluate_sign_only_checkpoint(
+        (
+            suggest_close,
+            exit_reason,
+            pred_linear,
+            last_renew_segment_evaluated,
+        ) = _evaluate_sign_only_checkpoint(
             side=side,
             bars_held=bars_held,
             min_hold_steps=min_hold_steps,
             check_interval_steps=check_interval_steps,
             pred_log2=pred_log2,
+            last_renew_segment_evaluated=last_renew_segment_evaluated,
         )
         row = {
             'bars_held': bars_held,
@@ -117,6 +144,7 @@ def probe_sign_only_renew_checkpoints(
             'pred_eval_linear': pred_linear,
             'suggest_close': suggest_close,
             'exit_reason': exit_reason,
+            'last_renew_segment_evaluated': last_renew_segment_evaluated,
         }
         checkpoint_rows.append(row)
         if suggest_close:

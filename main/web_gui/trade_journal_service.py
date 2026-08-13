@@ -193,6 +193,28 @@ def _open_position_with_mark_price_excursion(
     return enriched
 
 
+def resolve_last_renew_segment_evaluated(
+    open_position_data: dict[str, Any],
+) -> int:
+    if 'last_renew_segment_evaluated' not in open_position_data:
+        return -1
+    return int(open_position_data['last_renew_segment_evaluated'])
+
+
+def apply_last_renew_segment_evaluated(
+    last_renew_segment_evaluated: int,
+) -> None:
+    with _JOURNAL_LOCK:
+        journal = _load_journal_unlocked()
+        open_position_data = journal['open_position']
+        if open_position_data is None:
+            return
+        open_position_data['last_renew_segment_evaluated'] = (
+            last_renew_segment_evaluated
+        )
+        _save_journal_unlocked(journal)
+
+
 def compute_sign_only_renew_metrics(
     bars_elapsed: int,
     min_hold_steps: int,
@@ -202,6 +224,7 @@ def compute_sign_only_renew_metrics(
     entry_price: float,
     notional_usd: float,
     excursion: dict[str, float] | None,
+    last_renew_segment_evaluated: int,
 ) -> dict[str, float | int | bool]:
     if min_hold_steps <= 0:
         raise ValueError(f'min_hold_steps must be positive, got: {min_hold_steps}')
@@ -227,6 +250,9 @@ def compute_sign_only_renew_metrics(
 
     if bars_elapsed < min_hold_steps:
         metrics['segments_completed'] = 0
+        metrics['current_renew_segment'] = 0
+        metrics['last_renew_segment_evaluated'] = last_renew_segment_evaluated
+        metrics['pending_segment_eval'] = False
         metrics['segment_bars_elapsed'] = bars_elapsed
         metrics['bars_until_checkpoint'] = min_hold_steps - bars_elapsed
         metrics['at_renew_checkpoint'] = False
@@ -237,14 +263,24 @@ def compute_sign_only_renew_metrics(
     else:
         segments_completed = bars_elapsed // check_interval_steps
         remainder = bars_elapsed % check_interval_steps
-        at_renew_checkpoint = remainder == 0
+        current_renew_segment = segments_completed
+        pending_segment_eval = (
+            current_renew_segment > last_renew_segment_evaluated
+        )
+        at_renew_checkpoint = pending_segment_eval
         if at_renew_checkpoint:
-            segment_bars_elapsed = check_interval_steps
+            segment_bars_elapsed = remainder if remainder > 0 else check_interval_steps
             bars_until_checkpoint = 0
         else:
-            segment_bars_elapsed = remainder
-            bars_until_checkpoint = check_interval_steps - remainder
+            segment_bars_elapsed = remainder if remainder > 0 else check_interval_steps
+            if remainder == 0:
+                bars_until_checkpoint = check_interval_steps
+            else:
+                bars_until_checkpoint = check_interval_steps - remainder
         metrics['segments_completed'] = segments_completed
+        metrics['current_renew_segment'] = current_renew_segment
+        metrics['last_renew_segment_evaluated'] = last_renew_segment_evaluated
+        metrics['pending_segment_eval'] = pending_segment_eval
         metrics['segment_bars_elapsed'] = segment_bars_elapsed
         metrics['bars_until_checkpoint'] = bars_until_checkpoint
         metrics['at_renew_checkpoint'] = at_renew_checkpoint
@@ -359,6 +395,8 @@ def open_position(
             position['exit_stack_eval_horizon'] = exit_stack_eval_horizon
         if exit_stack_min_hold_steps is not None:
             position['exit_stack_min_hold_steps'] = exit_stack_min_hold_steps
+        if exit_stack_mode == 'rolling_h_renew_sign_only':
+            position['last_renew_segment_evaluated'] = -1
         journal['open_position'] = position
         _save_journal_unlocked(journal)
         return position
@@ -475,6 +513,9 @@ def enrich_open_position(
             entry_price=float(open_position_data['entry_price']),
             notional_usd=float(open_position_data['notional_usd']),
             excursion=excursion,
+            last_renew_segment_evaluated=resolve_last_renew_segment_evaluated(
+                open_position_data,
+            ),
         )
     else:
         metrics = compute_position_metrics(

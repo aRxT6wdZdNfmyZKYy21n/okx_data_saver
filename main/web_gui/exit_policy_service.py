@@ -4,6 +4,7 @@ import traceback
 import httpx
 from fastapi import HTTPException
 
+from main.web_gui.trade_journal_service import apply_last_renew_segment_evaluated
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,10 @@ def run_remote_exit_policy(payload: dict[str, object]) -> dict[str, object]:
     }
     if 'current_predictions' in payload:
         request_body['current_predictions'] = payload['current_predictions']
+    if 'last_renew_segment_evaluated' in payload:
+        request_body['last_renew_segment_evaluated'] = payload[
+            'last_renew_segment_evaluated'
+        ]
     if use_exit_stack:
         if 'entry_predictions' in payload:
             request_body['entry_predictions'] = payload['entry_predictions']
@@ -76,7 +81,15 @@ def run_remote_exit_policy(payload: dict[str, object]) -> dict[str, object]:
             raise HTTPException(status_code=404, detail=response.text)
         if response.status_code >= 400:
             raise HTTPException(status_code=response.status_code, detail=response.text)
-        return response.json()
+        result = response.json()
+        if (
+            use_exit_stack
+            and 'last_renew_segment_evaluated' in result
+        ):
+            apply_last_renew_segment_evaluated(
+                int(result['last_renew_segment_evaluated']),
+            )
+        return result
     except HTTPException:
         raise
     except Exception as exception:

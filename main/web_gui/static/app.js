@@ -1793,6 +1793,9 @@
         bars_held: m.bars_elapsed,
         current_predictions: lastPredictions,
         exit_stack_mode: String(exitStack.mode),
+        last_renew_segment_evaluated: openPos.last_renew_segment_evaluated != null
+          ? Number(openPos.last_renew_segment_evaluated)
+          : -1,
       };
     }
     if (!lastPredictions || !openPos.entry_predictions || !openPos.entry_policy) return null;
@@ -1920,8 +1923,8 @@
     } else if (m.bars_elapsed < (m.min_hold_steps != null ? Number(m.min_hold_steps) : intervalSteps)) {
       renewState = 'before_min_hold';
     }
-    const progressClass = m.at_renew_checkpoint ? 'at-target' : '';
-    const checkpointHint = m.at_renew_checkpoint
+    const progressClass = m.pending_segment_eval || m.at_renew_checkpoint ? 'at-target' : '';
+    const checkpointHint = (m.pending_segment_eval || m.at_renew_checkpoint)
       ? 'checkpoint — проверка знака pred'
       : `до checkpoint: ${barsUntilCheckpoint} bar`;
     return `
