@@ -173,6 +173,9 @@
   let refreshBarsElapsedInFlight = false;
   let refreshX1BarInFlight = false;
   let lastJournalBarsElapsed = null;
+  let lastJournalBarsElapsedEntryStartTradeId = null;
+  let tradeJournalRequestSeq = 0;
+  let journalBarsRefetchTimer = null;
   const INFERENCE_REFRESH_INTERVAL_SEC = 10;
   const INFERENCE_FETCH_TIMEOUT_MS = 30000;
   const JOURNAL_REFRESH_INTERVAL_SEC = 15;
@@ -1734,6 +1737,65 @@
     return null;
   }
 
+  function resetJournalBarsElapsedCache() {
+    lastJournalBarsElapsed = null;
+    lastJournalBarsElapsedEntryStartTradeId = null;
+    if (journalBarsRefetchTimer) {
+      clearTimeout(journalBarsRefetchTimer);
+      journalBarsRefetchTimer = null;
+    }
+  }
+
+  function advanceJournalBarsElapsed(entryStartTradeId, nextBarsElapsed) {
+    const entryId = Number(entryStartTradeId);
+    const next = Number(nextBarsElapsed);
+    if (!Number.isFinite(entryId) || !Number.isFinite(next) || next < 0) {
+      return lastJournalBarsElapsed;
+    }
+    if (lastJournalBarsElapsedEntryStartTradeId !== entryId) {
+      lastJournalBarsElapsedEntryStartTradeId = entryId;
+      lastJournalBarsElapsed = next;
+      return next;
+    }
+    if (lastJournalBarsElapsed == null || next > lastJournalBarsElapsed) {
+      lastJournalBarsElapsed = next;
+    }
+    return lastJournalBarsElapsed;
+  }
+
+  function resolveDisplayBarsElapsed(openPos) {
+    if (!openPos) {
+      return null;
+    }
+    let best = lastJournalBarsElapsed;
+    if (openPos.metrics && openPos.metrics.bars_elapsed != null) {
+      const fromMetrics = Number(openPos.metrics.bars_elapsed);
+      if (best == null || fromMetrics > best) {
+        best = fromMetrics;
+      }
+    }
+    if (lastExitPolicy && lastExitPolicy.bars_held != null) {
+      const fromExitPolicy = Number(lastExitPolicy.bars_held);
+      if (best == null || fromExitPolicy > best) {
+        best = fromExitPolicy;
+      }
+    }
+    return best;
+  }
+
+  function scheduleJournalRefetchForBarsAdvance(symbol) {
+    if (!symbol) {
+      return;
+    }
+    if (journalBarsRefetchTimer) {
+      clearTimeout(journalBarsRefetchTimer);
+    }
+    journalBarsRefetchTimer = setTimeout(() => {
+      journalBarsRefetchTimer = null;
+      fetchAndApplyTradeJournal(symbol);
+    }, 100);
+  }
+
   function buildTradeJournalParams(symbol) {
     const params = { symbol_id: symbol };
     const markPrice = getMarkPriceForJournal();
@@ -1747,8 +1809,13 @@
   }
 
   function fetchAndApplyTradeJournal(symbol) {
+    const requestSeq = tradeJournalRequestSeq + 1;
+    tradeJournalRequestSeq = requestSeq;
     return API.tradeJournal(buildTradeJournalParams(symbol))
       .then(state => {
+        if (requestSeq !== tradeJournalRequestSeq) {
+          return lastJournalState;
+        }
         applyJournalState(state, symbol);
         return state;
       });
@@ -1767,11 +1834,14 @@
         if (data.bars_elapsed == null) {
           return;
         }
-        const nextBarsElapsed = Number(data.bars_elapsed);
-        if (lastJournalBarsElapsed === nextBarsElapsed) {
+        const prevBarsElapsed = lastJournalBarsElapsed;
+        const mergedBarsElapsed = advanceJournalBarsElapsed(
+          entryStartTradeId,
+          Number(data.bars_elapsed),
+        );
+        if (mergedBarsElapsed === prevBarsElapsed) {
           return;
         }
-        lastJournalBarsElapsed = nextBarsElapsed;
         return fetchAndApplyTradeJournal(symbol);
       })
       .catch(() => {})
@@ -1888,6 +1958,23 @@
   }
 
   function applyInferenceExitPolicy(incoming, symbol) {
+    if (
+      incoming
+      && incoming.bars_held != null
+      && lastJournalState
+      && lastJournalState.open_position
+      && lastJournalState.open_position.symbol_id === symbol
+      && lastJournalState.open_position.entry_start_trade_id != null
+    ) {
+      const prevBarsElapsed = lastJournalBarsElapsed;
+      const mergedBarsElapsed = advanceJournalBarsElapsed(
+        lastJournalState.open_position.entry_start_trade_id,
+        Number(incoming.bars_held),
+      );
+      if (mergedBarsElapsed != null && (prevBarsElapsed == null || mergedBarsElapsed > prevBarsElapsed)) {
+        scheduleJournalRefetchForBarsAdvance(symbol);
+      }
+    }
     if (exitPolicyIsRenderable(incoming)) {
       lastExitPolicy = incoming;
       if (journalHasOpenPosition && lastJournalState && lastJournalState.open_position) {
@@ -1910,6 +1997,8 @@
   function buildExitPolicyPayload(symbol, openPos) {
     if (!openPos || !openPos.side || !openPos.metrics) return null;
     const m = openPos.metrics;
+    const displayBarsElapsed = resolveDisplayBarsElapsed(openPos);
+    const barsHeld = displayBarsElapsed != null ? displayBarsElapsed : m.bars_elapsed;
     const exitStack = getExitStackForSymbol(symbol);
     if (exitStack) {
       if (!lastPredictions) return null;
@@ -1917,7 +2006,7 @@
         symbol_id: symbol,
         side: openPos.side,
         eval_horizon: resolveDeployEvalHorizon(openPos, symbol),
-        bars_held: m.bars_elapsed,
+        bars_held: barsHeld,
         current_predictions: lastPredictions,
         exit_stack_mode: String(exitStack.mode),
         last_renew_segment_evaluated: openPos.last_renew_segment_evaluated != null
@@ -1940,7 +2029,7 @@
       symbol_id: symbol,
       side: openPos.side,
       eval_horizon: openPos.eval_horizon,
-      bars_held: m.bars_elapsed,
+      bars_held: barsHeld,
       entry_predictions: openPos.entry_predictions,
       current_predictions: lastPredictions,
       entry_policy: openPos.entry_policy,
@@ -1963,6 +2052,8 @@
     if (inferenceMinRows > 0 && Number(barsLimit) < inferenceMinRows) return null;
 
     const m = openPos.metrics;
+    const displayBarsElapsed = resolveDisplayBarsElapsed(openPos);
+    const barsHeld = displayBarsElapsed != null ? displayBarsElapsed : m.bars_elapsed;
     const linearMetric = (value) => {
       const n = Number(value);
       if (!Number.isFinite(n)) return 0;
@@ -1973,7 +2064,7 @@
       symbol_id: symbol,
       side: openPos.side,
       eval_horizon: openPos.eval_horizon,
-      bars_held: m.bars_elapsed,
+      bars_held: barsHeld,
       bars_limit: barsLimit,
       entry_predictions: openPos.entry_predictions,
       current_predictions: lastPredictions,
@@ -2039,9 +2130,13 @@
     const intervalSteps = m.renew_interval_steps != null
       ? Number(m.renew_interval_steps)
       : Number(m.eval_horizon_steps);
+    const displayBarsElapsed = resolveDisplayBarsElapsed(openPos);
+    const totalBarsElapsed = displayBarsElapsed != null
+      ? displayBarsElapsed
+      : Number(m.bars_elapsed);
     const segmentBars = m.segment_bars_elapsed != null
       ? Number(m.segment_bars_elapsed)
-      : Number(m.bars_elapsed);
+      : totalBarsElapsed;
     const segmentsCompleted = m.segments_completed != null
       ? Number(m.segments_completed)
       : 0;
@@ -2051,7 +2146,7 @@
     let renewState = 'between_renew_checkpoints';
     if (lastExitPolicy && lastExitPolicy.exit_reason) {
       renewState = String(lastExitPolicy.exit_reason);
-    } else if (m.bars_elapsed < (m.min_hold_steps != null ? Number(m.min_hold_steps) : intervalSteps)) {
+    } else if (totalBarsElapsed < (m.min_hold_steps != null ? Number(m.min_hold_steps) : intervalSteps)) {
       renewState = 'before_min_hold';
     }
     const progressClass = m.pending_segment_eval || m.at_renew_checkpoint ? 'at-target' : '';
@@ -2061,7 +2156,7 @@
     return `
         <div class="trade-journal-metrics trade-journal-sign-only-metrics">
           <span>Exit: <strong>sign_only renew @ ${deployHorizon}</strong></span>
-          <span>Всего баров: <strong>${m.bars_elapsed}</strong></span>
+          <span>Всего баров: <strong>${totalBarsElapsed}</strong></span>
           <span>Сегмент: <strong>${segmentBars}</strong> / ${intervalSteps}</span>
           <span>Продлений: <strong>${segmentsCompleted}</strong></span>
           <span>${checkpointHint}</span>
@@ -2073,12 +2168,14 @@
     `;
   }
 
-  function renderExitPolicyCard(exitPolicy) {
+  function renderExitPolicyCard(exitPolicy, displayBarsElapsed) {
     if (!exitPolicy) return '';
     if (exitPolicy.mode === 'rolling_h_renew_sign_only') {
       const action = String(exitPolicy.action || 'hold').toUpperCase();
       const runLabel = exitPolicy.run_label || 'rolling_h_renew_sign_only';
-      const barsHeld = exitPolicy.bars_held != null ? exitPolicy.bars_held : '—';
+      const barsHeld = displayBarsElapsed != null
+        ? displayBarsElapsed
+        : (exitPolicy.bars_held != null ? exitPolicy.bars_held : '—');
       const minHold = exitPolicy.min_hold_steps != null ? exitPolicy.min_hold_steps : '—';
       const predLinear = exitPolicy.pred_eval_linear != null
         ? formatPct(Number(exitPolicy.pred_eval_linear) * 100)
@@ -2107,7 +2204,9 @@
     const action = String(exitPolicy.action || 'hold').toUpperCase();
     const runLabel = exitPolicy.run_label || '—';
     const minHold = exitPolicy.min_hold_steps != null ? exitPolicy.min_hold_steps : '—';
-    const barsHeld = exitPolicy.bars_held != null ? exitPolicy.bars_held : '—';
+    const barsHeld = displayBarsElapsed != null
+      ? displayBarsElapsed
+      : (exitPolicy.bars_held != null ? exitPolicy.bars_held : '—');
     let actionClass = 'exit-policy-hold';
     if (action === 'CLOSE') actionClass = 'exit-policy-close';
 
@@ -2162,19 +2261,36 @@
 
   function syncJournalBarsElapsedFromState(state) {
     const openPos = state.open_position;
-    if (openPos && openPos.metrics && openPos.metrics.bars_elapsed != null) {
-      lastJournalBarsElapsed = Number(openPos.metrics.bars_elapsed);
+    if (
+      openPos
+      && openPos.metrics
+      && openPos.metrics.bars_elapsed != null
+      && openPos.entry_start_trade_id != null
+    ) {
+      advanceJournalBarsElapsed(
+        openPos.entry_start_trade_id,
+        Number(openPos.metrics.bars_elapsed),
+      );
       return;
     }
     if (!openPos) {
-      lastJournalBarsElapsed = null;
+      resetJournalBarsElapsedCache();
     }
   }
 
   function applyJournalState(state, symbol) {
     syncJournalBarsElapsedFromState(state);
-    applyJournalDefaultsFromState(state);
     const openPos = state.open_position;
+    if (
+      openPos
+      && openPos.metrics
+      && openPos.entry_start_trade_id != null
+      && lastJournalBarsElapsed != null
+      && Number(openPos.metrics.bars_elapsed) < lastJournalBarsElapsed
+    ) {
+      scheduleJournalRefetchForBarsAdvance(symbol);
+    }
+    applyJournalDefaultsFromState(state);
     const shouldRefreshExitPolicy = openPos
       && openPos.symbol_id === symbol
       && (exitGbmEnabled || getExitStackForSymbol(symbol))
@@ -2224,7 +2340,7 @@
       .then(state => {
         const openPos = state.open_position;
         if (!openPos || openPos.symbol_id !== symbol) {
-          lastJournalBarsElapsed = null;
+          resetJournalBarsElapsedCache();
         }
       })
       .catch(e => {
@@ -2279,6 +2395,7 @@
     let alertHtml = '';
     if (hasOpen && openPos.metrics) {
       const m = openPos.metrics;
+      const displayBarsElapsed = resolveDisplayBarsElapsed(openPos);
       runExitAlertChecks(openPos, symbol);
       updateExitOverlaySession(openPos);
       const progressClass = m.at_target_horizon ? 'at-target' : '';
@@ -2336,7 +2453,7 @@
         </div>
       `;
       metricsHtml = `
-        ${renderExitPolicyCard(lastExitPolicy)}
+        ${renderExitPolicyCard(lastExitPolicy, displayBarsElapsed)}
         ${renderExitTransformerCard(lastExitTransformer)}
         ${renderEntryPredictionMetrics(openPos, m, symbol)}
         ${renewMetricsHtml}
