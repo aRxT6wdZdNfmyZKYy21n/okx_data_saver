@@ -62,7 +62,9 @@ When `inference_api` exposes `exit_stack_by_symbol.BTC_USDT.mode=rolling_h_renew
 - **Entry** uses deploy eval horizon **`x32`** (from exit stack / policy), not the journal dropdown.
 - **Snapshot** stores `entry_predictions` keyed by `target_close_return_signed_log2_x32`.
 - **Progress** is per **32-bar segment** (not fixed `x1536`): segment bar count, renew count, bars until next checkpoint.
-- **Exit policy** card shows `sign_valid_renewed` / `sign_flip_at_checkpoint` from `POST /api/exit-policy` (exit stack stub; GBM disabled).
+- **Exit policy** (daemon + inference cycle): segment-based `rolling_h_renew_sign_only` eval on **latest available predictions** at pending checkpoint — no wait for a newer inference tick. Close on `sign_flip_at_checkpoint`; renew on `sign_valid_renewed`. Implementation: `main/web_gui/sign_only_renew_exit_common.py` (local eval; remote `/exit-policy` no longer gates daemon close).
+
+**Bug fixed 2026-08-14:** daemon previously skipped exit eval with `inference_not_new_after_checkpoint` while remote API used stale `bars_held % H == 0` logic → SHORT held through LONG flip. Logs: `data/trade_execution.jsonl` (`skip_exit_eval` / `between_renew_checkpoints` with `sign_still_valid: false`).
 
 Discard and re-open any journal position opened before this change (old rows used wrong `eval_horizon` → missing pred snapshot).
 

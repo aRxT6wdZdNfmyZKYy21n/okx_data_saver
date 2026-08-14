@@ -12,6 +12,10 @@ from main.web_gui.exit_policy_service import (
     build_exit_policy_disabled_response,
     run_remote_exit_policy,
 )
+from main.web_gui.sign_only_renew_exit_common import (
+    build_sign_only_exit_policy_response,
+    extract_pred_eval_log2_from_predictions,
+)
 from main.web_gui.exit_transformer_service import (
     build_exit_transformer_disabled_response,
     run_remote_exit_transformer_with_x_seq,
@@ -181,18 +185,22 @@ def _build_exit_payloads(
             deploy_eval_horizon = str(open_position_data['exit_stack_eval_horizon'])
         else:
             deploy_eval_horizon = str(open_position_data['eval_horizon'])
-        exit_policy_payload = {
-            'symbol_id': symbol_id,
-            'side': open_position_data['side'],
-            'eval_horizon': deploy_eval_horizon,
-            'bars_held': metrics['bars_elapsed'],
-            'current_predictions': current_predictions,
-            'exit_stack_mode': exit_stack_mode,
-            'last_renew_segment_evaluated': resolve_last_renew_segment_evaluated(
+        pred_log2 = extract_pred_eval_log2_from_predictions(
+            predictions=current_predictions,
+            eval_horizon=deploy_eval_horizon,
+        )
+        exit_policy_result = build_sign_only_exit_policy_response(
+            side=str(open_position_data['side']),
+            eval_horizon=deploy_eval_horizon,
+            min_hold_steps=min_hold_steps,
+            check_interval_steps=check_interval_steps,
+            bars_held=int(metrics['bars_elapsed']),
+            pred_log2=pred_log2,
+            last_renew_segment_evaluated=resolve_last_renew_segment_evaluated(
                 open_position_data,
             ),
-        }
-        exit_policy_result = run_remote_exit_policy(exit_policy_payload)
+            eval_source='inference_cycle_latest_predictions',
+        )
     elif settings.WEB_GUI_EXIT_GBM_ENABLED:
         if common_payload is None:
             return None, None

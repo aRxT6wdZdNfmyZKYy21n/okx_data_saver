@@ -10,8 +10,11 @@ from typing import Any
 from enumerations import SymbolId
 from main.offline_inference.artifacts import enrich_inference_artifact, read_latest_inference
 from main.web_gui.data_service import count_x1_bars_since_entry_sync, fetch_last_bars_sync
-from main.web_gui.exit_policy_service import run_remote_exit_policy
 from main.web_gui.inference_service import fetch_inference_metadata
+from main.web_gui.sign_only_renew_exit_common import (
+    build_sign_only_exit_policy_response,
+    extract_pred_eval_log2_from_predictions,
+)
 from main.web_gui.trade_execution_log import append_execution_event
 from main.web_gui.trade_journal_service import (
     apply_checkpoint_pending_since_ms,
@@ -26,6 +29,7 @@ from main.web_gui.trade_journal_service import (
     enrich_open_position,
     get_journal_state,
     open_position_automated,
+    parse_eval_horizon_steps,
     resolve_entry_side_from_hint,
     resolve_last_renew_segment_evaluated,
 )
@@ -203,26 +207,61 @@ def _try_automated_entry(
     )
 
 
-def _should_wait_for_fresh_prediction(
+def _resolve_sign_only_exit_params(
     open_position_data: dict[str, Any],
-    pending_segment_eval: bool,
+) -> tuple[str, int, int]:
+    if 'exit_stack_eval_horizon' in open_position_data:
+        deploy_eval_horizon = str(open_position_data['exit_stack_eval_horizon'])
+    else:
+        deploy_eval_horizon = str(open_position_data['eval_horizon'])
+    min_hold_steps = int(open_position_data['exit_stack_min_hold_steps'])
+    check_interval_steps = parse_eval_horizon_steps(deploy_eval_horizon)
+    return deploy_eval_horizon, min_hold_steps, check_interval_steps
+
+
+def _evaluate_sign_only_exit_policy_local(
+    open_position_data: dict[str, Any],
+    artifact: dict[str, Any],
+    bars_elapsed: int,
+    eval_source: str,
+) -> dict[str, Any]:
+    if 'predictions' not in artifact or not isinstance(artifact['predictions'], dict):
+        raise ValueError('artifact predictions missing for sign_only exit eval')
+    deploy_eval_horizon, min_hold_steps, check_interval_steps = (
+        _resolve_sign_only_exit_params(open_position_data)
+    )
+    pred_log2 = extract_pred_eval_log2_from_predictions(
+        predictions=artifact['predictions'],
+        eval_horizon=deploy_eval_horizon,
+    )
+    return build_sign_only_exit_policy_response(
+        side=str(open_position_data['side']),
+        eval_horizon=deploy_eval_horizon,
+        min_hold_steps=min_hold_steps,
+        check_interval_steps=check_interval_steps,
+        bars_held=bars_elapsed,
+        pred_log2=pred_log2,
+        last_renew_segment_evaluated=resolve_last_renew_segment_evaluated(
+            open_position_data,
+        ),
+        eval_source=eval_source,
+    )
+
+
+def _apply_sign_only_exit_policy_state(
+    exit_policy: dict[str, Any],
     inference_completed_at_ms: int | None,
-) -> tuple[bool, str]:
-    if not pending_segment_eval:
-        return False, ''
-    if inference_completed_at_ms is None:
-        return True, 'missing_inference_completed_at_ms'
-    if 'checkpoint_pending_since_ms' not in open_position_data:
-        return True, 'checkpoint_pending_since_ms_not_set'
-    checkpoint_pending_since_ms = int(open_position_data['checkpoint_pending_since_ms'])
-    if inference_completed_at_ms <= checkpoint_pending_since_ms:
-        return True, 'inference_not_new_after_checkpoint'
-    last_eval_ms = 0
-    if 'last_exit_eval_inference_completed_at_ms' in open_position_data:
-        last_eval_ms = int(open_position_data['last_exit_eval_inference_completed_at_ms'])
-    if inference_completed_at_ms <= last_eval_ms:
-        return True, 'inference_already_evaluated'
-    return False, ''
+    pending_segment_eval: bool,
+) -> None:
+    if (
+        'last_renew_segment_evaluated' in exit_policy
+        and exit_policy['last_renew_segment_evaluated'] is not None
+    ):
+        apply_last_renew_segment_evaluated(
+            int(exit_policy['last_renew_segment_evaluated']),
+        )
+    if inference_completed_at_ms is not None and pending_segment_eval:
+        apply_last_exit_eval_inference_completed_at_ms(inference_completed_at_ms)
 
 
 def _manage_open_position(
@@ -282,34 +321,6 @@ def _manage_open_position(
         apply_checkpoint_pending_since_ms(None)
 
     inference_completed_at_ms = _resolve_inference_completed_at_ms(artifact)
-    wait_for_fresh, wait_reason = _should_wait_for_fresh_prediction(
-        open_position_data=open_position_data,
-        pending_segment_eval=pending_segment_eval,
-        inference_completed_at_ms=inference_completed_at_ms,
-    )
-    if wait_for_fresh:
-        append_execution_event(
-            'skip_exit_eval',
-            {
-                'symbol_id': symbol_id,
-                'reason': wait_reason,
-                'bars_elapsed': bars_elapsed,
-                'pending_segment_eval': pending_segment_eval,
-                'inference_completed_at_ms': inference_completed_at_ms,
-            },
-        )
-        return
-
-    if 'predictions' not in artifact or not isinstance(artifact['predictions'], dict):
-        append_execution_event(
-            'skip_exit_eval',
-            {
-                'symbol_id': symbol_id,
-                'reason': 'missing_predictions',
-                'bars_elapsed': bars_elapsed,
-            },
-        )
-        return
 
     exit_stack_mode = None
     if 'exit_stack_mode' in open_position_data:
@@ -325,30 +336,48 @@ def _manage_open_position(
         )
         return
 
-    if 'exit_stack_eval_horizon' in open_position_data:
-        deploy_eval_horizon = str(open_position_data['exit_stack_eval_horizon'])
+    if pending_segment_eval:
+        if 'predictions' not in artifact or not isinstance(artifact['predictions'], dict):
+            append_execution_event(
+                'skip_exit_eval',
+                {
+                    'symbol_id': symbol_id,
+                    'reason': 'missing_predictions_at_checkpoint',
+                    'bars_elapsed': bars_elapsed,
+                    'pending_segment_eval': pending_segment_eval,
+                },
+            )
+            return
+        exit_policy = _evaluate_sign_only_exit_policy_local(
+            open_position_data=open_position_data,
+            artifact=artifact,
+            bars_elapsed=bars_elapsed,
+            eval_source='daemon_latest_predictions_at_checkpoint',
+        )
     else:
-        deploy_eval_horizon = str(open_position_data['eval_horizon'])
+        if 'predictions' not in artifact or not isinstance(artifact['predictions'], dict):
+            append_execution_event(
+                'skip_exit_eval',
+                {
+                    'symbol_id': symbol_id,
+                    'reason': 'missing_predictions',
+                    'bars_elapsed': bars_elapsed,
+                },
+            )
+            return
+        exit_policy = _evaluate_sign_only_exit_policy_local(
+            open_position_data=open_position_data,
+            artifact=artifact,
+            bars_elapsed=bars_elapsed,
+            eval_source='daemon_latest_predictions',
+        )
 
-    exit_policy_payload = {
-        'symbol_id': symbol_id,
-        'side': open_position_data['side'],
-        'eval_horizon': deploy_eval_horizon,
-        'bars_held': bars_elapsed,
-        'current_predictions': artifact['predictions'],
-        'exit_stack_mode': exit_stack_mode,
-        'last_renew_segment_evaluated': resolve_last_renew_segment_evaluated(
-            open_position_data,
-        ),
-    }
-    exit_policy = run_remote_exit_policy(exit_policy_payload)
     apply_daemon_last_exit_policy(exit_policy)
-    if (
-        'last_renew_segment_evaluated' in exit_policy
-        and exit_policy['last_renew_segment_evaluated'] is not None
-    ):
-        apply_last_renew_segment_evaluated(
-            int(exit_policy['last_renew_segment_evaluated']),
+    if exit_policy['at_renew_checkpoint']:
+        _apply_sign_only_exit_policy_state(
+            exit_policy=exit_policy,
+            inference_completed_at_ms=inference_completed_at_ms,
+            pending_segment_eval=pending_segment_eval,
         )
     append_execution_event(
         'exit_policy_eval',
@@ -362,11 +391,8 @@ def _manage_open_position(
         },
     )
 
-    if inference_completed_at_ms is not None and pending_segment_eval:
-        apply_last_exit_eval_inference_completed_at_ms(inference_completed_at_ms)
-
     if 'suggest_close' in exit_policy and bool(exit_policy['suggest_close']):
-        if not pending_segment_eval:
+        if not pending_segment_eval and not exit_policy['at_renew_checkpoint']:
             append_execution_event(
                 'skip_exit',
                 {

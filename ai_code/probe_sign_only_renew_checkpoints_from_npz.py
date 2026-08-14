@@ -36,55 +36,7 @@ def _estimate_entry_sample_index(
     return sample_before + fraction * (sample_after - sample_before)
 
 
-def _evaluate_sign_only_checkpoint(
-    side: str,
-    bars_held: int,
-    min_hold_steps: int,
-    check_interval_steps: int,
-    pred_log2: float,
-    last_renew_segment_evaluated: int,
-) -> tuple[bool, str, float, int]:
-    pred_linear = math.pow(2.0, pred_log2) - 1.0
-    current_renew_segment = bars_held // check_interval_steps
-    pending_segment_eval = (
-        bars_held >= min_hold_steps
-        and current_renew_segment > last_renew_segment_evaluated
-    )
-    updated_last_renew_segment_evaluated = last_renew_segment_evaluated
-    if pending_segment_eval:
-        updated_last_renew_segment_evaluated = current_renew_segment
-    if side == 'long':
-        sign_still_valid = pred_linear > 0.0
-    elif side == 'short':
-        sign_still_valid = pred_linear < 0.0
-    else:
-        raise ValueError(f'side must be long or short, got: {side!r}')
-
-    if bars_held < min_hold_steps:
-        return False, 'before_min_hold', pred_linear, last_renew_segment_evaluated
-    if not pending_segment_eval:
-        return (
-            False,
-            'between_renew_checkpoints',
-            pred_linear,
-            last_renew_segment_evaluated,
-        )
-    if sign_still_valid:
-        return (
-            False,
-            'sign_valid_renewed',
-            pred_linear,
-            updated_last_renew_segment_evaluated,
-        )
-    return (
-        True,
-        'sign_flip_at_checkpoint',
-        pred_linear,
-        updated_last_renew_segment_evaluated,
-    )
-
-
-def _nearest_row_for_target_sample(
+from main.web_gui.sign_only_renew_exit_common import evaluate_sign_only_checkpoint
     target_sample_index: float,
     sample_index: np.ndarray,
 ) -> int:
@@ -125,7 +77,9 @@ def probe_sign_only_renew_checkpoints(
             exit_reason,
             pred_linear,
             last_renew_segment_evaluated,
-        ) = _evaluate_sign_only_checkpoint(
+            _current_renew_segment,
+            _at_renew_checkpoint,
+        ) = evaluate_sign_only_checkpoint(
             side=side,
             bars_held=bars_held,
             min_hold_steps=min_hold_steps,
