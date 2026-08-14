@@ -33,17 +33,14 @@ from main.web_gui.trade_journal_service import (
     resolve_entry_side_from_hint,
     resolve_last_renew_segment_evaluated,
 )
+from main.web_gui.trading_inference_gate_common import (
+    evaluate_trading_inference_gate,
+    resolve_inference_completed_at_ms,
+    resolve_prediction_age_ms,
+)
 from settings import settings
 
 logger = logging.getLogger(__name__)
-
-
-def _resolve_inference_completed_at_ms(artifact: dict[str, Any]) -> int | None:
-    if 'inference_completed_at_ms' in artifact:
-        return int(artifact['inference_completed_at_ms'])
-    if 'updated_at_ms' in artifact:
-        return int(artifact['updated_at_ms'])
-    return None
 
 
 def _resolve_exit_stack_for_symbol(symbol_id: str) -> dict[str, Any] | None:
@@ -201,7 +198,7 @@ def _try_automated_entry(
             'balance_after_usd': balance_before,
             'entry_hint': entry_hint,
             'policy': policy,
-            'inference_completed_at_ms': _resolve_inference_completed_at_ms(artifact),
+            'inference_completed_at_ms': resolve_inference_completed_at_ms(artifact),
             'position_id': position['id'],
         },
     )
@@ -320,7 +317,7 @@ def _manage_open_position(
     else:
         apply_checkpoint_pending_since_ms(None)
 
-    inference_completed_at_ms = _resolve_inference_completed_at_ms(artifact)
+    inference_completed_at_ms = resolve_inference_completed_at_ms(artifact)
 
     exit_stack_mode = None
     if 'exit_stack_mode' in open_position_data:
@@ -436,6 +433,14 @@ def run_trading_tick(symbol_id: str) -> None:
     journal = get_journal_state()
     cash_balance_usd = compute_cash_balance_usd(journal['closed_trades'])
 
+    now_ms = int(time.time() * 1000.0)
+    prediction_age_ms = None
+    if artifact is not None:
+        prediction_age_ms = resolve_prediction_age_ms(
+            artifact=artifact,
+            now_ms=now_ms,
+        )
+
     append_execution_event(
         'tick',
         {
@@ -444,13 +449,28 @@ def run_trading_tick(symbol_id: str) -> None:
             'has_open_position': journal['open_position'] is not None,
             'mark_price': latest_bar['close_price'],
             'artifact_status': artifact['status'] if artifact is not None and 'status' in artifact else None,
-            'inference_completed_at_ms': _resolve_inference_completed_at_ms(artifact)
+            'inference_completed_at_ms': resolve_inference_completed_at_ms(artifact)
             if artifact is not None
             else None,
+            'prediction_age_ms': prediction_age_ms,
+            'max_prediction_age_ms': settings.WEB_GUI_TRADING_MAX_PREDICTION_AGE_MS,
         },
     )
 
-    if artifact is None or artifact['status'] != 'ok':
+    gate_usable, gate_reason, gate_details = evaluate_trading_inference_gate(
+        artifact=artifact,
+        max_prediction_age_ms=settings.WEB_GUI_TRADING_MAX_PREDICTION_AGE_MS,
+        now_ms=now_ms,
+    )
+    if not gate_usable:
+        append_execution_event(
+            'skip_tick',
+            {
+                'symbol_id': symbol_id,
+                'reason': gate_reason,
+                **gate_details,
+            },
+        )
         return
 
     open_position_data = journal['open_position']

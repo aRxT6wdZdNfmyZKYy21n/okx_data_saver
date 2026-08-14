@@ -43,6 +43,8 @@ python3 -m main.web_gui -v
 
 # Manual trade research export (incremental; Polars work runs in spawn subprocess)
 python3 -m main.trade_research_export --symbol BTC_USDT -v
+# Faster payload prep while GPU runs inference batches:
+python3 -m main.trade_research_export --symbol BTC_USDT -v --num-workers 4 --prefetch-factor 2
 ```
 
 ## Environment
@@ -64,7 +66,9 @@ When `inference_api` exposes `exit_stack_by_symbol.BTC_USDT.mode=rolling_h_renew
 - **Progress** is per **32-bar segment** (not fixed `x1536`): segment bar count, renew count, bars until next checkpoint.
 - **Exit policy** (daemon + inference cycle): segment-based `rolling_h_renew_sign_only` eval on **latest available predictions** at pending checkpoint — no wait for a newer inference tick. Close on `sign_flip_at_checkpoint`; renew on `sign_valid_renewed`. Implementation: `main/web_gui/sign_only_renew_exit_common.py` (local eval; remote `/exit-policy` no longer gates daemon close).
 
-**Bug fixed 2026-08-14:** daemon previously skipped exit eval with `inference_not_new_after_checkpoint` while remote API used stale `bars_held % H == 0` logic → SHORT held through LONG flip. Logs: `data/trade_execution.jsonl` (`skip_exit_eval` / `between_renew_checkpoints` with `sign_still_valid: false`).
+- **Trading daemon freshness gate:** entry/exit use latest enriched artifact (`ok` or `computing` + `last_inference_ok` snapshot). Block only when predictions are older than `WEB_GUI_TRADING_MAX_PREDICTION_AGE_MS` (default **600000** = 10 min) or artifact is `error` / missing preds. Logs: `skip_tick` with `predictions_stale`. Aligns with lag-sweep live band (4–8 min); avoids idle ~95% of time while inference cycle runs.
+
+**Bug fixed 2026-08-14:** daemon previously skipped all ticks when `latest_inference.json` status was `computing`, even though GUI showed fresh-enough preds from sidecar. Also fixed checkpoint exit waiting for post-checkpoint inference (`sign_flip_at_checkpoint` on latest preds).
 
 Discard and re-open any journal position opened before this change (old rows used wrong `eval_horizon` → missing pred snapshot).
 
