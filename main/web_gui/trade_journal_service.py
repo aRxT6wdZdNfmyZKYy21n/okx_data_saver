@@ -5,6 +5,7 @@
 import json
 import logging
 import os
+import shutil
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -19,6 +20,7 @@ _JOURNAL_LOCK = threading.Lock()
 DEFAULT_NOTIONAL_USD = 7.0
 ROUND_TRIP_FEE_RATE = 0.001
 TAKER_FEE_RATE_PER_SIDE = 0.0005
+TRADING_DAEMON_MARKER_FILENAME = '.trading_daemon_initialized'
 
 
 def _repo_root() -> str:
@@ -36,8 +38,18 @@ def default_eval_horizon() -> str:
     return settings.WEB_GUI_TRADE_JOURNAL_DEFAULT_EVAL_HORIZON
 
 
+def initial_balance_usd() -> float:
+    return settings.WEB_GUI_TRADING_INITIAL_BALANCE_USD
+
+
+def trading_daemon_marker_path() -> str:
+    return os.path.join(os.path.dirname(journal_path()), TRADING_DAEMON_MARKER_FILENAME)
+
+
 def _empty_journal() -> dict[str, Any]:
     return {
+        'initial_balance_usd': initial_balance_usd(),
+        'automation_enabled': settings.WEB_GUI_TRADING_ENABLED,
         'open_position': None,
         'closed_trades': [],
     }
@@ -53,6 +65,8 @@ def _load_journal_unlocked() -> dict[str, Any]:
         data['open_position'] = None
     if 'closed_trades' not in data:
         data['closed_trades'] = []
+    if 'initial_balance_usd' not in data:
+        data['initial_balance_usd'] = initial_balance_usd()
     return data
 
 
@@ -61,6 +75,193 @@ def _save_journal_unlocked(data: dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as journal_file:
         json.dump(data, journal_file, ensure_ascii=False, indent=2)
+
+
+def compute_total_realized_pnl_usd(closed_trades: list[dict[str, Any]]) -> float:
+    return sum(float(trade['realized_pnl_usd']) for trade in closed_trades)
+
+
+def compute_cash_balance_usd(closed_trades: list[dict[str, Any]]) -> float:
+    return initial_balance_usd() + compute_total_realized_pnl_usd(closed_trades)
+
+
+def build_equity_curve(closed_trades: list[dict[str, Any]]) -> list[dict[str, float | str]]:
+    balance = initial_balance_usd()
+    curve: list[dict[str, float | str]] = [
+        {
+            'closed_at_utc': '',
+            'balance_usd': balance,
+        },
+    ]
+    for trade in closed_trades:
+        balance = balance + float(trade['realized_pnl_usd'])
+        closed_at_utc = ''
+        if 'closed_at_utc' in trade:
+            closed_at_utc = str(trade['closed_at_utc'])
+        curve.append(
+            {
+                'closed_at_utc': closed_at_utc,
+                'balance_usd': balance,
+            },
+        )
+    return curve
+
+
+def archive_journal_file(path: str) -> str:
+    timestamp_label = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    archive_path = f'{path}.archived.{timestamp_label}'
+    shutil.move(path, archive_path)
+    return archive_path
+
+
+def ensure_automated_trading_initialized() -> None:
+    if not settings.WEB_GUI_TRADING_ENABLED:
+        return
+    marker_path = trading_daemon_marker_path()
+    if os.path.isfile(marker_path):
+        return
+    with _JOURNAL_LOCK:
+        if os.path.isfile(marker_path):
+            return
+        journal_file = journal_path()
+        os.makedirs(os.path.dirname(journal_file), exist_ok=True)
+        if os.path.isfile(journal_file):
+            archive_path = archive_journal_file(journal_file)
+            logger.info('Archived trade journal before automation: %s', archive_path)
+        fresh_journal = _empty_journal()
+        fresh_journal['automation_enabled'] = True
+        _save_journal_unlocked(fresh_journal)
+        with open(marker_path, 'w', encoding='utf-8') as marker_file:
+            marker_file.write(datetime.now(timezone.utc).isoformat())
+        logger.info('Automated trading journal initialized at %s', journal_file)
+
+
+def resolve_entry_side_from_hint(entry_hint: dict[str, Any]) -> str | None:
+    if 'recommended_action' not in entry_hint:
+        return None
+    recommended_action = str(entry_hint['recommended_action']).lower()
+    if recommended_action not in ('long', 'short'):
+        return None
+    if 'entry_blocked' in entry_hint and bool(entry_hint['entry_blocked']):
+        return None
+    if recommended_action == 'long':
+        if 'allow_long' in entry_hint and not bool(entry_hint['allow_long']):
+            return None
+    if recommended_action == 'short':
+        if 'allow_short' in entry_hint and not bool(entry_hint['allow_short']):
+            return None
+    return recommended_action
+
+
+def apply_daemon_last_exit_policy(exit_policy: dict[str, Any]) -> None:
+    with _JOURNAL_LOCK:
+        journal = _load_journal_unlocked()
+        open_position_data = journal['open_position']
+        if open_position_data is None:
+            return
+        open_position_data['daemon_last_exit_policy'] = exit_policy
+        journal['open_position'] = open_position_data
+        _save_journal_unlocked(journal)
+
+
+def apply_checkpoint_pending_since_ms(checkpoint_pending_since_ms: int | None) -> None:
+    with _JOURNAL_LOCK:
+        journal = _load_journal_unlocked()
+        open_position_data = journal['open_position']
+        if open_position_data is None:
+            return
+        if checkpoint_pending_since_ms is None:
+            if 'checkpoint_pending_since_ms' in open_position_data:
+                del open_position_data['checkpoint_pending_since_ms']
+        else:
+            open_position_data['checkpoint_pending_since_ms'] = (
+                checkpoint_pending_since_ms
+            )
+        journal['open_position'] = open_position_data
+        _save_journal_unlocked(journal)
+
+
+def apply_last_exit_eval_inference_completed_at_ms(
+    inference_completed_at_ms: int,
+) -> None:
+    with _JOURNAL_LOCK:
+        journal = _load_journal_unlocked()
+        open_position_data = journal['open_position']
+        if open_position_data is None:
+            return
+        open_position_data['last_exit_eval_inference_completed_at_ms'] = (
+            inference_completed_at_ms
+        )
+        if 'checkpoint_pending_since_ms' in open_position_data:
+            del open_position_data['checkpoint_pending_since_ms']
+        journal['open_position'] = open_position_data
+        _save_journal_unlocked(journal)
+
+
+def open_position_automated(
+    symbol_id: str,
+    side: str,
+    entry_price: float,
+    entry_start_trade_id: int,
+    entry_timestamp_ms: int,
+    eval_horizon: str,
+    notional_usd: float,
+    policy_action: str | None,
+    entry_policy: dict[str, Any] | None,
+    entry_predictions: dict[str, float] | None,
+    exit_stack_mode: str | None,
+    exit_stack_eval_horizon: str | None,
+    exit_stack_min_hold_steps: int | None,
+) -> dict[str, Any]:
+    position = open_position(
+        symbol_id=symbol_id,
+        side=side,
+        entry_price=entry_price,
+        entry_start_trade_id=entry_start_trade_id,
+        entry_timestamp_ms=entry_timestamp_ms,
+        eval_horizon=eval_horizon,
+        notional_usd=notional_usd,
+        policy_action=policy_action,
+        notes='',
+        entry_policy=entry_policy,
+        entry_predictions=entry_predictions,
+        exit_stack_mode=exit_stack_mode,
+        exit_stack_eval_horizon=exit_stack_eval_horizon,
+        exit_stack_min_hold_steps=exit_stack_min_hold_steps,
+    )
+    with _JOURNAL_LOCK:
+        journal = _load_journal_unlocked()
+        open_position_data = journal['open_position']
+        if open_position_data is None:
+            raise RuntimeError('Open position missing after automated entry')
+        open_position_data['executed_by'] = 'daemon'
+        journal['open_position'] = open_position_data
+        _save_journal_unlocked(journal)
+        return open_position_data
+
+
+def close_position_automated(
+    exit_price: float,
+    exit_start_trade_id: int,
+    exit_timestamp_ms: int,
+    exit_overlay: dict[str, Any] | None,
+) -> dict[str, Any]:
+    closed_trade = close_position(
+        exit_price=exit_price,
+        exit_start_trade_id=exit_start_trade_id,
+        exit_timestamp_ms=exit_timestamp_ms,
+        notes='',
+        exit_overlay=exit_overlay,
+    )
+    balance_after = compute_cash_balance_usd(get_journal_state()['closed_trades'])
+    with _JOURNAL_LOCK:
+        journal = _load_journal_unlocked()
+        if journal['closed_trades']:
+            journal['closed_trades'][-1]['executed_by'] = 'daemon'
+            journal['closed_trades'][-1]['balance_after_close_usd'] = balance_after
+            _save_journal_unlocked(journal)
+            closed_trade = journal['closed_trades'][-1]
+    return closed_trade
 
 
 def parse_eval_horizon_steps(eval_horizon: str) -> int:
@@ -563,13 +764,19 @@ def build_journal_response(
 
     closed = journal['closed_trades']
     recent_closed = closed[-20:][::-1]
-    total_realized = sum(float(t['realized_pnl_usd']) for t in closed)
+    total_realized = compute_total_realized_pnl_usd(closed)
+    cash_balance = compute_cash_balance_usd(closed)
+    equity_curve = build_equity_curve(closed)
 
     return {
         'open_position': enriched_open if enriched_open is not None else open_position_data,
         'closed_trades': recent_closed,
         'closed_trades_count': len(closed),
         'total_realized_pnl_usd': total_realized,
+        'cash_balance_usd': cash_balance,
+        'initial_balance_usd': initial_balance_usd(),
+        'equity_curve': equity_curve,
+        'automation_enabled': settings.WEB_GUI_TRADING_ENABLED,
         'defaults': {
             'notional_usd': DEFAULT_NOTIONAL_USD,
             'eval_horizon': default_eval_horizon(),

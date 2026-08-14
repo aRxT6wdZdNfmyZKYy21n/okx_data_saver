@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # Per-instance trade journal (micro live 020); relative paths are under repo root
     WEB_GUI_TRADE_JOURNAL_PATH: str = 'data/trade_journal.json'
     WEB_GUI_TRADE_JOURNAL_DEFAULT_EVAL_HORIZON: str = 'x32'
+    # Automated paper trading loop inside web_gui (daemon is sole journal writer)
+    WEB_GUI_TRADING_ENABLED: bool = False
+    WEB_GUI_TRADING_LOOP_INTERVAL_SEC: int = 5
+    WEB_GUI_TRADING_INITIAL_BALANCE_USD: float = 100.0
     # Optional override for ?v= on app.js/style.css (default: max mtime of static files)
     WEB_GUI_ASSET_VERSION: str | None = None
 

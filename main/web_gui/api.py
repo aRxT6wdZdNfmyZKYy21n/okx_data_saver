@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -49,11 +50,27 @@ from main.web_gui.static_assets import (
     render_index_html,
     static_dir_path,
 )
+from main.web_gui.trading_daemon_runner import trading_daemon_loop
 from settings import settings
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title='OKX Data Set Web GUI', version='0.1.0')
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    trading_task: asyncio.Task | None = None
+    if settings.WEB_GUI_TRADING_ENABLED:
+        trading_task = asyncio.create_task(trading_daemon_loop())
+    yield
+    if trading_task is not None:
+        trading_task.cancel()
+        try:
+            await trading_task
+        except asyncio.CancelledError:
+            pass
+
+
+app = FastAPI(title='OKX Data Set Web GUI', version='0.1.0', lifespan=_app_lifespan)
 
 # Дефолтное число баров для GUI (хвост графика).
 DEFAULT_BARS_LIMIT = settings.WEB_GUI_RECORDS_LIMIT
@@ -148,6 +165,9 @@ async def get_config() -> dict:
         'tradeResearchPnlStride': settings.WEB_GUI_TRADE_RESEARCH_PNL_STRIDE,
         'exitGbmEnabled': settings.WEB_GUI_EXIT_GBM_ENABLED,
         'exitTransformerEnabled': settings.WEB_GUI_EXIT_TRANSFORMER_ENABLED,
+        'tradingEnabled': settings.WEB_GUI_TRADING_ENABLED,
+        'tradingLoopIntervalSec': settings.WEB_GUI_TRADING_LOOP_INTERVAL_SEC,
+        'tradingInitialBalanceUsd': settings.WEB_GUI_TRADING_INITIAL_BALANCE_USD,
     }
 
 
@@ -396,6 +416,9 @@ class ExitTransformerRequest(BaseModel):
 
 @app.post('/api/exit-policy')
 async def post_exit_policy(body: ExitPolicyRequest) -> dict:
+    if settings.WEB_GUI_TRADING_ENABLED:
+        raise HTTPException(status_code=403, detail='Exit policy is daemon-only')
+
     try:
         SymbolId[body.symbol_id]
     except KeyError:
@@ -480,6 +503,9 @@ async def get_trade_journal_bars_elapsed(
 
 @app.post('/api/trade-journal/entry')
 async def post_trade_journal_entry(body: TradeJournalEntryRequest) -> dict:
+    if settings.WEB_GUI_TRADING_ENABLED:
+        raise HTTPException(status_code=403, detail='Trade journal is daemon-only')
+
     try:
         SymbolId[body.symbol_id]
     except KeyError:
@@ -497,6 +523,9 @@ async def post_trade_journal_entry(body: TradeJournalEntryRequest) -> dict:
 
 @app.post('/api/trade-journal/exit')
 async def post_trade_journal_exit(body: TradeJournalExitRequest) -> dict:
+    if settings.WEB_GUI_TRADING_ENABLED:
+        raise HTTPException(status_code=403, detail='Trade journal is daemon-only')
+
     try:
         return await run_in_spawned_process_async(
             _worker_trade_journal_exit,
@@ -509,6 +538,9 @@ async def post_trade_journal_exit(body: TradeJournalExitRequest) -> dict:
 
 @app.delete('/api/trade-journal/open')
 async def delete_trade_journal_open() -> dict:
+    if settings.WEB_GUI_TRADING_ENABLED:
+        raise HTTPException(status_code=403, detail='Trade journal is daemon-only')
+
     return await run_in_spawned_process_async(
         _worker_trade_journal_discard,
         pool_kind='journal',

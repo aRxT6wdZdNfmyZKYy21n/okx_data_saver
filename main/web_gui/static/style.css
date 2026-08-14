@@ -746,6 +746,30 @@ body {
   color: var(--red);
 }
 
+.trade-journal-equity {
+  margin-top: 12px;
+}
+
+.trade-journal-equity h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #b2b5be;
+}
+
+.trade-journal-equity-chart {
+  width: 100%;
+  height: 120px;
+  background: #181c24;
+  border: 1px solid #2a2e39;
+  border-radius: 4px;
+}
+
+.trade-journal-automated .trade-journal-side::after {
+  content: ' · daemon';
+  color: #787b86;
+  font-size: 12px;
+}
+
 .trade-journal-loading {
   color: #787b86;
   font-size: 0.85rem;

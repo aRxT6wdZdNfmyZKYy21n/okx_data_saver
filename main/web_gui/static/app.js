@@ -227,6 +227,8 @@
   let entryConfidenceMarginBySymbol = {};
   let exitGbmEnabled = false;
   let exitTransformerEnabled = false;
+  let tradingEnabled = false;
+  let tradingInitialBalanceUsd = 100;
   let checkpointPathBySymbol = {};
   let inferenceMinRows = 0;
   let chartShowLimit = 50000;
@@ -720,7 +722,56 @@
     }, EXIT_CLOSE_BEEP_INTERVAL_MS);
   }
 
+  function applyTradingEnabledUi() {
+    const settingsBlock = document.querySelector('.trade-journal-settings');
+    if (settingsBlock) {
+      settingsBlock.style.display = tradingEnabled ? 'none' : '';
+    }
+    if (journalActionStatusEl) {
+      journalActionStatusEl.style.display = tradingEnabled ? 'none' : '';
+    }
+    if (tradeJournalPanel) {
+      tradeJournalPanel.classList.toggle('trade-journal-automated', tradingEnabled);
+    }
+  }
+
+  function renderEquityCurveSvg(equityCurve) {
+    if (!Array.isArray(equityCurve) || equityCurve.length < 2) {
+      return '';
+    }
+    const width = 640;
+    const height = 120;
+    const padding = 8;
+    const balances = equityCurve.map(point => Number(point.balance_usd));
+    const minBalance = Math.min(...balances);
+    const maxBalance = Math.max(...balances);
+    const span = maxBalance - minBalance;
+    const effectiveSpan = span > 0 ? span : 1;
+    const points = equityCurve.map((point, index) => {
+      const x = padding + (
+        (index / (equityCurve.length - 1)) * (width - padding * 2)
+      );
+      const balance = Number(point.balance_usd);
+      const y = padding + (
+        (1 - ((balance - minBalance) / effectiveSpan)) * (height - padding * 2)
+      );
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const lastBalance = balances[balances.length - 1];
+    return `
+      <div class="trade-journal-equity">
+        <h4>Equity (${formatUsd(lastBalance)})</h4>
+        <svg class="trade-journal-equity-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+          <polyline points="${points}" fill="none" stroke="#42a5f5" stroke-width="2" />
+        </svg>
+      </div>
+    `;
+  }
+
   function runExitAlertChecks(openPos, symbol) {
+    if (tradingEnabled) {
+      return;
+    }
     if (!openPos || !openPos.metrics) {
       return;
     }
@@ -782,6 +833,9 @@
   }
 
   function maybeNotifyEntryAllowedAlert(entryHint) {
+    if (tradingEnabled) {
+      return;
+    }
     if (journalHasOpenPosition) {
       resetEntryAllowedAlertState();
       return;
@@ -2104,9 +2158,7 @@
         bars_held: barsHeld,
         current_predictions: lastPredictions,
         exit_stack_mode: String(exitStack.mode),
-        last_renew_segment_evaluated: openPos.last_renew_segment_evaluated != null
-          ? Number(openPos.last_renew_segment_evaluated)
-          : -1,
+        last_renew_segment_evaluated: resolveRenewSegmentEvaluatedForExitPolicy(openPos),
       };
     }
     if (!lastPredictions || !openPos.entry_predictions || !openPos.entry_policy) return null;
@@ -2495,7 +2547,8 @@
       scheduleJournalRefetchForBarsAdvance(symbol);
     }
     applyJournalDefaultsFromState(state);
-    const shouldRefreshExitPolicy = openPos
+    const shouldRefreshExitPolicy = !tradingEnabled
+      && openPos
       && openPos.symbol_id === symbol
       && (exitGbmEnabled || getExitStackForSymbol(symbol))
       && lastPredictions;
@@ -2597,7 +2650,9 @@
       stopExitCloseAlertTimer();
       resetExitAlertTimingState();
     } else {
-      startExitCloseAlertTimer();
+      if (!tradingEnabled) {
+        startExitCloseAlertTimer();
+      }
     }
     if (openPos) {
       resetEntryAllowedAlertState();
@@ -2605,45 +2660,62 @@
     const closedTrades = state.closed_trades || [];
     const totalPnl = state.total_realized_pnl_usd;
     const closedCount = state.closed_trades_count || 0;
+    const hasOpen = openPos && openPos.side;
+    const cashBalance = state.cash_balance_usd != null
+      ? Number(state.cash_balance_usd)
+      : (tradingInitialBalanceUsd + Number(totalPnl || 0));
+    if (tradingEnabled) {
+      tradeJournalTotals.textContent = `Balance: ${formatUsd(cashBalance)} · Realized: ${formatUsd(totalPnl)} · Closed: ${closedCount}`;
+    } else {
+      tradeJournalTotals.textContent = `Закрыто: ${closedCount} · Realized: ${formatUsd(totalPnl)}`;
+    }
 
-    tradeJournalTotals.textContent = `Закрыто: ${closedCount} · Realized: ${formatUsd(totalPnl)}`;
+    if (tradingEnabled && hasOpen && openPos.daemon_last_exit_policy) {
+      lastExitPolicy = openPos.daemon_last_exit_policy;
+    }
 
     const policySide = policyActionToSide(lastPolicy && lastPolicy.action);
-    const hasOpen = openPos && openPos.side;
     const sideLabel = hasOpen ? openPos.side.toUpperCase() : 'FLAT';
     const sideClass = hasOpen ? (openPos.side === 'long' ? 'position-long' : 'position-short') : 'position-flat';
 
     let metricsHtml = '';
     let alertHtml = '';
+    if (tradingEnabled) {
+      alertHtml = '';
+    }
     if (hasOpen && openPos.metrics) {
       const m = openPos.metrics;
       const displayBarsElapsed = resolveDisplayBarsElapsed(openPos);
-      runExitAlertChecks(openPos, symbol);
+      if (!tradingEnabled) {
+        runExitAlertChecks(openPos, symbol);
+      }
       updateExitOverlaySession(openPos);
       const progressClass = m.at_target_horizon ? 'at-target' : '';
       const evalHorizonLabel = resolveDeployEvalHorizon(openPos, symbol);
       const signOnlyRenew = exitStackUsesSignOnlyRenew(symbol) || Boolean(m.sign_only_renew);
       const renewUi = signOnlyRenew ? resolveSignOnlyRenewUi(lastExitPolicy, m) : null;
-      alertHtml = m.at_target_horizon && !signOnlyRenew
-        ? `<div class="trade-journal-alert">⚠ Достигнут горизонт ${evalHorizonLabel} — по policy пора выходить</div>`
-        : '';
-      if (renewUi && renewUi.infoHtml) {
-        alertHtml += renewUi.infoHtml;
-      }
-      if (exitGbmEnabled && lastExitPolicy && lastExitPolicy.suggest_close
-        && lastExitPolicy.mode !== 'rolling_h_renew_sign_only') {
-        const thresholdPct = (Number(lastExitPolicy.close_probability_threshold) * 100).toFixed(1);
-        const pClosePct = (Number(lastExitPolicy.close_probability) * 100).toFixed(1);
-        alertHtml += `<div class="trade-journal-alert">⏹ Exit GBM: P(close)=${pClosePct}% ≥ ${thresholdPct}% — рассмотри ранний выход</div>`;
-      }
-      if (exitTransformerEnabled && lastExitTransformer && lastExitTransformer.suggest_close) {
-        const thresholdPct = formatPct(Number(lastExitTransformer.delta_pnl_threshold) * 100);
-        const deltaPct = formatPct(Number(lastExitTransformer.predicted_delta_pnl) * 100);
-        alertHtml += `<div class="trade-journal-alert">⏹ Exit Transformer v2: Δpnl=${deltaPct} > ${thresholdPct} — рассмотри ранний выход</div>`;
-      }
-      const policySideNow = policyActionToSide(lastPolicy && lastPolicy.action);
-      if (policySideNow && policySideNow !== openPos.side) {
-        alertHtml += `<div class="trade-journal-alert">↔ Policy flip → ${policySideNow.toUpperCase()}, открыт ${String(openPos.side).toUpperCase()} — рассмотри exit</div>`;
+      if (!tradingEnabled) {
+        alertHtml = m.at_target_horizon && !signOnlyRenew
+          ? `<div class="trade-journal-alert">⚠ Достигнут горизонт ${evalHorizonLabel} — по policy пора выходить</div>`
+          : '';
+        if (renewUi && renewUi.infoHtml) {
+          alertHtml += renewUi.infoHtml;
+        }
+        if (exitGbmEnabled && lastExitPolicy && lastExitPolicy.suggest_close
+          && lastExitPolicy.mode !== 'rolling_h_renew_sign_only') {
+          const thresholdPct = (Number(lastExitPolicy.close_probability_threshold) * 100).toFixed(1);
+          const pClosePct = (Number(lastExitPolicy.close_probability) * 100).toFixed(1);
+          alertHtml += `<div class="trade-journal-alert">⏹ Exit GBM: P(close)=${pClosePct}% ≥ ${thresholdPct}% — рассмотри ранний выход</div>`;
+        }
+        if (exitTransformerEnabled && lastExitTransformer && lastExitTransformer.suggest_close) {
+          const thresholdPct = formatPct(Number(lastExitTransformer.delta_pnl_threshold) * 100);
+          const deltaPct = formatPct(Number(lastExitTransformer.predicted_delta_pnl) * 100);
+          alertHtml += `<div class="trade-journal-alert">⏹ Exit Transformer v2: Δpnl=${deltaPct} > ${thresholdPct} — рассмотри ранний выход</div>`;
+        }
+        const policySideNow = policyActionToSide(lastPolicy && lastPolicy.action);
+        if (policySideNow && policySideNow !== openPos.side) {
+          alertHtml += `<div class="trade-journal-alert">↔ Policy flip → ${policySideNow.toUpperCase()}, открыт ${String(openPos.side).toUpperCase()} — рассмотри exit</div>`;
+        }
       }
       const mfeLine = m.mfe_net_return_pct != null
         ? `<span>MFE: <strong class="${pnlClass(m.mfe_pnl_usd)}">${formatPct(m.mfe_net_return_pct)} (${formatUsd(m.mfe_pnl_usd)})</strong></span>`
@@ -2762,7 +2834,7 @@
     const exitLoadingClass = journalActionPending && journalActionPending.actionKey === 'exit' ? ' is-loading' : '';
     const discardLoadingClass = journalActionPending && journalActionPending.actionKey === 'discard' ? ' is-loading' : '';
 
-    const actionsHtml = `
+    const actionsHtml = tradingEnabled ? '' : `
       <div class="trade-journal-actions">
         <button type="button" id="btnJournalEntryLong" class="btn-entry-long${longLoadingClass}" ${canEnterLong || canEnterManual ? '' : 'disabled'} title="${canEnterLong ? '' : (!entryFillReady && !hasOpen ? 'Укажите цену и notional с биржи' : (policySide === 'long' && !snrAllowLong ? 'Entry hint: подождать' : ''))}">
           ${longLabel}
@@ -2778,6 +2850,10 @@
         </button>
       </div>
     `;
+
+    const equityCurveHtml = tradingEnabled
+      ? renderEquityCurveSvg(state.equity_curve)
+      : '';
 
     let historyHtml = '';
     if (closedTrades.length > 0) {
@@ -2816,10 +2892,12 @@
         ${metricsHtml}
         ${actionsHtml}
       </div>
+      ${equityCurveHtml}
       ${historyHtml}
     `;
 
-    const btnLong = document.getElementById('btnJournalEntryLong');
+    if (!tradingEnabled) {
+      const btnLong = document.getElementById('btnJournalEntryLong');
     const btnShort = document.getElementById('btnJournalEntryShort');
     const btnExit = document.getElementById('btnJournalExit');
     const btnDiscard = document.getElementById('btnJournalDiscard');
@@ -2835,6 +2913,7 @@
     }
     if (btnDiscard) {
       btnDiscard.addEventListener('click', () => handleJournalDiscard(symbol));
+    }
     }
 
     isFirstJournalLoad = false;
@@ -4446,6 +4525,11 @@
       entryConfidenceMarginBySymbol = config.entryConfidenceMarginBySymbol || {};
       exitGbmEnabled = Boolean(config.exitGbmEnabled);
       exitTransformerEnabled = Boolean(config.exitTransformerEnabled);
+      tradingEnabled = Boolean(config.tradingEnabled);
+      if (config.tradingInitialBalanceUsd != null) {
+        tradingInitialBalanceUsd = Number(config.tradingInitialBalanceUsd);
+      }
+      applyTradingEnabledUi();
       checkpointPathBySymbol = config.checkpointPathBySymbol || {};
       if (config.tradeResearchEvalHorizon) {
         tradeResearchEvalHorizon = String(config.tradeResearchEvalHorizon);
