@@ -44,7 +44,9 @@ class Settings(BaseSettings):
     WEB_GUI_TRADING_ENABLED: bool = False
     WEB_GUI_TRADING_LOOP_INTERVAL_SEC: int = 5
     WEB_GUI_TRADING_INITIAL_BALANCE_USD: float = 100.0
-    WEB_GUI_TRADING_MAX_PREDICTION_AGE_MS: int = 600_000
+    # Live gate: inference cycle must finish within 1 min; pred bar ≤ 5 min (4 min lag + ~1 min infer)
+    WEB_GUI_TRADING_MAX_INFERENCE_AGE_MS: int = 60_000
+    WEB_GUI_TRADING_MAX_BAR_AGE_MS: int = 300_000
     # Optional override for ?v= on app.js/style.css (default: max mtime of static files)
     WEB_GUI_ASSET_VERSION: str | None = None
 

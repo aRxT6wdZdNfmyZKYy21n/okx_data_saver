@@ -66,9 +66,15 @@ When `inference_api` exposes `exit_stack_by_symbol.BTC_USDT.mode=rolling_h_renew
 - **Progress** is per **32-bar segment** (not fixed `x1536`): segment bar count, renew count, bars until next checkpoint.
 - **Exit policy** (daemon + inference cycle): segment-based `rolling_h_renew_sign_only` eval on **latest available predictions** at pending checkpoint — no wait for a newer inference tick. Close on `sign_flip_at_checkpoint`; renew on `sign_valid_renewed`. Implementation: `main/web_gui/sign_only_renew_exit_common.py` (local eval; remote `/exit-policy` no longer gates daemon close).
 
-- **Trading daemon freshness gate:** entry/exit use latest enriched artifact (`ok` or `computing` + `last_inference_ok` snapshot). Block only when predictions are older than `WEB_GUI_TRADING_MAX_PREDICTION_AGE_MS` (default **600000** = 10 min) or artifact is `error` / missing preds. Logs: `skip_tick` with `predictions_stale`. Aligns with lag-sweep live band (4–8 min); avoids idle ~95% of time while inference cycle runs.
+- **Trading daemon freshness gate (dual):**
+  - **Inference age** ≤ `WEB_GUI_TRADING_MAX_INFERENCE_AGE_MS` (default **60000** = 1 min) — `now − inference_completed_at_ms`
+  - **Bar age** ≤ `WEB_GUI_TRADING_MAX_BAR_AGE_MS` (default **300000** = 5 min) — `now − bar_timestamp_ms` (pred bar, not wall clock since last x1 in DB)
+  - Entry/exit use enriched artifact (`ok` or `computing` + `last_inference_ok` sidecar). Block on `inference_stale`, `bar_stale`, `error`, missing preds.
+  - Aligns with backtest band **4 min entry lag + ~1 min infer** (see [158 § 5 min](158_entry_lag_backtest.md) in trading_bot docs).
 
 **Bug fixed 2026-08-14:** daemon previously skipped all ticks when `latest_inference.json` status was `computing`, even though GUI showed fresh-enough preds from sidecar. Also fixed checkpoint exit waiting for post-checkpoint inference (`sign_flip_at_checkpoint` on latest preds).
+
+**Gate v2 @ 2026-08-14 pm:** split inference age (1 min) vs pred **bar** age (5 min); was single 10 min on `inference_completed_at_ms` only.
 
 Discard and re-open any journal position opened before this change (old rows used wrong `eval_horizon` → missing pred snapshot).
 

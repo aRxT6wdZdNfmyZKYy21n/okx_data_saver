@@ -35,8 +35,9 @@ from main.web_gui.trade_journal_service import (
 )
 from main.web_gui.trading_inference_gate_common import (
     evaluate_trading_inference_gate,
+    resolve_bar_age_ms,
+    resolve_inference_age_ms,
     resolve_inference_completed_at_ms,
-    resolve_prediction_age_ms,
 )
 from settings import settings
 
@@ -434,9 +435,14 @@ def run_trading_tick(symbol_id: str) -> None:
     cash_balance_usd = compute_cash_balance_usd(journal['closed_trades'])
 
     now_ms = int(time.time() * 1000.0)
-    prediction_age_ms = None
+    inference_age_ms = None
+    bar_age_ms = None
     if artifact is not None:
-        prediction_age_ms = resolve_prediction_age_ms(
+        inference_age_ms = resolve_inference_age_ms(
+            artifact=artifact,
+            now_ms=now_ms,
+        )
+        bar_age_ms = resolve_bar_age_ms(
             artifact=artifact,
             now_ms=now_ms,
         )
@@ -452,14 +458,17 @@ def run_trading_tick(symbol_id: str) -> None:
             'inference_completed_at_ms': resolve_inference_completed_at_ms(artifact)
             if artifact is not None
             else None,
-            'prediction_age_ms': prediction_age_ms,
-            'max_prediction_age_ms': settings.WEB_GUI_TRADING_MAX_PREDICTION_AGE_MS,
+            'inference_age_ms': inference_age_ms,
+            'bar_age_ms': bar_age_ms,
+            'max_inference_age_ms': settings.WEB_GUI_TRADING_MAX_INFERENCE_AGE_MS,
+            'max_bar_age_ms': settings.WEB_GUI_TRADING_MAX_BAR_AGE_MS,
         },
     )
 
     gate_usable, gate_reason, gate_details = evaluate_trading_inference_gate(
         artifact=artifact,
-        max_prediction_age_ms=settings.WEB_GUI_TRADING_MAX_PREDICTION_AGE_MS,
+        max_inference_age_ms=settings.WEB_GUI_TRADING_MAX_INFERENCE_AGE_MS,
+        max_bar_age_ms=settings.WEB_GUI_TRADING_MAX_BAR_AGE_MS,
         now_ms=now_ms,
     )
     if not gate_usable:
