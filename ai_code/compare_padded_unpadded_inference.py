@@ -105,7 +105,7 @@ def main() -> None:
     metadata = fetch_inference_metadata()
     symbol = SymbolId[args.symbol]
 
-    raw_df = fetch_last_bars_sync(symbol_id=symbol, limit=args.bars, offset=0)
+    raw_df = fetch_last_bars_sync(symbol_id=symbol, limit=args.bars, offset=0, since_start_trade_id=None)
     if raw_df is None:
         raise RuntimeError('Failed to fetch bars')
 

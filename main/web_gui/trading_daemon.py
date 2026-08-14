@@ -58,7 +58,7 @@ def _resolve_exit_stack_for_symbol(symbol_id: str) -> dict[str, Any] | None:
 
 
 def _fetch_latest_x1_bar(symbol: SymbolId) -> dict[str, Any]:
-    df = fetch_last_bars_sync(symbol_id=symbol, limit=1, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol, limit=1, offset=0, since_start_trade_id=None)
     if df is None or df.height < 1:
         raise RuntimeError(f'No x1 bars available for {symbol.name}')
     row = df.row(df.height - 1, named=True)

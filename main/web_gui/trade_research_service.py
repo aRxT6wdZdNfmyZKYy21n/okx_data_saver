@@ -839,7 +839,7 @@ def run_trade_research(
             ),
         )
 
-    df = fetch_last_bars_sync(symbol_id=symbol, limit=research_limit, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol, limit=research_limit, offset=0, since_start_trade_id=None)
     if df is None:
         raise HTTPException(status_code=422, detail='Недостаточно данных для trade research')
     if df.height < minimum_rows:

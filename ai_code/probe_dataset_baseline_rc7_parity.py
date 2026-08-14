@@ -293,7 +293,7 @@ def main() -> None:
     bars_limit = max(args.bars, required_rows + 10_000)
 
     symbol = SymbolId[args.symbol]
-    raw_df = fetch_last_bars_sync(symbol_id=symbol, limit=bars_limit, offset=0)
+    raw_df = fetch_last_bars_sync(symbol_id=symbol, limit=bars_limit, offset=0, since_start_trade_id=None)
     if raw_df is None:
         raise RuntimeError('Failed to fetch bars')
 

@@ -115,6 +115,9 @@ def _worker_trade_research_from_artifact(
 
 
 def _worker_inference_cycle_safe(symbol_id_str: str) -> None:
+    from main.offline_inference.trading_bot_imports import ensure_trading_bot_on_path
+
+    ensure_trading_bot_on_path()
     from main.offline_inference.inference_cycle import run_inference_cycle_safe
 
     run_inference_cycle_safe(symbol_id=symbol_id_str)

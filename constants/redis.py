@@ -21,6 +21,8 @@ VELOCITY_PREFIX: Final[str] = 'velocity'
 METADATA_PREFIX: Final[str] = 'metadata'
 WEB_GUI_X1_BARS_PREFIX: Final[str] = 'web_gui:x1_bars'
 BARS_REFRESH_LOCK_KEY: Final[str] = 'web_gui:x1_bars:refresh_lock'
+INFERENCE_DATASET_STATE_PREFIX: Final[str] = 'inference:dataset_state'
+WEB_GUI_DATASET_LEVELS_PREFIX: Final[str] = 'web_gui:dataset_levels'
 
 # Максимальный размер части данных (500 МБ для безопасности)
 MAX_PART_SIZE_BYTES: Final[int] = 500_000_000
@@ -104,3 +106,39 @@ def get_web_gui_x1_bars_meta_key(
     offset: int,
 ) -> str:
     return f'{get_web_gui_x1_bars_key(symbol_id, limit, offset)}:bars_meta'
+
+
+def get_inference_dataset_state_meta_key(
+    symbol_id: SymbolId,
+    config_hash: str,
+) -> str:
+    return f'{INFERENCE_DATASET_STATE_PREFIX}:{symbol_id.name}:{config_hash}:meta'
+
+
+def get_inference_dataset_state_raw_x1_key(
+    symbol_id: SymbolId,
+    config_hash: str,
+) -> str:
+    return f'{INFERENCE_DATASET_STATE_PREFIX}:{symbol_id.name}:{config_hash}:raw_x1'
+
+
+def get_inference_dataset_state_write_lock_key(
+    symbol_id: SymbolId,
+    config_hash: str,
+) -> str:
+    return f'{INFERENCE_DATASET_STATE_PREFIX}:{symbol_id.name}:{config_hash}:write_lock'
+
+
+def get_web_gui_dataset_levels_key(
+    symbol_id: SymbolId,
+    bars_limit: int,
+    scale: str,
+) -> str:
+    return f'{WEB_GUI_DATASET_LEVELS_PREFIX}:{symbol_id.name}:limit:{bars_limit}:scale:{scale}'
+
+
+def get_web_gui_dataset_levels_meta_key(
+    symbol_id: SymbolId,
+    bars_limit: int,
+) -> str:
+    return f'{WEB_GUI_DATASET_LEVELS_PREFIX}:{symbol_id.name}:limit:{bars_limit}:meta'

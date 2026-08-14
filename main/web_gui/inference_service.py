@@ -249,6 +249,19 @@ def _prepare_inference_context_from_df(
         df,
         metadata,
     )
+    return _prepare_inference_context_from_dataset(
+        df=df,
+        metadata=metadata,
+        inference_dataset=inference_dataset,
+    )
+
+
+def _prepare_inference_context_from_dataset(
+    df: polars.DataFrame,
+    metadata: dict,
+    inference_dataset: HybridTradeDatasetInference,
+) -> tuple[dict, dict[str, int | float]]:
+    real_bar_count = int(df.height)
     start_index = int(inference_dataset.dataset.start_index)
     logger.info(
         'Dataset preparation done: samples=%d start_index=%d',
@@ -330,7 +343,7 @@ def run_remote_inference(symbol_id: str, limit: int) -> dict[str, object]:
         raise HTTPException(status_code=503, detail='Inference is disabled')
 
     symbol = SymbolId[symbol_id]
-    df = fetch_last_bars_sync(symbol_id=symbol, limit=limit, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol, limit=limit, offset=0, since_start_trade_id=None)
     if df is None:
         raise HTTPException(status_code=422, detail='Недостаточно данных для инференса')
 

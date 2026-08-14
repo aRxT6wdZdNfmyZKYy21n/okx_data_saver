@@ -68,33 +68,55 @@ def _fetch_last_bars_from_db_sync(
     symbol_id: SymbolId,
     limit: int,
     offset: int,
+    since_start_trade_id: int | None,
 ) -> polars.DataFrame | None:
     db_read_started_at = time.monotonic()
-    total = limit + offset
-    logger.info(
-        'DB read start: fetch_last_bars symbol=%s limit=%d offset=%d',
-        symbol_id.name,
-        limit,
-        offset,
-    )
-    query = f"""
-    SELECT
-        symbol_id, start_trade_id, end_trade_id,
-        start_timestamp_ms, end_timestamp_ms,
-        open_price, high_price, low_price, close_price,
-        total_volume, buy_volume, total_quantity, buy_quantity,
-        total_trades_count, buy_trades_count
-    FROM (
-        SELECT *
+    if since_start_trade_id is not None:
+        logger.info(
+            'DB read start: fetch_x1_since symbol=%s since_start_trade_id=%d limit=%d',
+            symbol_id.name,
+            since_start_trade_id,
+            limit,
+        )
+        query = f"""
+        SELECT
+            symbol_id, start_trade_id, end_trade_id,
+            start_timestamp_ms, end_timestamp_ms,
+            open_price, high_price, low_price, close_price,
+            total_volume, buy_volume, total_quantity, buy_quantity,
+            total_trades_count, buy_trades_count
         FROM {OKXDataSetRecordData_3.__tablename__}
         WHERE symbol_id = '{symbol_id.name}'
-        ORDER BY start_trade_id DESC
-        LIMIT {total}
-    ) AS sub
-    ORDER BY start_trade_id ASC
-    OFFSET {offset}
-    LIMIT {limit}
-    """
+          AND start_trade_id >= {since_start_trade_id}
+        ORDER BY start_trade_id ASC
+        LIMIT {limit}
+        """
+    else:
+        total = limit + offset
+        logger.info(
+            'DB read start: fetch_last_bars symbol=%s limit=%d offset=%d',
+            symbol_id.name,
+            limit,
+            offset,
+        )
+        query = f"""
+        SELECT
+            symbol_id, start_trade_id, end_trade_id,
+            start_timestamp_ms, end_timestamp_ms,
+            open_price, high_price, low_price, close_price,
+            total_volume, buy_volume, total_quantity, buy_quantity,
+            total_trades_count, buy_trades_count
+        FROM (
+            SELECT *
+            FROM {OKXDataSetRecordData_3.__tablename__}
+            WHERE symbol_id = '{symbol_id.name}'
+            ORDER BY start_trade_id DESC
+            LIMIT {total}
+        ) AS sub
+        ORDER BY start_trade_id ASC
+        OFFSET {offset}
+        LIMIT {limit}
+        """
     try:
         df = polars.read_database_uri(engine='connectorx', query=query, uri=_db_uri())
     except Exception as exception:
@@ -127,12 +149,14 @@ async def _fetch_last_bars_from_db(
     symbol_id: SymbolId,
     limit: int,
     offset: int,
+    since_start_trade_id: int | None,
 ) -> polars.DataFrame | None:
     return await asyncio.to_thread(
         _fetch_last_bars_from_db_sync,
         symbol_id,
         limit,
         offset,
+        since_start_trade_id,
     )
 
 
@@ -140,11 +164,21 @@ async def fetch_last_bars(
     symbol_id: SymbolId,
     limit: int,
     offset: int,
+    since_start_trade_id: int | None,
 ) -> polars.DataFrame | None:
     """
     Загружает последние `limit` баров для символа (по start_trade_id DESC), возвращает в порядке ASC.
     Пагинация: offset — сколько последних баров пропустить (0 = самые свежие).
+    Warm stateful path: since_start_trade_id — прямой ASC fetch из DB (без Redis x1 cache).
     """
+    if since_start_trade_id is not None:
+        return await _fetch_last_bars_from_db(
+            symbol_id=symbol_id,
+            limit=limit,
+            offset=offset,
+            since_start_trade_id=since_start_trade_id,
+        )
+
     return await fetch_last_bars_with_redis_cache(
         symbol_id=symbol_id,
         limit=limit,
@@ -153,6 +187,7 @@ async def fetch_last_bars(
             symbol_id=symbol_id,
             limit=limit,
             offset=offset,
+            since_start_trade_id=None,
         ),
     )
 
@@ -161,12 +196,14 @@ def fetch_last_bars_sync(
     symbol_id: SymbolId,
     limit: int,
     offset: int,
+    since_start_trade_id: int | None,
 ) -> polars.DataFrame | None:
     return run_async_data(
         lambda: fetch_last_bars(
             symbol_id=symbol_id,
             limit=limit,
             offset=offset,
+            since_start_trade_id=since_start_trade_id,
         ),
     )
 
@@ -271,7 +308,7 @@ async def get_bars_for_api(
         limit,
         offset,
     )
-    raw = await fetch_last_bars(symbol_id=symbol_id, limit=limit, offset=offset)
+    raw = await fetch_last_bars(symbol_id=symbol_id, limit=limit, offset=offset, since_start_trade_id=None)
     if raw is None:
         logger.info(
             'get_bars_for_api done symbol=%s scale=%s rows=0 duration_ms=%d',

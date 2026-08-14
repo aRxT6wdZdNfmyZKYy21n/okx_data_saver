@@ -726,7 +726,7 @@ def run_trade_research_export(
         raise RuntimeError(f'Metadata missing checkpoint for {symbol_id!r}')
 
     symbol = SymbolId[symbol_id]
-    df = fetch_last_bars_sync(symbol_id=symbol, limit=research_limit, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol, limit=research_limit, offset=0, since_start_trade_id=None)
     if df is None:
         raise RuntimeError('Недостаточно данных для trade research export')
     if df.height < minimum_rows:

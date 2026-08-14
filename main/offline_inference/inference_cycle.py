@@ -238,30 +238,51 @@ def _build_exit_payloads(
 
 
 def run_inference_cycle(symbol_id: str) -> None:
-    bars_limit = settings.INFERENCE_DAEMON_BARS_LIMIT
     symbol = SymbolId[symbol_id]
-    df = fetch_last_bars_sync(symbol_id=symbol, limit=bars_limit, offset=0)
-    if df is None:
-        raise RuntimeError('Недостаточно данных для инференса')
-
-    _log_inference_db_fetch(symbol_id=symbol_id, df=df)
-
     metadata = fetch_inference_metadata()
     required_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
-    if df.height < required_rows:
-        raise RuntimeError(
-            'Инференс невозможен при таком количестве свечей x1 '
-            f'(требуется минимум {required_rows}, получено {df.height})',
-        )
 
-    inference_result, x_seq, entry_provenance = run_remote_inference_and_x_seq_from_df(
-        symbol_id=symbol_id,
-        df=df,
-    )
-    _log_inference_entry_provenance(
-        symbol_id=symbol_id,
-        provenance=entry_provenance,
-    )
+    mark_price: float | None = None
+
+    if settings.INFERENCE_DATASET_STATE_ENABLED:
+        from main.web_gui.stateful_inference_service import run_stateful_inference_and_x_seq
+
+        inference_result, x_seq, entry_provenance = run_stateful_inference_and_x_seq(
+            symbol_id=symbol_id,
+        )
+        mark_price = float(entry_provenance['db_latest_close_price'])
+        _log_inference_entry_provenance(
+            symbol_id=symbol_id,
+            provenance=entry_provenance,
+        )
+    else:
+        bars_limit = settings.INFERENCE_DAEMON_BARS_LIMIT
+        df = fetch_last_bars_sync(
+            symbol_id=symbol,
+            limit=bars_limit,
+            offset=0,
+            since_start_trade_id=None,
+        )
+        if df is None:
+            raise RuntimeError('Недостаточно данных для инференса')
+
+        _log_inference_db_fetch(symbol_id=symbol_id, df=df)
+
+        if df.height < required_rows:
+            raise RuntimeError(
+                'Инференс невозможен при таком количестве свечей x1 '
+                f'(требуется минимум {required_rows}, получено {df.height})',
+            )
+
+        inference_result, x_seq, entry_provenance = run_remote_inference_and_x_seq_from_df(
+            symbol_id=symbol_id,
+            df=df,
+        )
+        mark_price = float(df.row(df.height - 1, named=True)['close_price'])
+        _log_inference_entry_provenance(
+            symbol_id=symbol_id,
+            provenance=entry_provenance,
+        )
 
     exit_policy_result: dict[str, object] | None = None
     exit_transformer_result: dict[str, object] | None = None
@@ -272,7 +293,8 @@ def run_inference_cycle(symbol_id: str) -> None:
         open_position_data is not None
         and open_position_data['symbol_id'] == symbol_id
     ):
-        mark_price = float(df.row(df.height - 1, named=True)['close_price'])
+        if mark_price is None:
+            raise RuntimeError('mark_price missing after inference cycle dataset build')
         apply_mark_price_to_open_position(mark_price=mark_price)
         journal = get_journal_state()
         open_position_data = journal['open_position']

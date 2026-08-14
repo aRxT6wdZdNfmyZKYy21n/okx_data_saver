@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     BARS_REDIS_REFRESH_LOCK_TTL_SEC: int = 600
     BARS_REDIS_LOCK_WAIT_SEC: int = 300
     BARS_REDIS_LOCK_POLL_INTERVAL_SEC: float = 0.5
+    INFERENCE_DATASET_STATE_ENABLED: bool = True
+    INFERENCE_DATASET_STATE_REDIS_TTL_SEC: int = 86400 * 365 * 10
+    INFERENCE_DATASET_STATE_DELTA_FETCH_LIMIT: int = 10_000
 
     # Spawn worker pools (Polars isolation). heavy=1 avoids parallel 10M-bar loads.
     SPAWN_WORKER_HEAVY_POOL_SIZE: int = 1

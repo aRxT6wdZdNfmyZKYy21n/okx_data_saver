@@ -40,7 +40,7 @@ def run_remote_exit_transformer(payload: dict[str, object]) -> dict[str, object]
     symbol_id = str(payload['symbol_id'])
     bars_limit = int(payload['bars_limit'])
     symbol = SymbolId[symbol_id]
-    df = fetch_last_bars_sync(symbol_id=symbol, limit=bars_limit, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol, limit=bars_limit, offset=0, since_start_trade_id=None)
     if df is None:
         raise HTTPException(status_code=422, detail='Недостаточно данных для exit transformer')
 

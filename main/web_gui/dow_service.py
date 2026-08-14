@@ -54,7 +54,7 @@ def run_dow_pipeline(
     Загружает последние limit баров, прогоняет через калькулятор Доу с max_trend_levels=level,
     возвращает get_final_tensors(). Логирует каждую 1000-ю обработанную строку.
     """
-    df = fetch_last_bars_sync(symbol_id=symbol_id, limit=limit, offset=0)
+    df = fetch_last_bars_sync(symbol_id=symbol_id, limit=limit, offset=0, since_start_trade_id=None)
     if df is None or df.height == 0:
         return None
 
