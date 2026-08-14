@@ -28,6 +28,18 @@ def parse_arguments() -> argparse.Namespace:
         action='store_true',
         help='INFO logging (DB reads, dataset preparation, batch inference progress)',
     )
+    parser.add_argument(
+        '--num-workers',
+        type=int,
+        default=0,
+        help='DataLoader workers для параллельной подготовки payload (default: 0)',
+    )
+    parser.add_argument(
+        '--prefetch-factor',
+        type=int,
+        default=2,
+        help='Prefetch batches на worker при --num-workers > 0 (default: 2)',
+    )
     return parser.parse_args()
 
 
@@ -46,6 +58,8 @@ def main() -> None:
     run_in_spawned_process(
         _worker_trade_research_export_safe,
         arguments.symbol,
+        arguments.num_workers,
+        arguments.prefetch_factor,
     )
 
 

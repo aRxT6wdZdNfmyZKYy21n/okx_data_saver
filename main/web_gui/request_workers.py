@@ -122,11 +122,15 @@ def _worker_inference_cycle_safe(symbol_id_str: str) -> None:
 
 def _worker_trade_research_export_safe(
     symbol_id_str: str,
+    num_workers: int,
+    prefetch_factor: int,
 ) -> None:
     from main.offline_inference.trade_research_export import run_trade_research_export_safe
 
     run_trade_research_export_safe(
         symbol_id=symbol_id_str,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
     )
 
 

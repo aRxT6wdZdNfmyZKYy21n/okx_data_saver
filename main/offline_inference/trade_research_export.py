@@ -13,6 +13,11 @@ from main.offline_inference.artifacts import (
     write_trade_research_meta,
 )
 from main.offline_inference.atomic_io import atomic_write_npz
+from main.offline_inference.trade_research_payload_dataloader_common import (
+    InferenceSamplePayloadDataset,
+    TrainSamplePayloadDataset,
+    build_trade_research_payload_dataloader,
+)
 from main.offline_inference.paths import (
     trade_research_horizon_dir,
     trade_research_npz_path,
@@ -33,8 +38,6 @@ from main.web_gui.inference_service import (
     _build_dataset,
     _build_level0_to_raw_row_indices_from_dataset,
     _build_train_level0_context,
-    _prepare_payload_dict_from_sample,
-    _prepare_payload_dict_from_train_sample,
     _train_sample_index_for_inference_sample,
     fetch_inference_metadata,
 )
@@ -253,27 +256,26 @@ def _run_batch_inference(
     train_sample_index_by_inference_sample: dict[int, int],
     train_dataset: object,
     symbol_id: str,
+    num_workers: int,
+    prefetch_factor: int,
 ) -> dict[int, dict[str, object]]:
     inference_by_sample: dict[int, dict[str, object]] = {}
     if len(sample_indices) == 0:
         return inference_by_sample
 
-    total_chunks = (len(sample_indices) + BATCH_CHUNK_SIZE - 1) // BATCH_CHUNK_SIZE
-    for chunk_index, chunk_start in enumerate(
-        range(0, len(sample_indices), BATCH_CHUNK_SIZE),
-    ):
-        chunk_sample_indices = sample_indices[
-            chunk_start:chunk_start + BATCH_CHUNK_SIZE
-        ]
-        chunk_payloads = []
-        for sample_index in chunk_sample_indices:
-            train_sample_index = train_sample_index_by_inference_sample[sample_index]
-            chunk_payloads.append(
-                _prepare_payload_dict_from_train_sample(
-                    train_dataset=train_dataset,
-                    train_sample_index=train_sample_index,
-                ),
-            )
+    payload_dataset = TrainSamplePayloadDataset(
+        train_dataset=train_dataset,
+        sample_indices=sample_indices,
+        train_sample_index_by_inference_sample=train_sample_index_by_inference_sample,
+    )
+    payload_loader = build_trade_research_payload_dataloader(
+        payload_dataset=payload_dataset,
+        batch_size=BATCH_CHUNK_SIZE,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+    )
+    total_chunks = len(payload_loader)
+    for chunk_index, (chunk_sample_indices, chunk_payloads) in enumerate(payload_loader):
         chunk_results = _call_inference_batch_api(
             samples=chunk_payloads,
             symbol_id=symbol_id,
@@ -293,11 +295,16 @@ def _run_batch_inference(
             inference_by_sample[sample_index] = inference_result
         if (chunk_index + 1) % 10 == 0 or (chunk_index + 1) == total_chunks:
             logger.info(
-                'Trade research export inference: %d/%d batches, %d/%d samples',
+                'Trade research export inference: %d/%d batches, %d/%d samples '
+                '(num_workers=%d%s)',
                 chunk_index + 1,
                 total_chunks,
                 len(inference_by_sample),
                 len(sample_indices),
+                num_workers,
+                f', prefetch_factor={prefetch_factor}'
+                if num_workers > 0
+                else '',
             )
     return inference_by_sample
 
@@ -306,25 +313,25 @@ def _run_batch_inference_inference(
     sample_indices: list[int],
     inference_dataset: object,
     symbol_id: str,
+    num_workers: int,
+    prefetch_factor: int,
 ) -> dict[int, dict[str, object]]:
     inference_by_sample: dict[int, dict[str, object]] = {}
     if len(sample_indices) == 0:
         return inference_by_sample
 
-    total_chunks = (len(sample_indices) + BATCH_CHUNK_SIZE - 1) // BATCH_CHUNK_SIZE
-    for chunk_index, chunk_start in enumerate(
-        range(0, len(sample_indices), BATCH_CHUNK_SIZE),
-    ):
-        chunk_sample_indices = sample_indices[
-            chunk_start:chunk_start + BATCH_CHUNK_SIZE
-        ]
-        chunk_payloads = [
-            _prepare_payload_dict_from_sample(
-                dataset=inference_dataset,
-                sample_index=sample_index,
-            )
-            for sample_index in chunk_sample_indices
-        ]
+    payload_dataset = InferenceSamplePayloadDataset(
+        inference_dataset=inference_dataset,
+        sample_indices=sample_indices,
+    )
+    payload_loader = build_trade_research_payload_dataloader(
+        payload_dataset=payload_dataset,
+        batch_size=BATCH_CHUNK_SIZE,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
+    )
+    total_chunks = len(payload_loader)
+    for chunk_index, (chunk_sample_indices, chunk_payloads) in enumerate(payload_loader):
         chunk_results = _call_inference_batch_api(
             samples=chunk_payloads,
             symbol_id=symbol_id,
@@ -344,11 +351,16 @@ def _run_batch_inference_inference(
             inference_by_sample[sample_index] = inference_result
         if (chunk_index + 1) % 10 == 0 or (chunk_index + 1) == total_chunks:
             logger.info(
-                'Trade research export inference tail: %d/%d batches, %d/%d samples',
+                'Trade research export inference tail: %d/%d batches, %d/%d samples '
+                '(num_workers=%d%s)',
                 chunk_index + 1,
                 total_chunks,
                 len(inference_by_sample),
                 len(sample_indices),
+                num_workers,
+                f', prefetch_factor={prefetch_factor}'
+                if num_workers > 0
+                else '',
             )
     return inference_by_sample
 
@@ -662,6 +674,8 @@ def _backfill_train_split_fields(
 
 def run_trade_research_export(
     symbol_id: str,
+    num_workers: int,
+    prefetch_factor: int,
 ) -> None:
     from main.offline_inference.trading_bot_imports import ensure_trading_bot_on_path
 
@@ -860,12 +874,16 @@ def run_trade_research_export(
         train_sample_index_by_inference_sample=train_sample_index_by_inference_sample,
         train_dataset=train_dataset,
         symbol_id=symbol_id,
+        num_workers=num_workers,
+        prefetch_factor=prefetch_factor,
     )
     inference_by_sample.update(
         _run_batch_inference_inference(
             sample_indices=tail_samples_to_infer,
             inference_dataset=dataset,
             symbol_id=symbol_id,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor,
         ),
     )
 
@@ -1044,6 +1062,8 @@ def run_trade_research_export(
 
 def run_trade_research_export_safe(
     symbol_id: str,
+    num_workers: int,
+    prefetch_factor: int,
 ) -> None:
     eval_horizon: str | None = None
     try:
@@ -1051,6 +1071,8 @@ def run_trade_research_export_safe(
         eval_horizon = inference_stack_fingerprint(metadata, symbol_id)['eval_horizon']
         run_trade_research_export(
             symbol_id=symbol_id,
+            num_workers=num_workers,
+            prefetch_factor=prefetch_factor,
         )
     except Exception as exception:
         logger.error(
