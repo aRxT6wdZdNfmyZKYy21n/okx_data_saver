@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 import polars
@@ -31,11 +32,12 @@ from trading_bot_dataset.src.stateful_inference_dataset import (
 logger = logging.getLogger(__name__)
 
 
-def _log_stateful_dataset_module_path() -> None:
+def _log_stateful_runtime_paths() -> None:
     import trading_bot_dataset.src.stateful_inference_common as stateful_common_module
 
     logger.info(
-        'Stateful dataset module path: %s',
+        'Stateful runtime paths: TRADING_BOT_ROOT=%s module=%s',
+        os.path.abspath(settings.TRADING_BOT_ROOT),
         stateful_common_module.__file__,
     )
 
@@ -44,28 +46,15 @@ def _apply_incremental_delta(
     stateful: StatefulHybridTradeDatasetInference,
     delta: polars.DataFrame,
 ) -> None:
-    remaining = delta
-    if remaining.height > 1:
-        first_start_trade_id = int(remaining['start_trade_id'][0])
-        if first_start_trade_id == stateful.last_start_trade_id:
-            refresh_result = stateful.apply_x1_delta(remaining.head(1))
-            logger.info(
-                'Stateful delta refresh step: action=%s rows=%d duration_ms=%d',
-                refresh_result.action,
-                refresh_result.rows_affected,
-                refresh_result.duration_ms,
-            )
-            remaining = remaining.tail(remaining.height - 1)
-
-    if remaining.height == 0:
-        return
-
-    append_result = stateful.apply_x1_delta(remaining)
+    delta_result = stateful.apply_x1_delta(
+        delta,
+        rebuild_inference=False,
+    )
     logger.info(
-        'Stateful delta append step: action=%s rows=%d duration_ms=%d',
-        append_result.action,
-        append_result.rows_affected,
-        append_result.duration_ms,
+        'Stateful delta applied (raw only): action=%s rows=%d duration_ms=%d',
+        delta_result.action,
+        delta_result.rows_affected,
+        delta_result.duration_ms,
     )
 
 
@@ -73,7 +62,7 @@ def prepare_stateful_inference_context(
     symbol_id: str,
 ) -> tuple[dict, dict[str, int | float]]:
     started_at = time.monotonic()
-    _log_stateful_dataset_module_path()
+    _log_stateful_runtime_paths()
     symbol = SymbolId[symbol_id]
     metadata = fetch_inference_metadata()
     config = build_stateful_inference_config(metadata)
@@ -83,6 +72,7 @@ def prepare_stateful_inference_context(
         config_hash=config.config_hash,
     )
 
+    warm_checkpoint_loaded = False
     if checkpoint is None:
         logger.info(
             'Stateful inference cold start: symbol=%s config_hash=%s',
@@ -102,6 +92,7 @@ def prepare_stateful_inference_context(
             dataframe=raw_df,
         )
     else:
+        warm_checkpoint_loaded = True
         _checkpoint_meta, raw_x1 = checkpoint
         stateful = StatefulHybridTradeDatasetInference.from_raw_checkpoint(
             config=config,
@@ -126,6 +117,7 @@ def prepare_stateful_inference_context(
                     'Stateful delta continuity error; cold start fallback: %s',
                     exception,
                 )
+                warm_checkpoint_loaded = False
                 raw_df = fetch_last_bars_sync(
                     symbol_id=symbol,
                     limit=settings.INFERENCE_DAEMON_BARS_LIMIT,
@@ -140,6 +132,9 @@ def prepare_stateful_inference_context(
                     config=config,
                     dataframe=raw_df,
                 )
+
+    if warm_checkpoint_loaded:
+        stateful.rebuild_inference_dataset()
 
     required_rows = int(metadata['sequence_length']) * int(metadata['max_scale'])
     if stateful.raw_x1.height < required_rows:
