@@ -17,6 +17,7 @@ from main.web_gui.trade_journal_service import (
     apply_checkpoint_pending_since_ms,
     apply_daemon_last_exit_policy,
     apply_last_exit_eval_inference_completed_at_ms,
+    apply_last_renew_segment_evaluated,
     apply_mark_price_to_open_position,
     close_position_automated,
     compute_cash_balance_usd,
@@ -342,6 +343,13 @@ def _manage_open_position(
     }
     exit_policy = run_remote_exit_policy(exit_policy_payload)
     apply_daemon_last_exit_policy(exit_policy)
+    if (
+        'last_renew_segment_evaluated' in exit_policy
+        and exit_policy['last_renew_segment_evaluated'] is not None
+    ):
+        apply_last_renew_segment_evaluated(
+            int(exit_policy['last_renew_segment_evaluated']),
+        )
     append_execution_event(
         'exit_policy_eval',
         {

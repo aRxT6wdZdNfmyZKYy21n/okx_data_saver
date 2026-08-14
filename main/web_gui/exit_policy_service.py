@@ -85,6 +85,7 @@ def run_remote_exit_policy(payload: dict[str, object]) -> dict[str, object]:
         if (
             use_exit_stack
             and 'last_renew_segment_evaluated' in result
+            and not settings.WEB_GUI_TRADING_ENABLED
         ):
             apply_last_renew_segment_evaluated(
                 int(result['last_renew_segment_evaluated']),

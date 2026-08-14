@@ -11,18 +11,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
 
 from enumerations import SymbolId
 from main.web_gui.constants import CHART_SHOW_LIMIT, DOW_LEVEL_NAMES, SCALE_NAMES, chart_x1_fetch_limit
-from main.web_gui.exit_policy_service import (
-    build_exit_policy_disabled_response,
-    run_remote_exit_policy,
-)
-from main.web_gui.exit_transformer_service import (
-    build_exit_transformer_disabled_response,
-    run_remote_exit_transformer,
-)
 from main.web_gui.inference_artifact_service import get_inference_artifact
 from main.web_gui.inference_service import (
     fetch_inference_metadata,
@@ -37,12 +28,7 @@ from main.spawn_process import run_in_spawned_process_async
 from main.web_gui.request_workers import (
     _worker_bars,
     _worker_dow,
-    _worker_exit_policy,
-    _worker_exit_transformer,
     _worker_trade_journal_bars_elapsed,
-    _worker_trade_journal_discard,
-    _worker_trade_journal_entry,
-    _worker_trade_journal_exit,
     _worker_trade_research_from_artifact,
 )
 from main.web_gui.static_assets import (
@@ -358,101 +344,6 @@ async def get_trade_research(
     return payload
 
 
-class TradeJournalEntryRequest(BaseModel):
-    symbol_id: str
-    side: str
-    entry_price: float = Field(..., gt=0)
-    entry_start_trade_id: int = Field(..., ge=0)
-    entry_timestamp_ms: int = Field(..., ge=0)
-    eval_horizon: str
-    notional_usd: float = Field(..., gt=0)
-    policy_action: str | None = None
-    notes: str = ''
-    entry_policy: dict | None = None
-    entry_predictions: dict[str, float] | None = None
-    exit_stack_mode: str | None = None
-    exit_stack_eval_horizon: str | None = None
-    exit_stack_min_hold_steps: int | None = None
-
-
-class TradeJournalExitRequest(BaseModel):
-    exit_price: float = Field(..., gt=0)
-    exit_start_trade_id: int = Field(..., ge=0)
-    exit_timestamp_ms: int = Field(..., ge=0)
-    notes: str = ''
-    exit_overlay: dict | None = None
-
-
-class ExitPolicyRequest(BaseModel):
-    symbol_id: str
-    side: str
-    eval_horizon: str
-    bars_held: int = Field(..., ge=0)
-    entry_predictions: dict[str, float] | None = None
-    current_predictions: dict[str, float] | None = None
-    entry_policy: dict | None = None
-    current_policy: dict | None = None
-    unrealized_linear: float | None = None
-    mfe_linear: float | None = None
-    mae_linear: float | None = None
-    giveback_linear: float | None = None
-    exit_stack_mode: str | None = None
-    last_renew_segment_evaluated: int | None = None
-
-
-class ExitTransformerRequest(BaseModel):
-    symbol_id: str
-    side: str
-    eval_horizon: str
-    bars_held: int = Field(..., ge=0)
-    bars_limit: int = Field(..., ge=1)
-    entry_predictions: dict[str, float]
-    current_predictions: dict[str, float]
-    unrealized_linear: float
-    mfe_linear: float
-    mae_linear: float
-    giveback_linear: float
-
-
-@app.post('/api/exit-policy')
-async def post_exit_policy(body: ExitPolicyRequest) -> dict:
-    if settings.WEB_GUI_TRADING_ENABLED:
-        raise HTTPException(status_code=403, detail='Exit policy is daemon-only')
-
-    try:
-        SymbolId[body.symbol_id]
-    except KeyError:
-        raise HTTPException(422, detail=f'Unknown symbol_id: {body.symbol_id}')
-
-    use_exit_stack = body.exit_stack_mode is not None
-    if not settings.WEB_GUI_EXIT_GBM_ENABLED and not use_exit_stack:
-        return build_exit_policy_disabled_response()
-
-    payload = body.model_dump(exclude_none=True)
-    return await run_in_spawned_process_async(
-        _worker_exit_policy,
-        payload,
-        pool_kind='heavy',
-    )
-
-
-@app.post('/api/exit-transformer')
-async def post_exit_transformer(body: ExitTransformerRequest) -> dict:
-    try:
-        SymbolId[body.symbol_id]
-    except KeyError:
-        raise HTTPException(422, detail=f'Unknown symbol_id: {body.symbol_id}')
-
-    if not settings.WEB_GUI_EXIT_TRANSFORMER_ENABLED:
-        return build_exit_transformer_disabled_response()
-
-    return await run_in_spawned_process_async(
-        _worker_exit_transformer,
-        body.model_dump(),
-        pool_kind='heavy',
-    )
-
-
 @app.get('/api/trade-journal')
 def get_trade_journal(
     symbol_id: str = Query(..., description='SymbolId, e.g. BTC_USDT'),
@@ -499,52 +390,6 @@ async def get_trade_journal_bars_elapsed(
         pool_kind='light',
     )
     return {'bars_elapsed': bars_elapsed}
-
-
-@app.post('/api/trade-journal/entry')
-async def post_trade_journal_entry(body: TradeJournalEntryRequest) -> dict:
-    if settings.WEB_GUI_TRADING_ENABLED:
-        raise HTTPException(status_code=403, detail='Trade journal is daemon-only')
-
-    try:
-        SymbolId[body.symbol_id]
-    except KeyError:
-        raise HTTPException(422, detail=f'Unknown symbol_id: {body.symbol_id}')
-
-    try:
-        return await run_in_spawned_process_async(
-            _worker_trade_journal_entry,
-            body.model_dump(),
-            pool_kind='journal',
-        )
-    except ValueError as exception:
-        raise HTTPException(409, detail=str(exception))
-
-
-@app.post('/api/trade-journal/exit')
-async def post_trade_journal_exit(body: TradeJournalExitRequest) -> dict:
-    if settings.WEB_GUI_TRADING_ENABLED:
-        raise HTTPException(status_code=403, detail='Trade journal is daemon-only')
-
-    try:
-        return await run_in_spawned_process_async(
-            _worker_trade_journal_exit,
-            body.model_dump(),
-            pool_kind='journal',
-        )
-    except ValueError as exception:
-        raise HTTPException(409, detail=str(exception))
-
-
-@app.delete('/api/trade-journal/open')
-async def delete_trade_journal_open() -> dict:
-    if settings.WEB_GUI_TRADING_ENABLED:
-        raise HTTPException(status_code=403, detail='Trade journal is daemon-only')
-
-    return await run_in_spawned_process_async(
-        _worker_trade_journal_discard,
-        pool_kind='journal',
-    )
 
 
 def mount_static(static_dir: str) -> None:

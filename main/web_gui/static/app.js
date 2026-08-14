@@ -72,62 +72,6 @@
       const q = new URLSearchParams(params).toString();
       return this.get('./api/trade-journal/bars-elapsed?' + q);
     },
-    async tradeJournalEntry(body) {
-      const r = await fetch('./api/trade-journal/entry', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(text);
-      }
-      return r.json();
-    },
-    async tradeJournalExit(body) {
-      const r = await fetch('./api/trade-journal/exit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(text);
-      }
-      return r.json();
-    },
-    async tradeJournalDiscardOpen() {
-      const r = await fetch('./api/trade-journal/open', { method: 'DELETE' });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(text);
-      }
-      return r.json();
-    },
-    async exitPolicy(body) {
-      const r = await fetch('./api/exit-policy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(text);
-      }
-      return r.json();
-    },
-    async exitTransformer(body) {
-      const r = await fetch('./api/exit-transformer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(text);
-      }
-      return r.json();
-    },
   };
 
   let config = { defaultLimit: 32768, defaultScale: 'x32', refreshIntervalSec: 30 };
@@ -175,16 +119,12 @@
   let lastJournalBarsElapsed = null;
   let lastJournalBarsElapsedEntryStartTradeId = null;
   let tradeJournalRequestSeq = 0;
-  let journalApplyGeneration = 0;
-  let journalMutationPending = false;
   let journalBarsRefetchTimer = null;
   const INFERENCE_REFRESH_INTERVAL_SEC = 10;
   const INFERENCE_FETCH_TIMEOUT_MS = 30000;
   const JOURNAL_REFRESH_INTERVAL_SEC = 15;
   const JOURNAL_BARS_ELAPSED_INTERVAL_SEC = 30;
   const X1_BAR_REFRESH_INTERVAL_SEC = 60;
-  const EXIT_CLOSE_BEEP_INTERVAL_MS = 5000;
-  const EXIT_CLOSE_NOTIFICATION_INTERVAL_MS = 30000;
   const ASSET_VERSION_POLL_INTERVAL_SEC = 60;
   const scaleSelect = document.getElementById('scale');
   const symbolSelect = document.getElementById('symbol');
@@ -212,22 +152,12 @@
   const tradeJournalPanel = document.getElementById('tradeJournalPanel');
   const tradeJournalContent = document.getElementById('tradeJournalContent');
   const tradeJournalTotals = document.getElementById('tradeJournalTotals');
-  const journalNotionalInput = document.getElementById('journalNotional');
-  const journalFillPriceInput = document.getElementById('journalFillPrice');
-  const journalFillPriceLabel = document.getElementById('journalFillPriceLabel');
-  const journalActionStatusEl = document.getElementById('journalActionStatus');
-  const journalEvalHorizonSelect = document.getElementById('journalEvalHorizon');
-  const journalSoundEnabledCheck = document.getElementById('journalSoundEnabled');
   let inferenceErrorBySymbolAndHorizon = {};
   let policyBySymbol = {};
   let exitPolicyBySymbol = {};
-  let exitTransformerBySymbol = {};
   let exitStackBySymbol = {};
   let entryHintModeBySymbol = {};
   let entryConfidenceMarginBySymbol = {};
-  let exitGbmEnabled = false;
-  let exitTransformerEnabled = false;
-  let tradingEnabled = false;
   let tradingInitialBalanceUsd = 100;
   let checkpointPathBySymbol = {};
   let inferenceMinRows = 0;
@@ -236,7 +166,6 @@
   let lastEntryHint = null;
   let lastPredictions = null;
   let lastExitPolicy = null;
-  let lastExitTransformer = null;
   let lastInferenceStatus = null;
   let lastInferenceCompletedAtMs = null;
   let lastInferenceNetworkError = null;
@@ -245,47 +174,12 @@
   let lastInferenceBarProvenance = null;
   let latestX1Bar = null;
   let lastChartBarClose = null;
-  let journalDefaults = {
-    notional_usd: 7,
-    eval_horizon: 'x32',
-    round_trip_fee_rate: 0.001,
-  };
-  let previousAtTargetHorizon = false;
   let isFirstJournalLoad = true;
-  let horizonAlertPositionId = null;
-  let previousExitGbmSuggestClose = false;
-  let exitGbmAlertPositionId = null;
-  let signOnlyAlertSequence = 0;
-  let exitCloseAlertTimer = null;
-  const exitAlertBeepAtMs = {
-    sign_only_close: 0,
-    gbm_close: 0,
-    transformer_close: 0,
-    horizon: 0,
-    policy_flip: 0,
-  };
-  const exitAlertNotifyAtMs = {
-    sign_only_close: 0,
-    gbm_close: 0,
-    transformer_close: 0,
-    horizon: 0,
-    policy_flip: 0,
-  };
-  let previousExitTransformerSuggestClose = false;
-  let exitTransformerAlertPositionId = null;
-  let exitOverlaySession = null;
-  let previousEntryAllowedAction = null;
-  let isFirstEntryHintSample = true;
   let journalHasOpenPosition = false;
   let lastJournalState = null;
-  let journalActionPending = null;
-  let audioContext = null;
-  let audioUnlocked = false;
-
   const SCALE_NAMES = ['x1', 'x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x1536', 'x2048', 'x4096', 'x8192', 'x16384', 'x32768', 'x65536', 'x131072', 'x262144'];
   const CVD_WINDOW_OPTIONS = ['x2', 'x4', 'x8', 'x16', 'x32', 'x64', 'x128', 'x256', 'x512', 'x1024', 'x2048', 'x4096', 'x8192', 'x16384'];
   const CVD_WINDOW_DEFAULT = 'x512';
-  const JOURNAL_EVAL_HORIZON_OPTIONS = ['x32', 'x64', 'x512', 'x1024', 'x1536', 'x2048', 'x3072', 'x4096'];
   let tradeResearchEvalHorizon = 'x32';
   let tradeResearchScale = 'x32';
   let tradeResearchAvailableHorizons = [];
@@ -300,113 +194,7 @@
         `Non-overlapping policy trades @ ${horizon} на x1`;
     }
   }
-  const JOURNAL_SETTINGS_STORAGE_KEY = 'okx_web_gui_journal_settings';
-  const JOURNAL_SOUND_ENABLED_STORAGE_KEY = 'okx_web_gui_journal_sound_enabled';
 
-  function loadJournalSettingsFromStorage() {
-    try {
-      const raw = localStorage.getItem(JOURNAL_SETTINGS_STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return null;
-      return parsed;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function saveJournalSettingsToStorage() {
-    const evalHorizon = journalEvalHorizonSelect.value;
-    if (!evalHorizon) return;
-    localStorage.setItem(
-      JOURNAL_SETTINGS_STORAGE_KEY,
-      JSON.stringify({ eval_horizon: evalHorizon }),
-    );
-  }
-
-  function parseJournalFillPrice() {
-    const value = Number(journalFillPriceInput.value);
-    if (!Number.isFinite(value) || value <= 0) {
-      return null;
-    }
-    return value;
-  }
-
-  function parseJournalNotionalUsd() {
-    const value = Number(journalNotionalInput.value);
-    if (!Number.isFinite(value) || value <= 0) {
-      return null;
-    }
-    return value;
-  }
-
-  function journalEntryFillValid() {
-    return parseJournalFillPrice() !== null && parseJournalNotionalUsd() !== null;
-  }
-
-  function journalExitFillValid() {
-    return parseJournalFillPrice() !== null;
-  }
-
-  function resetJournalFillFields() {
-    journalFillPriceInput.value = '';
-    journalNotionalInput.value = '';
-  }
-
-  function initJournalFillFieldsOnLoad() {
-    resetJournalFillFields();
-  }
-
-  function setJournalActionPending(pending) {
-    journalActionPending = pending;
-    updateJournalActionStatusUi();
-    if (lastJournalState && symbolSelect.value) {
-      renderTradeJournal(lastJournalState, symbolSelect.value);
-    }
-  }
-
-  function updateJournalActionStatusUi() {
-    if (!journalActionStatusEl) return;
-    if (!journalActionPending) {
-      journalActionStatusEl.classList.add('hidden');
-      journalActionStatusEl.textContent = '';
-      return;
-    }
-    journalActionStatusEl.classList.remove('hidden');
-    journalActionStatusEl.textContent = journalActionPending.message;
-  }
-
-  function getJournalNotionalUsd() {
-    const parsed = parseJournalNotionalUsd();
-    if (parsed !== null) {
-      return parsed;
-    }
-    return Number(journalDefaults.notional_usd);
-  }
-
-  function getJournalEvalHorizon() {
-    const value = journalEvalHorizonSelect.value;
-    if (value) return value;
-    return journalDefaults.eval_horizon;
-  }
-
-  function resolveJournalEvalHorizon(symbol) {
-    const exitStack = getExitStackForSymbol(symbol);
-    if (
-      exitStack
-      && exitStack.mode === 'rolling_h_renew_sign_only'
-      && exitStack.eval_horizon
-    ) {
-      return String(exitStack.eval_horizon);
-    }
-    if (lastPolicy && lastPolicy.eval_horizon) {
-      return String(lastPolicy.eval_horizon);
-    }
-    if (lastEntryHint && lastEntryHint.eval_horizon) {
-      return String(lastEntryHint.eval_horizon);
-    }
-    return getJournalEvalHorizon();
-  }
 
   function resolveDeployEvalHorizon(openPos, symbol) {
     if (openPos && openPos.exit_stack_eval_horizon) {
@@ -428,312 +216,6 @@
     return resolveJournalEvalHorizon(symbol);
   }
 
-  function setJournalEvalHorizon(value) {
-    if (!value) return;
-    if (!JOURNAL_EVAL_HORIZON_OPTIONS.includes(value)) return;
-    journalEvalHorizonSelect.value = value;
-    saveJournalSettingsToStorage();
-  }
-
-  function initJournalSettingsControls() {
-    journalEvalHorizonSelect.innerHTML = '';
-    JOURNAL_EVAL_HORIZON_OPTIONS.forEach((horizon) => {
-      const option = document.createElement('option');
-      option.value = horizon;
-      option.textContent = horizon;
-      journalEvalHorizonSelect.appendChild(option);
-    });
-
-    const stored = loadJournalSettingsFromStorage();
-    if (stored && stored.eval_horizon != null && JOURNAL_EVAL_HORIZON_OPTIONS.includes(stored.eval_horizon)) {
-      journalEvalHorizonSelect.value = stored.eval_horizon;
-    } else {
-      journalEvalHorizonSelect.value = journalDefaults.eval_horizon;
-    }
-
-    initJournalFillFieldsOnLoad();
-    journalNotionalInput.addEventListener('input', () => {
-      if (lastJournalState && symbolSelect.value && !journalHasOpenPosition) {
-        renderTradeJournal(lastJournalState, symbolSelect.value);
-      }
-    });
-    journalFillPriceInput.addEventListener('input', () => {
-      if (lastJournalState && symbolSelect.value) {
-        renderTradeJournal(lastJournalState, symbolSelect.value);
-      }
-    });
-    journalEvalHorizonSelect.addEventListener('change', saveJournalSettingsToStorage);
-  }
-
-  function syncJournalSettingsDisabled(hasOpen) {
-    const symbol = symbolSelect.value;
-    const signOnlyRenew = exitStackUsesSignOnlyRenew(symbol);
-    journalNotionalInput.disabled = hasOpen || journalActionPending !== null;
-    journalFillPriceInput.disabled = journalActionPending !== null;
-    journalEvalHorizonSelect.disabled = hasOpen || journalActionPending !== null || signOnlyRenew;
-    if (journalFillPriceLabel) {
-      journalFillPriceLabel.textContent = hasOpen ? 'Цена выхода $' : 'Цена входа $';
-    }
-  }
-
-  function isJournalSoundEnabled() {
-    return journalSoundEnabledCheck.checked;
-  }
-
-  function loadJournalSoundEnabledFromStorage() {
-    const raw = localStorage.getItem(JOURNAL_SOUND_ENABLED_STORAGE_KEY);
-    if (raw === '0') {
-      journalSoundEnabledCheck.checked = false;
-      return;
-    }
-    journalSoundEnabledCheck.checked = true;
-  }
-
-  function saveJournalSoundEnabledToStorage() {
-    localStorage.setItem(
-      JOURNAL_SOUND_ENABLED_STORAGE_KEY,
-      journalSoundEnabledCheck.checked ? '1' : '0',
-    );
-  }
-
-  function getAudioContext() {
-    if (!audioContext) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      audioContext = new AudioCtx();
-    }
-    return audioContext;
-  }
-
-  function unlockAudio() {
-    const ctx = getAudioContext();
-    if (ctx.state === 'suspended') {
-      ctx.resume();
-    }
-    audioUnlocked = true;
-  }
-
-  function playTone(frequencyHz, durationSec, startSec, gainValue) {
-    const ctx = getAudioContext();
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.value = frequencyHz;
-    gainNode.gain.value = gainValue;
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    const startAt = ctx.currentTime + startSec;
-    oscillator.start(startAt);
-    oscillator.stop(startAt + durationSec);
-  }
-
-  function playHorizonReachedSound() {
-    if (!isJournalSoundEnabled()) return;
-    unlockAudio();
-    playTone(880, 0.12, 0, 0.08);
-    playTone(1175, 0.18, 0.18, 0.08);
-  }
-
-  function playHorizonOverdueSound() {
-    if (!isJournalSoundEnabled()) return;
-    unlockAudio();
-    playTone(740, 0.14, 0, 0.1);
-    playTone(740, 0.14, 0.22, 0.1);
-    playTone(988, 0.22, 0.44, 0.1);
-  }
-
-  function emptyExitOverlaySession() {
-    return {
-      exit_gbm_enabled: false,
-      exit_transformer_enabled: false,
-      exit_policy_at_close: null,
-      exit_transformer_at_close: null,
-      exit_gbm_alert_fired: false,
-      exit_transformer_alert_fired: false,
-      first_exit_gbm_alert: null,
-      first_exit_transformer_alert: null,
-    };
-  }
-
-  function resetExitOverlaySession() {
-    exitOverlaySession = emptyExitOverlaySession();
-    exitOverlaySession.exit_gbm_enabled = exitGbmEnabled;
-    exitOverlaySession.exit_transformer_enabled = exitTransformerEnabled;
-  }
-
-  function sanitizeExitPolicyForJournal(exitPolicy) {
-    if (!exitPolicy || exitPolicy.close_probability == null) {
-      return null;
-    }
-    return {
-      enabled: exitPolicy.enabled !== false,
-      action: exitPolicy.action,
-      suggest_close: Boolean(exitPolicy.suggest_close),
-      close_probability: Number(exitPolicy.close_probability),
-      close_probability_threshold: Number(exitPolicy.close_probability_threshold),
-      min_hold_steps: exitPolicy.min_hold_steps,
-      bars_held: exitPolicy.bars_held,
-      run_label: exitPolicy.run_label,
-      eval_horizon: exitPolicy.eval_horizon,
-    };
-  }
-
-  function sanitizeExitTransformerForJournal(exitTransformer) {
-    if (!exitTransformer || exitTransformer.predicted_delta_pnl == null) {
-      return null;
-    }
-    return {
-      enabled: exitTransformer.enabled !== false,
-      action: exitTransformer.action,
-      suggest_close: Boolean(exitTransformer.suggest_close),
-      predicted_delta_pnl: Number(exitTransformer.predicted_delta_pnl),
-      delta_pnl_threshold: Number(exitTransformer.delta_pnl_threshold),
-      min_hold_steps: exitTransformer.min_hold_steps,
-      bars_held: exitTransformer.bars_held,
-      run_label: exitTransformer.run_label,
-      eval_horizon: exitTransformer.eval_horizon,
-    };
-  }
-
-  function buildPositionMetricsSnapshot(openPos) {
-    if (!openPos || !openPos.metrics) {
-      return null;
-    }
-    const metrics = openPos.metrics;
-    return {
-      bars_elapsed: metrics.bars_elapsed,
-      unrealized_net_return_pct: metrics.unrealized_net_return_pct,
-      mfe_net_return_pct: metrics.mfe_net_return_pct,
-      mae_net_return_pct: metrics.mae_net_return_pct,
-      giveback_net_return_pct: metrics.giveback_net_return_pct,
-      mark_price: metrics.mark_price,
-    };
-  }
-
-  function updateExitOverlaySession(openPos) {
-    if (!exitOverlaySession) {
-      resetExitOverlaySession();
-    }
-    exitOverlaySession.exit_gbm_enabled = exitGbmEnabled;
-    exitOverlaySession.exit_transformer_enabled = exitTransformerEnabled;
-    const metricsSnapshot = buildPositionMetricsSnapshot(openPos);
-
-    if (exitGbmEnabled && lastExitPolicy) {
-      const sanitized = sanitizeExitPolicyForJournal(lastExitPolicy);
-      exitOverlaySession.exit_policy_at_close = sanitized;
-      if (sanitized && sanitized.suggest_close && !exitOverlaySession.exit_gbm_alert_fired) {
-        exitOverlaySession.exit_gbm_alert_fired = true;
-        exitOverlaySession.first_exit_gbm_alert = {
-          overlay: sanitized,
-          position_metrics: metricsSnapshot,
-        };
-      }
-    }
-
-    if (exitTransformerEnabled && lastExitTransformer) {
-      const sanitized = sanitizeExitTransformerForJournal(lastExitTransformer);
-      exitOverlaySession.exit_transformer_at_close = sanitized;
-      if (sanitized && sanitized.suggest_close && !exitOverlaySession.exit_transformer_alert_fired) {
-        exitOverlaySession.exit_transformer_alert_fired = true;
-        exitOverlaySession.first_exit_transformer_alert = {
-          overlay: sanitized,
-          position_metrics: metricsSnapshot,
-        };
-      }
-    }
-  }
-
-  function buildExitOverlayPayloadForClose() {
-    if (!exitOverlaySession) {
-      resetExitOverlaySession();
-    }
-    return {
-      exit_gbm_enabled: exitOverlaySession.exit_gbm_enabled,
-      exit_transformer_enabled: exitOverlaySession.exit_transformer_enabled,
-      exit_policy_at_close: exitOverlaySession.exit_policy_at_close,
-      exit_transformer_at_close: exitOverlaySession.exit_transformer_at_close,
-      exit_gbm_alert_fired: exitOverlaySession.exit_gbm_alert_fired,
-      exit_transformer_alert_fired: exitOverlaySession.exit_transformer_alert_fired,
-      first_exit_gbm_alert: exitOverlaySession.first_exit_gbm_alert,
-      first_exit_transformer_alert: exitOverlaySession.first_exit_transformer_alert,
-    };
-  }
-
-  function resetHorizonAlertState() {
-    previousAtTargetHorizon = false;
-    horizonAlertPositionId = null;
-  }
-
-  function resetExitGbmAlertState() {
-    previousExitGbmSuggestClose = false;
-    exitGbmAlertPositionId = null;
-    lastExitPolicy = null;
-    resetExitAlertTimingState();
-  }
-
-  function resetExitAlertTimingState() {
-    Object.keys(exitAlertBeepAtMs).forEach((key) => {
-      exitAlertBeepAtMs[key] = 0;
-    });
-    Object.keys(exitAlertNotifyAtMs).forEach((key) => {
-      exitAlertNotifyAtMs[key] = 0;
-    });
-  }
-
-  function shouldExitAlertBeep(alertKey) {
-    const now = Date.now();
-    if (now - exitAlertBeepAtMs[alertKey] < EXIT_CLOSE_BEEP_INTERVAL_MS) {
-      return false;
-    }
-    exitAlertBeepAtMs[alertKey] = now;
-    return true;
-  }
-
-  function shouldExitAlertNotify(alertKey) {
-    const now = Date.now();
-    if (now - exitAlertNotifyAtMs[alertKey] < EXIT_CLOSE_NOTIFICATION_INTERVAL_MS) {
-      return false;
-    }
-    exitAlertNotifyAtMs[alertKey] = now;
-    return true;
-  }
-
-  function stopExitCloseAlertTimer() {
-    if (exitCloseAlertTimer) {
-      clearInterval(exitCloseAlertTimer);
-      exitCloseAlertTimer = null;
-    }
-  }
-
-  function startExitCloseAlertTimer() {
-    if (exitCloseAlertTimer) {
-      return;
-    }
-    exitCloseAlertTimer = setInterval(() => {
-      if (!journalHasOpenPosition || !lastJournalState) {
-        stopExitCloseAlertTimer();
-        return;
-      }
-      const symbol = symbolSelect.value;
-      const openPos = lastJournalState.open_position;
-      if (!openPos || openPos.symbol_id !== symbol) {
-        return;
-      }
-      runExitAlertChecks(openPos, symbol);
-    }, EXIT_CLOSE_BEEP_INTERVAL_MS);
-  }
-
-  function applyTradingEnabledUi() {
-    const settingsBlock = document.querySelector('.trade-journal-settings');
-    if (settingsBlock) {
-      settingsBlock.style.display = tradingEnabled ? 'none' : '';
-    }
-    if (journalActionStatusEl) {
-      journalActionStatusEl.style.display = tradingEnabled ? 'none' : '';
-    }
-    if (tradeJournalPanel) {
-      tradeJournalPanel.classList.toggle('trade-journal-automated', tradingEnabled);
-    }
-  }
 
   function renderEquityCurveSvg(equityCurve) {
     if (!Array.isArray(equityCurve) || equityCurve.length < 2) {
@@ -768,350 +250,9 @@
     `;
   }
 
-  function runExitAlertChecks(openPos, symbol) {
-    if (tradingEnabled) {
-      return;
-    }
-    if (!openPos || !openPos.metrics) {
-      return;
-    }
-    const m = openPos.metrics;
-    maybeNotifyHorizonAlert(openPos, m.at_target_horizon && !exitStackUsesSignOnlyRenew(symbol));
-    maybeNotifyExitGbmAlert(openPos, lastExitPolicy);
-    maybeNotifyExitStackSignOnlyAlert(openPos, lastExitPolicy, symbol);
-    maybeNotifyExitTransformerAlert(openPos, lastExitTransformer);
-    maybeNotifyPolicyFlipAlert(openPos, symbol);
-  }
-
-  function resetExitTransformerAlertState() {
-    previousExitTransformerSuggestClose = false;
-    exitTransformerAlertPositionId = null;
-    lastExitTransformer = null;
-  }
 
   resetExitOverlaySession();
 
-  function resetEntryAllowedAlertState() {
-    previousEntryAllowedAction = null;
-  }
-
-  function playEntryLongSound() {
-    if (!isJournalSoundEnabled()) return;
-    unlockAudio();
-    playTone(523, 0.1, 0, 0.09);
-    playTone(659, 0.1, 0.12, 0.09);
-    playTone(784, 0.16, 0.24, 0.09);
-  }
-
-  function playEntryShortSound() {
-    if (!isJournalSoundEnabled()) return;
-    unlockAudio();
-    playTone(784, 0.1, 0, 0.09);
-    playTone(659, 0.1, 0.12, 0.09);
-    playTone(523, 0.16, 0.24, 0.09);
-  }
-
-  function entryAllowedActionFromHint(entryHint) {
-    if (!entryHint || !entryHint.recommended_action) {
-      return null;
-    }
-    const recommended = String(entryHint.recommended_action).toLowerCase();
-    if (recommended === 'long' || recommended === 'short') {
-      return recommended;
-    }
-    return null;
-  }
-
-  function showEntryAllowedBrowserNotification(title, body) {
-    if (!('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
-    try {
-      new Notification(title, { body, tag: 'okx-micro-live-entry' });
-    } catch (_) {
-      // no-op
-    }
-  }
-
-  function maybeNotifyEntryAllowedAlert(entryHint) {
-    if (tradingEnabled) {
-      return;
-    }
-    if (journalHasOpenPosition) {
-      resetEntryAllowedAlertState();
-      return;
-    }
-
-    const currentAction = entryAllowedActionFromHint(entryHint);
-    const previousAction = previousEntryAllowedAction;
-
-    if (isFirstEntryHintSample) {
-      isFirstEntryHintSample = false;
-      previousEntryAllowedAction = currentAction;
-      return;
-    }
-
-    const becameAllowed = currentAction != null && previousAction !== currentAction;
-    if (becameAllowed) {
-      if (currentAction === 'long') {
-        playEntryLongSound();
-      } else if (currentAction === 'short') {
-        playEntryShortSound();
-      }
-      const policyAction = lastPolicy && lastPolicy.action
-        ? String(lastPolicy.action).toUpperCase()
-        : currentAction.toUpperCase();
-      const snr = entryHint.snr != null ? Number(entryHint.snr).toFixed(2) : '—';
-      const title = `Micro live: вход ${currentAction.toUpperCase()}`;
-      const body = `Policy ${policyAction}, SNR=${snr} — SNR/gate ok @ ${entryHint.eval_horizon || 'eval'}`;
-      showEntryAllowedBrowserNotification(title, body);
-    }
-
-    previousEntryAllowedAction = currentAction;
-  }
-
-  function playExitGbmAlertSound() {
-    if (!isJournalSoundEnabled()) return;
-    unlockAudio();
-    playTone(988, 0.12, 0, 0.09);
-    playTone(1319, 0.2, 0.16, 0.09);
-  }
-
-  function playSignOnlyCloseAlertSound() {
-    if (!isJournalSoundEnabled()) return;
-    unlockAudio();
-    playTone(880, 0.1, 0, 0.12);
-    playTone(880, 0.1, 0.15, 0.12);
-    playTone(1319, 0.22, 0.32, 0.12);
-  }
-
-  function playPolicyFlipAlertSound() {
-    if (!isJournalSoundEnabled()) return;
-    unlockAudio();
-    playTone(740, 0.12, 0, 0.1);
-    playTone(988, 0.18, 0.18, 0.1);
-  }
-
-  function maybeNotifyExitGbmAlert(openPos, exitPolicy) {
-    if (!exitGbmEnabled) {
-      previousExitGbmSuggestClose = false;
-      return;
-    }
-    if (!openPos || !exitPolicy) {
-      previousExitGbmSuggestClose = false;
-      return;
-    }
-    if (exitPolicy.mode === 'rolling_h_renew_sign_only') {
-      previousExitGbmSuggestClose = false;
-      return;
-    }
-    const suggestClose = Boolean(exitPolicy.suggest_close);
-    if (!suggestClose) {
-      previousExitGbmSuggestClose = false;
-      return;
-    }
-
-    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
-    const sideLabel = String(openPos.side || '').toUpperCase();
-    const threshold = exitPolicy.close_probability_threshold;
-    const pClose = exitPolicy.close_probability;
-    const title = 'Micro live: Exit GBM → CLOSE';
-    const body = `${sideLabel} ${openPos.symbol_id} — P(close)=${(Number(pClose) * 100).toFixed(1)}% ≥ ${(Number(threshold) * 100).toFixed(1)}%`;
-
-    if (shouldExitAlertBeep('gbm_close')) {
-      playExitGbmAlertSound();
-    }
-    if (shouldExitAlertNotify('gbm_close')) {
-      showExitGbmBrowserNotification(title, body);
-    }
-
-    exitGbmAlertPositionId = positionId;
-    previousExitGbmSuggestClose = true;
-  }
-
-  function showExitStackSignOnlyBrowserNotification(title, body) {
-    if (!('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
-    signOnlyAlertSequence += 1;
-    try {
-      new Notification(title, {
-        body,
-        tag: `okx-micro-live-sign-only-${signOnlyAlertSequence}`,
-      });
-    } catch (_) {
-      // no-op
-    }
-  }
-
-  function maybeNotifyExitStackSignOnlyAlert(openPos, exitPolicy, symbol) {
-    if (!exitStackUsesSignOnlyRenew(symbol)) {
-      return;
-    }
-    if (!openPos || !exitPolicy) {
-      return;
-    }
-    if (exitPolicy.mode !== 'rolling_h_renew_sign_only') {
-      return;
-    }
-    if (!Boolean(exitPolicy.suggest_close)) {
-      return;
-    }
-    const sideLabel = String(openPos.side || '').toUpperCase();
-    const title = 'Micro live: sign_only renew → CLOSE';
-    const body = `${sideLabel} ${openPos.symbol_id} — pred sign flip @ checkpoint`;
-    if (shouldExitAlertBeep('sign_only_close')) {
-      playSignOnlyCloseAlertSound();
-    }
-    if (shouldExitAlertNotify('sign_only_close')) {
-      showExitStackSignOnlyBrowserNotification(title, body);
-    }
-    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
-    exitGbmAlertPositionId = positionId;
-  }
-
-  function showExitGbmBrowserNotification(title, body) {
-    if (!('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
-    try {
-      new Notification(title, { body, tag: 'okx-micro-live-exit-gbm' });
-    } catch (_) {
-      // no-op
-    }
-  }
-
-  function playExitTransformerAlertSound() {
-    if (!isJournalSoundEnabled()) return;
-    unlockAudio();
-    playTone(880, 0.12, 0, 0.09);
-    playTone(1175, 0.2, 0.16, 0.09);
-  }
-
-  function maybeNotifyExitTransformerAlert(openPos, exitTransformer) {
-    if (!exitTransformerEnabled) {
-      previousExitTransformerSuggestClose = false;
-      return;
-    }
-    if (!openPos || !exitTransformer) {
-      previousExitTransformerSuggestClose = false;
-      return;
-    }
-    const suggestClose = Boolean(exitTransformer.suggest_close);
-    if (!suggestClose) {
-      previousExitTransformerSuggestClose = false;
-      return;
-    }
-
-    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
-    const sideLabel = String(openPos.side || '').toUpperCase();
-    const threshold = exitTransformer.delta_pnl_threshold;
-    const deltaPnl = exitTransformer.predicted_delta_pnl;
-    const title = 'Micro live: Exit Transformer v2 → CLOSE';
-    const body = `${sideLabel} ${openPos.symbol_id} — Δpnl=${formatPct(Number(deltaPnl) * 100)} > ${formatPct(Number(threshold) * 100)}`;
-
-    if (shouldExitAlertBeep('transformer_close')) {
-      playExitTransformerAlertSound();
-    }
-    if (shouldExitAlertNotify('transformer_close')) {
-      showExitTransformerBrowserNotification(title, body);
-    }
-
-    exitTransformerAlertPositionId = positionId;
-    previousExitTransformerSuggestClose = true;
-  }
-
-  function maybeNotifyPolicyFlipAlert(openPos, symbol) {
-    if (!openPos || !openPos.side) {
-      return;
-    }
-    const policySideNow = policyActionToSide(lastPolicy && lastPolicy.action);
-    if (!policySideNow || policySideNow === openPos.side) {
-      return;
-    }
-    const sideLabel = String(openPos.side || '').toUpperCase();
-    const title = 'Micro live: policy flip — рассмотри exit';
-    const body = `${sideLabel} ${openPos.symbol_id} — policy → ${policySideNow.toUpperCase()}`;
-    if (shouldExitAlertBeep('policy_flip')) {
-      playPolicyFlipAlertSound();
-    }
-    if (shouldExitAlertNotify('policy_flip')) {
-      if ('Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification(title, { body, tag: 'okx-micro-live-policy-flip' });
-        } catch (_) {
-          // no-op
-        }
-      }
-    }
-  }
-
-  function showExitTransformerBrowserNotification(title, body) {
-    if (!('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
-    try {
-      new Notification(title, { body, tag: 'okx-micro-live-exit-transformer' });
-    } catch (_) {
-      // no-op
-    }
-  }
-
-  function maybeNotifyHorizonAlert(openPos, atTargetHorizon) {
-    if (!openPos || !atTargetHorizon) {
-      previousAtTargetHorizon = false;
-      return;
-    }
-
-    const positionId = openPos.id || `${openPos.symbol_id}:${openPos.entry_start_trade_id}`;
-    const evalHorizonLabel = openPos.eval_horizon || 'horizon';
-    const sideLabel = String(openPos.side || '').toUpperCase();
-    const title = `Micro live: выход по ${evalHorizonLabel}`;
-    const body = `${sideLabel} ${openPos.symbol_id} — счётчик баров достиг горизонта, закрой позицию на бирже.`;
-
-    const isFirstCrossThisSession = !previousAtTargetHorizon && !isFirstJournalLoad;
-    if (shouldExitAlertBeep('horizon')) {
-      if (isFirstCrossThisSession) {
-        playHorizonReachedSound();
-      } else {
-        playHorizonOverdueSound();
-      }
-    }
-
-    if (shouldExitAlertNotify('horizon')) {
-      showHorizonBrowserNotification(title, body);
-    }
-
-    horizonAlertPositionId = positionId;
-    previousAtTargetHorizon = true;
-  }
-
-  function showHorizonBrowserNotification(title, body) {
-    if (!('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
-    try {
-      new Notification(title, { body, tag: 'okx-micro-live-horizon' });
-    } catch (_) {
-      // no-op
-    }
-  }
-
-  function requestNotificationPermissionIfNeeded() {
-    if (!('Notification' in window)) return;
-    if (Notification.permission !== 'default') return;
-    Notification.requestPermission();
-  }
-
-  function initJournalSoundControls() {
-    loadJournalSoundEnabledFromStorage();
-    journalSoundEnabledCheck.addEventListener('change', () => {
-      saveJournalSoundEnabledToStorage();
-      if (journalSoundEnabledCheck.checked) {
-        unlockAudio();
-        requestNotificationPermissionIfNeeded();
-      }
-    });
-
-    document.addEventListener('click', () => {
-      unlockAudio();
-    }, { once: true });
-  }
 
   function setStatus(text, isError = false) {
     statusEl.textContent = text;
@@ -1429,9 +570,6 @@
 
     const action = String(policy.action).toUpperCase();
     const evalHorizon = policy.eval_horizon || '—';
-    if (policy.eval_horizon) {
-      setJournalEvalHorizon(policy.eval_horizon);
-    }
     const runLabel = policy.run_label || '—';
     const probs = policy.probabilities || {};
     const holdPct = probs.hold != null ? (Number(probs.hold) * 100).toFixed(1) : '—';
@@ -1591,7 +729,6 @@
     inferencePanel.classList.remove('hidden');
     renderPolicy(policy, symbol, entryHint);
     inferenceContent.innerHTML = rows.join('');
-    maybeNotifyEntryAllowedAlert(entryHint);
   }
 
   function handleInferenceFetchError(error, symbol) {
@@ -1649,8 +786,6 @@
           }
 
           if (predictions) {
-            applyInferenceExitPolicy(response.exit_policy, symbol);
-            lastExitTransformer = response.exit_transformer || lastExitTransformer;
             renderInference(
               predictions,
               symbol,
@@ -1689,7 +824,6 @@
           lastPolicy = null;
           lastEntryHint = null;
           lastExitPolicy = null;
-          lastExitTransformer = null;
           return;
         }
         if (!response.predictions) {
@@ -1705,8 +839,6 @@
           ? Number(response.inference_completed_at_ms)
           : (response.updated_at_ms != null ? Number(response.updated_at_ms) : null);
         lastComputingStartedAtMs = null;
-        applyInferenceExitPolicy(response.exit_policy, symbol);
-        lastExitTransformer = response.exit_transformer || null;
         renderInference(
           response.predictions,
           symbol,
@@ -1802,44 +934,17 @@
     }
   }
 
-  function invalidatePendingJournalReads() {
-    journalApplyGeneration += 1;
-    tradeJournalRequestSeq += 1;
-    if (journalBarsRefetchTimer) {
-      clearTimeout(journalBarsRefetchTimer);
-      journalBarsRefetchTimer = null;
-    }
-  }
-
-  function beginJournalMutation() {
-    invalidatePendingJournalReads();
-    journalMutationPending = true;
-  }
-
-  function finishJournalMutation(state, symbol) {
-    journalMutationPending = false;
-    invalidatePendingJournalReads();
-    applyJournalState(state, symbol);
-  }
-
-  function shouldRejectStaleJournalRead(incoming) {
-    if (!lastJournalState) {
-      return false;
-    }
-    const prevOpen = lastJournalState.open_position;
-    const nextOpen = incoming.open_position;
-    const prevClosed = Number(lastJournalState.closed_trades_count || 0);
-    const nextClosed = Number(incoming.closed_trades_count || 0);
-    if (!prevOpen && nextOpen) {
-      return true;
-    }
-    if (prevOpen && !nextOpen && nextClosed <= prevClosed) {
-      return true;
-    }
-    if (nextClosed < prevClosed) {
-      return true;
-    }
-    return false;
+  function fetchAndApplyTradeJournal(symbol) {
+    const requestSeq = tradeJournalRequestSeq + 1;
+    tradeJournalRequestSeq = requestSeq;
+    return API.tradeJournal(buildTradeJournalParams(symbol))
+      .then(state => {
+        if (requestSeq !== tradeJournalRequestSeq) {
+          return lastJournalState;
+        }
+        applyJournalState(state, symbol);
+        return state;
+      });
   }
 
   function advanceJournalBarsElapsed(entryStartTradeId, nextBarsElapsed) {
@@ -1880,19 +985,15 @@
   }
 
   function scheduleJournalRefetchForBarsAdvance(symbol) {
-    if (!symbol || !journalHasOpenPosition || journalMutationPending) {
+    if (!symbol || !journalHasOpenPosition) {
       return;
     }
     if (journalBarsRefetchTimer) {
       clearTimeout(journalBarsRefetchTimer);
     }
-    const scheduledGeneration = journalApplyGeneration;
     journalBarsRefetchTimer = setTimeout(() => {
       journalBarsRefetchTimer = null;
-      if (scheduledGeneration !== journalApplyGeneration) {
-        return;
-      }
-      if (!journalHasOpenPosition || journalMutationPending) {
+      if (!journalHasOpenPosition) {
         return;
       }
       fetchAndApplyTradeJournal(symbol);
@@ -1919,47 +1020,17 @@
     return params;
   }
 
-  function fetchAndApplyTradeJournal(symbol) {
-    if (journalMutationPending) {
-      return Promise.resolve(lastJournalState);
-    }
-    const readGeneration = journalApplyGeneration;
-    const requestSeq = tradeJournalRequestSeq + 1;
-    tradeJournalRequestSeq = requestSeq;
-    return API.tradeJournal(buildTradeJournalParams(symbol))
-      .then(state => {
-        if (requestSeq !== tradeJournalRequestSeq) {
-          return lastJournalState;
-        }
-        if (readGeneration !== journalApplyGeneration) {
-          return lastJournalState;
-        }
-        if (journalMutationPending) {
-          return lastJournalState;
-        }
-        if (shouldRejectStaleJournalRead(state)) {
-          return lastJournalState;
-        }
-        applyJournalState(state, symbol);
-        return state;
-      });
-  }
-
   function pollJournalBarsElapsed(symbol, entryStartTradeId) {
-    if (refreshBarsElapsedInFlight || journalMutationPending || !journalHasOpenPosition) {
+    if (refreshBarsElapsedInFlight || !journalHasOpenPosition) {
       return Promise.resolve();
     }
-    const pollGeneration = journalApplyGeneration;
     refreshBarsElapsedInFlight = true;
     return API.tradeJournalBarsElapsed({
       symbol_id: symbol,
       entry_start_trade_id: String(entryStartTradeId),
     })
       .then(data => {
-        if (pollGeneration !== journalApplyGeneration) {
-          return;
-        }
-        if (journalMutationPending || !journalHasOpenPosition) {
+        if (!journalHasOpenPosition) {
           return;
         }
         if (data.bars_elapsed == null) {
@@ -1983,7 +1054,7 @@
 
   function refreshLatestX1Bar() {
     const symbol = symbolSelect.value;
-    if (!symbol || refreshX1BarInFlight || journalMutationPending) {
+    if (!symbol || refreshX1BarInFlight) {
       return Promise.resolve();
     }
     refreshX1BarInFlight = true;
@@ -2030,30 +1101,6 @@
       });
   }
 
-  function buildEntryJournalPayload(side, symbol) {
-    const evalHorizon = resolveJournalEvalHorizon(symbol);
-    let entryPolicy = null;
-    if (lastPolicy) {
-      entryPolicy = {
-        action: lastPolicy.action != null ? String(lastPolicy.action) : null,
-        eval_horizon: lastPolicy.eval_horizon != null ? String(lastPolicy.eval_horizon) : evalHorizon,
-        run_label: lastPolicy.run_label != null ? String(lastPolicy.run_label) : null,
-        probabilities: lastPolicy.probabilities || null,
-        entry_hint: lastEntryHint || null,
-      };
-    }
-    let entryPredictions = null;
-    if (lastPredictions) {
-      entryPredictions = {};
-      Object.keys(lastPredictions).forEach((key) => {
-        const value = Number(lastPredictions[key]);
-        if (Number.isFinite(value)) {
-          entryPredictions[key] = value;
-        }
-      });
-    }
-    return { entryPolicy, entryPredictions };
-  }
 
   function getBarsLimit() {
     return limitInput.value ? parseInt(limitInput.value, 10) : config.defaultLimit;
@@ -2088,44 +1135,6 @@
     return exitPolicy.close_probability != null;
   }
 
-  function applyInferenceExitPolicy(incoming, symbol) {
-    if (!journalHasOpenPosition || journalMutationPending) {
-      return;
-    }
-    if (
-      incoming
-      && incoming.bars_held != null
-      && lastJournalState
-      && lastJournalState.open_position
-      && lastJournalState.open_position.symbol_id === symbol
-      && lastJournalState.open_position.entry_start_trade_id != null
-    ) {
-      const prevBarsElapsed = lastJournalBarsElapsed;
-      const mergedBarsElapsed = advanceJournalBarsElapsed(
-        lastJournalState.open_position.entry_start_trade_id,
-        Number(incoming.bars_held),
-      );
-      if (mergedBarsElapsed != null && (prevBarsElapsed == null || mergedBarsElapsed > prevBarsElapsed)) {
-        scheduleJournalRefetchForBarsAdvance(symbol);
-      }
-    }
-    if (exitPolicyIsRenderable(incoming)) {
-      lastExitPolicy = incoming;
-      if (journalHasOpenPosition && lastJournalState && lastJournalState.open_position) {
-        runExitAlertChecks(lastJournalState.open_position, symbol);
-        startExitCloseAlertTimer();
-        syncJournalRenewSegmentAfterExitPolicy(symbol, incoming);
-      }
-      return;
-    }
-    if (exitStackUsesSignOnlyRenew(symbol) && exitPolicyIsSignOnly(lastExitPolicy)) {
-      return;
-    }
-    if (exitGbmEnabled && exitPolicyIsRenderable(lastExitPolicy)) {
-      return;
-    }
-    lastExitPolicy = incoming || null;
-  }
 
   let refreshExitPolicyRequestSeq = 0;
 
@@ -2143,134 +1152,6 @@
     return renewSegment;
   }
 
-  function buildExitPolicyPayload(symbol, openPos) {
-    if (!openPos || !openPos.side || !openPos.metrics) return null;
-    const m = openPos.metrics;
-    const displayBarsElapsed = resolveDisplayBarsElapsed(openPos);
-    const barsHeld = displayBarsElapsed != null ? displayBarsElapsed : m.bars_elapsed;
-    const exitStack = getExitStackForSymbol(symbol);
-    if (exitStack) {
-      if (!lastPredictions) return null;
-      return {
-        symbol_id: symbol,
-        side: openPos.side,
-        eval_horizon: resolveDeployEvalHorizon(openPos, symbol),
-        bars_held: barsHeld,
-        current_predictions: lastPredictions,
-        exit_stack_mode: String(exitStack.mode),
-        last_renew_segment_evaluated: resolveRenewSegmentEvaluatedForExitPolicy(openPos),
-      };
-    }
-    if (!lastPredictions || !openPos.entry_predictions || !openPos.entry_policy) return null;
-    if (!lastPolicy || !lastPolicy.probabilities) return null;
-    if (!openPos.entry_policy.probabilities) return null;
-    if (!exitPolicyBySymbol[symbol]) return null;
-
-    const linearMetric = (value) => {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return 0;
-      return n / 100.0;
-    };
-
-    return {
-      symbol_id: symbol,
-      side: openPos.side,
-      eval_horizon: openPos.eval_horizon,
-      bars_held: barsHeld,
-      entry_predictions: openPos.entry_predictions,
-      current_predictions: lastPredictions,
-      entry_policy: openPos.entry_policy,
-      current_policy: {
-        action: lastPolicy.action,
-        action_id: lastPolicy.action_id,
-        probabilities: lastPolicy.probabilities,
-      },
-      unrealized_linear: linearMetric(m.unrealized_net_return_pct),
-      mfe_linear: linearMetric(m.mfe_net_return_pct),
-      mae_linear: linearMetric(m.mae_net_return_pct),
-      giveback_linear: linearMetric(m.giveback_net_return_pct),
-    };
-  }
-
-  function buildExitTransformerPayload(symbol, openPos, barsLimit) {
-    if (!openPos || !openPos.side || !openPos.metrics) return null;
-    if (!lastPredictions || !openPos.entry_predictions) return null;
-    if (!exitTransformerBySymbol[symbol]) return null;
-    if (inferenceMinRows > 0 && Number(barsLimit) < inferenceMinRows) return null;
-
-    const m = openPos.metrics;
-    const displayBarsElapsed = resolveDisplayBarsElapsed(openPos);
-    const barsHeld = displayBarsElapsed != null ? displayBarsElapsed : m.bars_elapsed;
-    const linearMetric = (value) => {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return 0;
-      return n / 100.0;
-    };
-
-    return {
-      symbol_id: symbol,
-      side: openPos.side,
-      eval_horizon: openPos.eval_horizon,
-      bars_held: barsHeld,
-      bars_limit: barsLimit,
-      entry_predictions: openPos.entry_predictions,
-      current_predictions: lastPredictions,
-      unrealized_linear: linearMetric(m.unrealized_net_return_pct),
-      mfe_linear: linearMetric(m.mfe_net_return_pct),
-      mae_linear: linearMetric(m.mae_net_return_pct),
-      giveback_linear: linearMetric(m.giveback_net_return_pct),
-    };
-  }
-
-  function refreshExitPolicy(symbol, openPos) {
-    const exitStack = getExitStackForSymbol(symbol);
-    if (!exitGbmEnabled && !exitStack) {
-      lastExitPolicy = null;
-      return Promise.resolve(null);
-    }
-    const payload = buildExitPolicyPayload(symbol, openPos);
-    if (!payload) {
-      return Promise.resolve(lastExitPolicy);
-    }
-    const requestSeq = refreshExitPolicyRequestSeq + 1;
-    refreshExitPolicyRequestSeq = requestSeq;
-    return API.exitPolicy(payload)
-      .then(result => {
-        if (requestSeq !== refreshExitPolicyRequestSeq) {
-          return lastExitPolicy;
-        }
-        if (exitPolicyIsRenderable(result)) {
-          lastExitPolicy = result;
-        }
-        if (journalHasOpenPosition && lastJournalState && lastJournalState.open_position) {
-          runExitAlertChecks(lastJournalState.open_position, symbol);
-          startExitCloseAlertTimer();
-        }
-        return lastExitPolicy;
-      })
-      .catch(() => lastExitPolicy);
-  }
-
-  function refreshExitTransformer(symbol, openPos, barsLimit) {
-    if (!exitTransformerEnabled) {
-      lastExitTransformer = null;
-      return Promise.resolve(null);
-    }
-    const payload = buildExitTransformerPayload(symbol, openPos, barsLimit);
-    if (!payload) {
-      lastExitTransformer = null;
-      return Promise.resolve(null);
-    }
-    return API.exitTransformer(payload)
-      .then(result => {
-        lastExitTransformer = result;
-        return result;
-      })
-      .catch(() => {
-        lastExitTransformer = null;
-        return null;
-      });
-  }
 
   function formatSignOnlyExitReason(exitReason) {
     const reason = String(exitReason || '');
@@ -2363,24 +1244,6 @@
     return Number(openPos.last_renew_segment_evaluated);
   }
 
-  function syncJournalRenewSegmentAfterExitPolicy(symbol, exitPolicy) {
-    if (
-      !exitPolicy
-      || exitPolicy.last_renew_segment_evaluated == null
-      || !lastJournalState
-      || !lastJournalState.open_position
-      || lastJournalState.open_position.symbol_id !== symbol
-    ) {
-      return Promise.resolve();
-    }
-    const openPos = lastJournalState.open_position;
-    const prevRenewSegment = openPositionRenewSegmentEvaluated(openPos);
-    const nextRenewSegment = Number(exitPolicy.last_renew_segment_evaluated);
-    if (nextRenewSegment === prevRenewSegment) {
-      return Promise.resolve();
-    }
-    return fetchAndApplyTradeJournal(symbol);
-  }
 
   function renderSignOnlyRenewMetrics(openPos, m, symbol) {
     const deployHorizon = resolveDeployEvalHorizon(openPos, symbol);
@@ -2478,42 +1341,6 @@
     `;
   }
 
-  function renderExitTransformerCard(exitTransformer) {
-    if (!exitTransformer || exitTransformer.predicted_delta_pnl == null) return '';
-
-    const deltaPnl = Number(exitTransformer.predicted_delta_pnl);
-    const threshold = Number(exitTransformer.delta_pnl_threshold);
-    const deltaPct = Number.isFinite(deltaPnl) ? formatPct(deltaPnl * 100) : '—';
-    const thresholdPct = Number.isFinite(threshold) ? formatPct(threshold * 100) : '—';
-    const action = String(exitTransformer.action || 'hold').toUpperCase();
-    const runLabel = exitTransformer.run_label || '—';
-    const minHold = exitTransformer.min_hold_steps != null ? exitTransformer.min_hold_steps : '—';
-    const barsHeld = exitTransformer.bars_held != null ? exitTransformer.bars_held : '—';
-    let actionClass = 'exit-policy-hold';
-    if (action === 'CLOSE') actionClass = 'exit-policy-close';
-
-    return `
-      <div class="exit-policy-card exit-policy-transformer ${actionClass}">
-        <div class="exit-policy-action">Exit Transformer v2: ${action}</div>
-        <div class="exit-policy-meta">
-          <span>Δpnl: <strong>${deltaPct}</strong> / порог ${thresholdPct}</span>
-          <span>stack: <strong>${runLabel}</strong></span>
-          <span>бары: <strong>${barsHeld}</strong> (min ${minHold})</span>
-        </div>
-      </div>
-    `;
-  }
-
-  function applyJournalDefaultsFromState(state) {
-    if (state.defaults) {
-      journalDefaults = state.defaults;
-      if (!loadJournalSettingsFromStorage()) {
-        if (JOURNAL_EVAL_HORIZON_OPTIONS.includes(journalDefaults.eval_horizon)) {
-          journalEvalHorizonSelect.value = journalDefaults.eval_horizon;
-        }
-      }
-    }
-  }
 
   function syncJournalBarsElapsedFromState(state) {
     const openPos = state.open_position;
@@ -2546,43 +1373,6 @@
     ) {
       scheduleJournalRefetchForBarsAdvance(symbol);
     }
-    applyJournalDefaultsFromState(state);
-    const shouldRefreshExitPolicy = !tradingEnabled
-      && openPos
-      && openPos.symbol_id === symbol
-      && (exitGbmEnabled || getExitStackForSymbol(symbol))
-      && lastPredictions;
-    if (shouldRefreshExitPolicy) {
-      const applyGeneration = journalApplyGeneration;
-      const entryStartTradeId = openPos.entry_start_trade_id;
-      renderTradeJournal(state, symbol);
-      return refreshExitPolicy(symbol, openPos).then((exitPolicy) => {
-        if (applyGeneration !== journalApplyGeneration) {
-          return;
-        }
-        if (journalMutationPending) {
-          return;
-        }
-        return syncJournalRenewSegmentAfterExitPolicy(symbol, exitPolicy).then(() => {
-          if (applyGeneration !== journalApplyGeneration) {
-            return;
-          }
-          if (journalMutationPending) {
-            return;
-          }
-          if (!lastJournalState || !lastJournalState.open_position) {
-            return;
-          }
-          if (Number(lastJournalState.open_position.entry_start_trade_id) !== Number(entryStartTradeId)) {
-            return;
-          }
-          renderTradeJournal(lastJournalState, symbol);
-          if (lastJournalBarsElapsed == null) {
-            pollJournalBarsElapsed(symbol, Number(entryStartTradeId));
-          }
-        });
-      });
-    }
     renderTradeJournal(state, symbol);
     if (
       openPos
@@ -2592,8 +1382,8 @@
     ) {
       pollJournalBarsElapsed(symbol, Number(openPos.entry_start_trade_id));
     }
-    return Promise.resolve();
   }
+
 
   function rerenderTradeJournalIfOpen(symbol) {
     if (!lastJournalState || !journalHasOpenPosition || !symbol) {
@@ -2607,7 +1397,7 @@
   }
 
   function refreshTradeJournal(symbol) {
-    if (!symbol || refreshJournalInFlight || journalMutationPending) {
+    if (!symbol || refreshJournalInFlight) {
       return Promise.resolve();
     }
     refreshJournalInFlight = true;
@@ -2628,7 +1418,7 @@
 
   function refreshJournalBarsElapsedOnly() {
     const symbol = symbolSelect.value;
-    if (!symbol || !journalHasOpenPosition || !lastJournalState || journalMutationPending) {
+    if (!symbol || !journalHasOpenPosition || !lastJournalState) {
       return Promise.resolve();
     }
     const openPos = lastJournalState.open_position;
@@ -2646,17 +1436,6 @@
     lastJournalState = state;
     const openPos = state.open_position;
     journalHasOpenPosition = Boolean(openPos);
-    if (!openPos) {
-      stopExitCloseAlertTimer();
-      resetExitAlertTimingState();
-    } else {
-      if (!tradingEnabled) {
-        startExitCloseAlertTimer();
-      }
-    }
-    if (openPos) {
-      resetEntryAllowedAlertState();
-    }
     const closedTrades = state.closed_trades || [];
     const totalPnl = state.total_realized_pnl_usd;
     const closedCount = state.closed_trades_count || 0;
@@ -2664,58 +1443,29 @@
     const cashBalance = state.cash_balance_usd != null
       ? Number(state.cash_balance_usd)
       : (tradingInitialBalanceUsd + Number(totalPnl || 0));
-    if (tradingEnabled) {
-      tradeJournalTotals.textContent = `Balance: ${formatUsd(cashBalance)} · Realized: ${formatUsd(totalPnl)} · Closed: ${closedCount}`;
-    } else {
-      tradeJournalTotals.textContent = `Закрыто: ${closedCount} · Realized: ${formatUsd(totalPnl)}`;
-    }
 
-    if (tradingEnabled && hasOpen && openPos.daemon_last_exit_policy) {
+    tradeJournalTotals.textContent = `Balance: ${formatUsd(cashBalance)} · Realized: ${formatUsd(totalPnl)} · Closed: ${closedCount}`;
+
+    if (hasOpen && openPos.daemon_last_exit_policy) {
       lastExitPolicy = openPos.daemon_last_exit_policy;
+    } else if (!hasOpen) {
+      lastExitPolicy = null;
     }
 
-    const policySide = policyActionToSide(lastPolicy && lastPolicy.action);
     const sideLabel = hasOpen ? openPos.side.toUpperCase() : 'FLAT';
     const sideClass = hasOpen ? (openPos.side === 'long' ? 'position-long' : 'position-short') : 'position-flat';
 
     let metricsHtml = '';
-    let alertHtml = '';
-    if (tradingEnabled) {
-      alertHtml = '';
-    }
+    let infoHtml = '';
     if (hasOpen && openPos.metrics) {
       const m = openPos.metrics;
       const displayBarsElapsed = resolveDisplayBarsElapsed(openPos);
-      if (!tradingEnabled) {
-        runExitAlertChecks(openPos, symbol);
-      }
-      updateExitOverlaySession(openPos);
       const progressClass = m.at_target_horizon ? 'at-target' : '';
       const evalHorizonLabel = resolveDeployEvalHorizon(openPos, symbol);
       const signOnlyRenew = exitStackUsesSignOnlyRenew(symbol) || Boolean(m.sign_only_renew);
       const renewUi = signOnlyRenew ? resolveSignOnlyRenewUi(lastExitPolicy, m) : null;
-      if (!tradingEnabled) {
-        alertHtml = m.at_target_horizon && !signOnlyRenew
-          ? `<div class="trade-journal-alert">⚠ Достигнут горизонт ${evalHorizonLabel} — по policy пора выходить</div>`
-          : '';
-        if (renewUi && renewUi.infoHtml) {
-          alertHtml += renewUi.infoHtml;
-        }
-        if (exitGbmEnabled && lastExitPolicy && lastExitPolicy.suggest_close
-          && lastExitPolicy.mode !== 'rolling_h_renew_sign_only') {
-          const thresholdPct = (Number(lastExitPolicy.close_probability_threshold) * 100).toFixed(1);
-          const pClosePct = (Number(lastExitPolicy.close_probability) * 100).toFixed(1);
-          alertHtml += `<div class="trade-journal-alert">⏹ Exit GBM: P(close)=${pClosePct}% ≥ ${thresholdPct}% — рассмотри ранний выход</div>`;
-        }
-        if (exitTransformerEnabled && lastExitTransformer && lastExitTransformer.suggest_close) {
-          const thresholdPct = formatPct(Number(lastExitTransformer.delta_pnl_threshold) * 100);
-          const deltaPct = formatPct(Number(lastExitTransformer.predicted_delta_pnl) * 100);
-          alertHtml += `<div class="trade-journal-alert">⏹ Exit Transformer v2: Δpnl=${deltaPct} > ${thresholdPct} — рассмотри ранний выход</div>`;
-        }
-        const policySideNow = policyActionToSide(lastPolicy && lastPolicy.action);
-        if (policySideNow && policySideNow !== openPos.side) {
-          alertHtml += `<div class="trade-journal-alert">↔ Policy flip → ${policySideNow.toUpperCase()}, открыт ${String(openPos.side).toUpperCase()} — рассмотри exit</div>`;
-        }
+      if (renewUi && renewUi.infoHtml) {
+        infoHtml = renewUi.infoHtml;
       }
       const mfeLine = m.mfe_net_return_pct != null
         ? `<span>MFE: <strong class="${pnlClass(m.mfe_pnl_usd)}">${formatPct(m.mfe_net_return_pct)} (${formatUsd(m.mfe_pnl_usd)})</strong></span>`
@@ -2746,7 +1496,6 @@
       `;
       metricsHtml = `
         ${renderExitPolicyCard(lastExitPolicy, displayBarsElapsed)}
-        ${renderExitTransformerCard(lastExitTransformer)}
         ${renderEntryPredictionMetrics(openPos, m, symbol)}
         ${renewMetricsHtml}
         <div class="trade-journal-metrics">
@@ -2773,10 +1522,7 @@
           <span>Mark / бары: <strong>загрузка…</strong></span>
         </div>
       `;
-    } else if (!hasOpen) {
-      resetHorizonAlertState();
-      resetExitGbmAlertState();
-      resetExitTransformerAlertState();
+    } else {
       const hintRecommended = lastEntryHint && lastEntryHint.recommended_action
         ? String(lastEntryHint.recommended_action).toUpperCase()
         : null;
@@ -2794,66 +1540,11 @@
         const hintLabel = lastEntryHint.hint_mode === 'hybrid_gate_snr'
           ? 'Hybrid gate'
           : 'SNR gate';
-        alertHtml += `<div class="trade-journal-alert">⏸ ${hintLabel}: ${blockReason}</div>`;
+        infoHtml = `<div class="trade-journal-info">⏸ ${hintLabel}: ${blockReason}</div>`;
       }
     }
 
-    syncJournalSettingsDisabled(hasOpen);
-    updateJournalActionStatusUi();
-    const isPolicyOnlyHint = lastEntryHint && lastEntryHint.hint_mode === 'policy_only';
-    const snrAllowLong = isPolicyOnlyHint
-      || !lastEntryHint
-      || lastEntryHint.allow_long !== false;
-    const snrAllowShort = isPolicyOnlyHint
-      || !lastEntryHint
-      || lastEntryHint.allow_short !== false;
-    const entryFillReady = journalEntryFillValid();
-    const exitFillReady = journalExitFillValid();
-    const actionsLocked = journalActionPending !== null;
-    const canEnterLong = !actionsLocked && !hasOpen && policySide === 'long' && snrAllowLong && entryFillReady;
-    const canEnterShort = !actionsLocked && !hasOpen && policySide === 'short' && snrAllowShort && entryFillReady;
-    const canEnterManual = !actionsLocked && !hasOpen && !policySide && entryFillReady;
-    const canExit = !actionsLocked && hasOpen && exitFillReady;
-    const canDiscard = !actionsLocked && hasOpen;
-
-    const longLabel = journalActionPending && journalActionPending.actionKey === 'entry-long'
-      ? 'Входим LONG…'
-      : 'Вошёл LONG';
-    const shortLabel = journalActionPending && journalActionPending.actionKey === 'entry-short'
-      ? 'Входим SHORT…'
-      : 'Вошёл SHORT';
-    const exitLabel = journalActionPending && journalActionPending.actionKey === 'exit'
-      ? 'Выходим…'
-      : 'Вышел';
-    const discardLabel = journalActionPending && journalActionPending.actionKey === 'discard'
-      ? 'Сброс…'
-      : 'Сброс';
-
-    const longLoadingClass = journalActionPending && journalActionPending.actionKey === 'entry-long' ? ' is-loading' : '';
-    const shortLoadingClass = journalActionPending && journalActionPending.actionKey === 'entry-short' ? ' is-loading' : '';
-    const exitLoadingClass = journalActionPending && journalActionPending.actionKey === 'exit' ? ' is-loading' : '';
-    const discardLoadingClass = journalActionPending && journalActionPending.actionKey === 'discard' ? ' is-loading' : '';
-
-    const actionsHtml = tradingEnabled ? '' : `
-      <div class="trade-journal-actions">
-        <button type="button" id="btnJournalEntryLong" class="btn-entry-long${longLoadingClass}" ${canEnterLong || canEnterManual ? '' : 'disabled'} title="${canEnterLong ? '' : (!entryFillReady && !hasOpen ? 'Укажите цену и notional с биржи' : (policySide === 'long' && !snrAllowLong ? 'Entry hint: подождать' : ''))}">
-          ${longLabel}
-        </button>
-        <button type="button" id="btnJournalEntryShort" class="btn-entry-short${shortLoadingClass}" ${canEnterShort || canEnterManual ? '' : 'disabled'} title="${canEnterShort ? '' : (!entryFillReady && !hasOpen ? 'Укажите цену и notional с биржи' : (policySide === 'short' && !snrAllowShort ? 'Entry hint: подождать' : ''))}">
-          ${shortLabel}
-        </button>
-        <button type="button" id="btnJournalExit" class="btn-exit${exitLoadingClass}" ${canExit ? '' : 'disabled'} title="${canExit ? '' : (hasOpen && !exitFillReady ? 'Укажите цену выхода с биржи' : '')}">
-          ${exitLabel}
-        </button>
-        <button type="button" id="btnJournalDiscard"${discardLoadingClass ? ` class="btn-discard${discardLoadingClass}"` : ''} ${canDiscard ? '' : 'disabled'} title="Сбросить без записи в историю">
-          ${discardLabel}
-        </button>
-      </div>
-    `;
-
-    const equityCurveHtml = tradingEnabled
-      ? renderEquityCurveSvg(state.equity_curve)
-      : '';
+    const equityCurveHtml = renderEquityCurveSvg(state.equity_curve);
 
     let historyHtml = '';
     if (closedTrades.length > 0) {
@@ -2888,164 +1579,16 @@
     tradeJournalContent.innerHTML = `
       <div class="trade-journal-card ${sideClass}">
         <div class="trade-journal-side">${sideLabel}${hasOpen ? ` · ${openPos.symbol_id}` : ''}</div>
-        ${alertHtml}
+        ${infoHtml}
         ${metricsHtml}
-        ${actionsHtml}
       </div>
       ${equityCurveHtml}
       ${historyHtml}
     `;
 
-    if (!tradingEnabled) {
-      const btnLong = document.getElementById('btnJournalEntryLong');
-    const btnShort = document.getElementById('btnJournalEntryShort');
-    const btnExit = document.getElementById('btnJournalExit');
-    const btnDiscard = document.getElementById('btnJournalDiscard');
-
-    if (btnLong) {
-      btnLong.addEventListener('click', () => handleJournalEntry(symbol, 'long'));
-    }
-    if (btnShort) {
-      btnShort.addEventListener('click', () => handleJournalEntry(symbol, 'short'));
-    }
-    if (btnExit) {
-      btnExit.addEventListener('click', () => handleJournalExit(symbol));
-    }
-    if (btnDiscard) {
-      btnDiscard.addEventListener('click', () => handleJournalDiscard(symbol));
-    }
-    }
-
     isFirstJournalLoad = false;
   }
 
-  function handleJournalEntry(symbol, side) {
-    if (journalActionPending) return;
-    if (!latestX1Bar) {
-      setStatus('Нет x1-бара для привязки по времени', true);
-      return;
-    }
-    const entryPrice = parseJournalFillPrice();
-    const notionalUsd = parseJournalNotionalUsd();
-    if (entryPrice === null || notionalUsd === null) {
-      setStatus('Укажите цену и notional с биржи', true);
-      return;
-    }
-    const actionKey = side === 'long' ? 'entry-long' : 'entry-short';
-    const pendingMessage = side === 'long' ? 'Входим LONG…' : 'Входим SHORT…';
-    setJournalActionPending({ actionKey, message: pendingMessage });
-    setStatus('Запись входа…');
-    beginJournalMutation();
-
-    const policyAction = lastPolicy && lastPolicy.action ? String(lastPolicy.action).toUpperCase() : null;
-    const evalHorizon = resolveJournalEvalHorizon(symbol);
-    const entrySnapshot = buildEntryJournalPayload(side, symbol);
-    const exitStack = getExitStackForSymbol(symbol);
-
-    API.tradeJournalEntry({
-      symbol_id: symbol,
-      side,
-      entry_price: entryPrice,
-      entry_start_trade_id: Number(latestX1Bar.start_trade_id),
-      entry_timestamp_ms: Number(latestX1Bar.start_timestamp_ms),
-      eval_horizon: evalHorizon,
-      notional_usd: notionalUsd,
-      policy_action: policyAction,
-      notes: '',
-      entry_policy: entrySnapshot.entryPolicy,
-      entry_predictions: entrySnapshot.entryPredictions,
-      exit_stack_mode: exitStack && exitStack.mode ? String(exitStack.mode) : null,
-      exit_stack_eval_horizon: exitStack && exitStack.eval_horizon
-        ? String(exitStack.eval_horizon)
-        : null,
-      exit_stack_min_hold_steps: exitStack && exitStack.min_hold_steps != null
-        ? Number(exitStack.min_hold_steps)
-        : null,
-    })
-      .then((state) => {
-        resetJournalFillFields();
-        resetHorizonAlertState();
-        resetExitGbmAlertState();
-        resetExitTransformerAlertState();
-        resetExitOverlaySession();
-        setJournalActionPending(null);
-        finishJournalMutation(state, symbol);
-        setStatus('Вход записан');
-      })
-      .catch(e => {
-        journalMutationPending = false;
-        setJournalActionPending(null);
-        setStatus('Entry: ' + parseErrorDetail(e.message), true);
-      });
-  }
-
-  function handleJournalExit(symbol) {
-    if (journalActionPending) return;
-    if (!latestX1Bar) {
-      setStatus('Нет x1-бара для привязки по времени', true);
-      return;
-    }
-    const exitPrice = parseJournalFillPrice();
-    if (exitPrice === null) {
-      setStatus('Укажите цену выхода с биржи', true);
-      return;
-    }
-    setJournalActionPending({ actionKey: 'exit', message: 'Выходим…' });
-    setStatus('Запись выхода…');
-    beginJournalMutation();
-
-    API.tradeJournalExit({
-      exit_price: exitPrice,
-      exit_start_trade_id: Number(latestX1Bar.start_trade_id),
-      exit_timestamp_ms: Number(latestX1Bar.end_timestamp_ms || latestX1Bar.start_timestamp_ms),
-      notes: '',
-      exit_overlay: buildExitOverlayPayloadForClose(),
-    })
-      .then((state) => {
-        resetJournalFillFields();
-        resetHorizonAlertState();
-        resetExitGbmAlertState();
-        resetExitTransformerAlertState();
-        resetExitOverlaySession();
-        resetJournalBarsElapsedCache();
-        lastExitPolicy = null;
-        setJournalActionPending(null);
-        finishJournalMutation(state, symbol);
-        setStatus('Выход записан');
-      })
-      .catch(e => {
-        journalMutationPending = false;
-        setJournalActionPending(null);
-        setStatus('Exit: ' + parseErrorDetail(e.message), true);
-      });
-  }
-
-  function handleJournalDiscard(symbol) {
-    if (journalActionPending) return;
-    if (!window.confirm('Сбросить открытую позицию без записи в историю?')) return;
-    setJournalActionPending({ actionKey: 'discard', message: 'Сброс…' });
-    setStatus('Сброс позиции…');
-    beginJournalMutation();
-
-    API.tradeJournalDiscardOpen()
-      .then((state) => {
-        resetJournalFillFields();
-        resetHorizonAlertState();
-        resetExitGbmAlertState();
-        resetExitTransformerAlertState();
-        resetExitOverlaySession();
-        resetJournalBarsElapsedCache();
-        lastExitPolicy = null;
-        setJournalActionPending(null);
-        finishJournalMutation(state, symbol);
-        setStatus('Позиция сброшена');
-      })
-      .catch(e => {
-        journalMutationPending = false;
-        setJournalActionPending(null);
-        setStatus('Discard: ' + parseErrorDetail(e.message), true);
-      });
-  }
 
   function isDowLevel(value) {
     return typeof value === 'string' && /^Уровень \d+$/.test(value);
@@ -4380,7 +2923,6 @@
     if (journalRefreshTimer) clearInterval(journalRefreshTimer);
     if (journalBarsElapsedTimer) clearInterval(journalBarsElapsedTimer);
     if (x1BarRefreshTimer) clearInterval(x1BarRefreshTimer);
-    stopExitCloseAlertTimer();
     inferenceRefreshTimer = null;
     journalRefreshTimer = null;
     journalBarsElapsedTimer = null;
@@ -4519,17 +3061,12 @@
       inferenceErrorBySymbolAndHorizon = config.inferenceErrorBySymbolAndHorizon || {};
       policyBySymbol = config.policyBySymbol || {};
       exitPolicyBySymbol = config.exitPolicyBySymbol || {};
-      exitTransformerBySymbol = config.exitTransformerBySymbol || {};
       exitStackBySymbol = config.exitStackBySymbol || {};
       entryHintModeBySymbol = config.entryHintModeBySymbol || {};
       entryConfidenceMarginBySymbol = config.entryConfidenceMarginBySymbol || {};
-      exitGbmEnabled = Boolean(config.exitGbmEnabled);
-      exitTransformerEnabled = Boolean(config.exitTransformerEnabled);
-      tradingEnabled = Boolean(config.tradingEnabled);
       if (config.tradingInitialBalanceUsd != null) {
         tradingInitialBalanceUsd = Number(config.tradingInitialBalanceUsd);
       }
-      applyTradingEnabledUi();
       checkpointPathBySymbol = config.checkpointPathBySymbol || {};
       if (config.tradeResearchEvalHorizon) {
         tradeResearchEvalHorizon = String(config.tradeResearchEvalHorizon);
@@ -4549,13 +3086,6 @@
       startAssetVersionPoll(loadedAssetVersion);
       await initDropdowns();
       initCvdWindowDropdown();
-      initJournalSettingsControls();
-      initJournalSoundControls();
-      const initSymbol = symbolSelect.value;
-      if (initSymbol) {
-        setJournalEvalHorizon(resolveJournalEvalHorizon(initSymbol));
-      }
-      requestNotificationPermissionIfNeeded();
       chartDiv.style.height = '100%';
       volumeCanvas.width = volumePanel.clientWidth;
       volumeCanvas.height = volumePanel.clientHeight;
