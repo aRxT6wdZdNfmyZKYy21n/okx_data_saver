@@ -31,10 +31,49 @@ from trading_bot_dataset.src.stateful_inference_dataset import (
 logger = logging.getLogger(__name__)
 
 
+def _log_stateful_dataset_module_path() -> None:
+    import trading_bot_dataset.src.stateful_inference_common as stateful_common_module
+
+    logger.info(
+        'Stateful dataset module path: %s',
+        stateful_common_module.__file__,
+    )
+
+
+def _apply_incremental_delta(
+    stateful: StatefulHybridTradeDatasetInference,
+    delta: polars.DataFrame,
+) -> None:
+    remaining = delta
+    if remaining.height > 1:
+        first_start_trade_id = int(remaining['start_trade_id'][0])
+        if first_start_trade_id == stateful.last_start_trade_id:
+            refresh_result = stateful.apply_x1_delta(remaining.head(1))
+            logger.info(
+                'Stateful delta refresh step: action=%s rows=%d duration_ms=%d',
+                refresh_result.action,
+                refresh_result.rows_affected,
+                refresh_result.duration_ms,
+            )
+            remaining = remaining.tail(remaining.height - 1)
+
+    if remaining.height == 0:
+        return
+
+    append_result = stateful.apply_x1_delta(remaining)
+    logger.info(
+        'Stateful delta append step: action=%s rows=%d duration_ms=%d',
+        append_result.action,
+        append_result.rows_affected,
+        append_result.duration_ms,
+    )
+
+
 def prepare_stateful_inference_context(
     symbol_id: str,
 ) -> tuple[dict, dict[str, int | float]]:
     started_at = time.monotonic()
+    _log_stateful_dataset_module_path()
     symbol = SymbolId[symbol_id]
     metadata = fetch_inference_metadata()
     config = build_stateful_inference_config(metadata)
@@ -78,12 +117,9 @@ def prepare_stateful_inference_context(
             delta = polars.DataFrame()
         if delta.height > 0:
             try:
-                delta_result = stateful.apply_x1_delta(delta)
-                logger.info(
-                    'Stateful delta applied: action=%s rows=%d duration_ms=%d',
-                    delta_result.action,
-                    delta_result.rows_affected,
-                    delta_result.duration_ms,
+                _apply_incremental_delta(
+                    stateful=stateful,
+                    delta=delta,
                 )
             except DatasetContinuityError as exception:
                 logger.error(
