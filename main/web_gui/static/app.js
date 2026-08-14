@@ -213,7 +213,7 @@
     if (openPos && openPos.eval_horizon) {
       return String(openPos.eval_horizon);
     }
-    return resolveJournalEvalHorizon(symbol);
+    return tradeResearchEvalHorizon || 'x32';
   }
 
 
@@ -249,10 +249,6 @@
       </div>
     `;
   }
-
-
-  resetExitOverlaySession();
-
 
   function setStatus(text, isError = false) {
     statusEl.textContent = text;
