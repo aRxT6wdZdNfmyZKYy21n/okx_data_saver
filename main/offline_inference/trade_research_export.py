@@ -17,6 +17,7 @@ from main.offline_inference.trade_research_payload_dataloader_common import (
     InferenceSamplePayloadDataset,
     TrainSamplePayloadDataset,
     build_trade_research_payload_dataloader,
+    payload_dicts_from_loader_batch,
 )
 from main.offline_inference.paths import (
     trade_research_horizon_dir,
@@ -275,7 +276,10 @@ def _run_batch_inference(
         prefetch_factor=prefetch_factor,
     )
     total_chunks = len(payload_loader)
-    for chunk_index, (chunk_sample_indices, chunk_payloads) in enumerate(payload_loader):
+    for chunk_index, loader_batch in enumerate(payload_loader):
+        chunk_sample_indices, chunk_payloads = payload_dicts_from_loader_batch(
+            loader_batch,
+        )
         chunk_results = _call_inference_batch_api(
             samples=chunk_payloads,
             symbol_id=symbol_id,
@@ -331,7 +335,10 @@ def _run_batch_inference_inference(
         prefetch_factor=prefetch_factor,
     )
     total_chunks = len(payload_loader)
-    for chunk_index, (chunk_sample_indices, chunk_payloads) in enumerate(payload_loader):
+    for chunk_index, loader_batch in enumerate(payload_loader):
+        chunk_sample_indices, chunk_payloads = payload_dicts_from_loader_batch(
+            loader_batch,
+        )
         chunk_results = _call_inference_batch_api(
             samples=chunk_payloads,
             symbol_id=symbol_id,
@@ -747,6 +754,7 @@ def run_trade_research_export(
     dataset = _build_dataset(
         df,
         metadata,
+        inference_build_sample_index=None,
     )
     train_dataset, raw_to_train_level0_row = _build_train_level0_context(
         df=df,

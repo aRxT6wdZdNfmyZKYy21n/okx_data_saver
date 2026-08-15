@@ -857,6 +857,7 @@ def run_trade_research(
     dataset = _build_dataset(
         df,
         metadata,
+        inference_build_sample_index=None,
     )
     train_dataset, raw_to_train_level0_row = _build_train_level0_context(
         df=df,

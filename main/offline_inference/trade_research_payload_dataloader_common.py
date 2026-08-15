@@ -1,22 +1,42 @@
 from __future__ import annotations
 
+import torch
 from torch.utils.data import DataLoader, Dataset
 
 from main.web_gui.inference_service import (
-    _prepare_payload_dict_from_sample,
-    _prepare_payload_dict_from_train_sample,
+    _payload_dicts_from_batched_tensors,
 )
 
 
-def _payload_batch_collate(
-    batch: list[tuple[int, dict[str, object]]],
-) -> tuple[list[int], list[dict[str, object]]]:
+SampleTensorBatch = tuple[
+    list[int],
+    dict[str, torch.Tensor],
+    torch.Tensor,
+]
+
+SampleTensorItem = tuple[int, dict[str, torch.Tensor], torch.Tensor]
+
+
+def _payload_tensor_batch_collate(
+    batch: list[SampleTensorItem],
+) -> SampleTensorBatch:
     sample_indices = [item[0] for item in batch]
-    payloads = [item[1] for item in batch]
-    return sample_indices, payloads
+    scale_names = batch[0][1].keys()
+    batched_x_seq = {
+        scale_name: torch.stack(
+            [item[1][scale_name] for item in batch],
+            dim=0,
+        )
+        for scale_name in scale_names
+    }
+    batched_x_static = torch.stack(
+        [item[2] for item in batch],
+        dim=0,
+    )
+    return sample_indices, batched_x_seq, batched_x_static
 
 
-class TrainSamplePayloadDataset(Dataset[tuple[int, dict[str, object]]]):
+class TrainSamplePayloadDataset(Dataset[SampleTensorItem]):
     def __init__(
         self,
         train_dataset: object,
@@ -30,17 +50,14 @@ class TrainSamplePayloadDataset(Dataset[tuple[int, dict[str, object]]]):
     def __len__(self) -> int:
         return len(self._sample_indices)
 
-    def __getitem__(self, index: int) -> tuple[int, dict[str, object]]:
+    def __getitem__(self, index: int) -> SampleTensorItem:
         sample_index = self._sample_indices[index]
         train_sample_index = self._train_sample_index_by_inference_sample[sample_index]
-        payload = _prepare_payload_dict_from_train_sample(
-            train_dataset=self._train_dataset,
-            train_sample_index=train_sample_index,
-        )
-        return sample_index, payload
+        x_seq, x_static, _targets = self._train_dataset[train_sample_index]
+        return sample_index, x_seq, x_static
 
 
-class InferenceSamplePayloadDataset(Dataset[tuple[int, dict[str, object]]]):
+class InferenceSamplePayloadDataset(Dataset[SampleTensorItem]):
     def __init__(
         self,
         inference_dataset: object,
@@ -52,21 +69,18 @@ class InferenceSamplePayloadDataset(Dataset[tuple[int, dict[str, object]]]):
     def __len__(self) -> int:
         return len(self._sample_indices)
 
-    def __getitem__(self, index: int) -> tuple[int, dict[str, object]]:
+    def __getitem__(self, index: int) -> SampleTensorItem:
         sample_index = self._sample_indices[index]
-        payload = _prepare_payload_dict_from_sample(
-            dataset=self._inference_dataset,
-            sample_index=sample_index,
-        )
-        return sample_index, payload
+        x_seq, x_static = self._inference_dataset[sample_index]
+        return sample_index, x_seq, x_static
 
 
 def build_trade_research_payload_dataloader(
-    payload_dataset: Dataset[tuple[int, dict[str, object]]],
+    payload_dataset: Dataset[SampleTensorItem],
     batch_size: int,
     num_workers: int,
     prefetch_factor: int,
-) -> DataLoader[tuple[int, dict[str, object]]]:
+) -> DataLoader[SampleTensorBatch]:
     if batch_size <= 0:
         raise ValueError(f'batch_size must be positive, got: {batch_size}')
     if num_workers < 0:
@@ -80,10 +94,21 @@ def build_trade_research_payload_dataloader(
         'shuffle': False,
         'num_workers': num_workers,
         'drop_last': False,
-        'collate_fn': _payload_batch_collate,
+        'collate_fn': _payload_tensor_batch_collate,
     }
     if num_workers > 0:
         loader_kwargs['prefetch_factor'] = prefetch_factor
         loader_kwargs['persistent_workers'] = True
         loader_kwargs['multiprocessing_context'] = 'spawn'
     return DataLoader(payload_dataset, **loader_kwargs)
+
+
+def payload_dicts_from_loader_batch(
+    batch: SampleTensorBatch,
+) -> tuple[list[int], list[dict[str, object]]]:
+    sample_indices, batched_x_seq, batched_x_static = batch
+    payloads = _payload_dicts_from_batched_tensors(
+        batched_x_seq=batched_x_seq,
+        batched_x_static=batched_x_static,
+    )
+    return sample_indices, payloads

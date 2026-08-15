@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import logging
 import pickle
 import sys
@@ -133,18 +134,25 @@ def main() -> None:
     )
     volume_windows_config = extract_volume_windows_config(dataset_cfg)
 
+    dataset_kwargs: dict[str, object] = {
+        'dataframe': raw_df,
+        'sequence_length': int(metadata['sequence_length']),
+        'raw_columns': list(dataset_cfg['raw_cols']),
+        'static_columns': list(dataset_cfg['static_cols']),
+        'target_cols': list(dataset_cfg['target_cols']),
+        'aggregation_levels': list(dataset_cfg['aggregation_levels']),
+        'use_indicators': bool(dataset_cfg['use_indicators']),
+        'indicator_cols': list(dataset_cfg['indicator_cols']),
+        'model_config': model_cfg,
+        'inference_mode': False,
+        'volume_windows_config': volume_windows_config,
+    }
+    init_params = inspect.signature(HybridTradeDataset.__init__).parameters
+    if 'inference_build_sample_index' in init_params:
+        dataset_kwargs['inference_build_sample_index'] = None
+
     train_dataset = HybridTradeDataset(
-        dataframe=raw_df,
-        sequence_length=int(metadata['sequence_length']),
-        raw_columns=list(dataset_cfg['raw_cols']),
-        static_columns=list(dataset_cfg['static_cols']),
-        target_cols=list(dataset_cfg['target_cols']),
-        aggregation_levels=list(dataset_cfg['aggregation_levels']),
-        use_indicators=bool(dataset_cfg['use_indicators']),
-        indicator_cols=list(dataset_cfg['indicator_cols']),
-        model_config=model_cfg,
-        inference_mode=False,
-        volume_windows_config=volume_windows_config,
+        **dataset_kwargs,
     )
 
     level0_to_raw = _build_level0_to_raw_row_indices(

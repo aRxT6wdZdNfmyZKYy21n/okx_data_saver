@@ -5,6 +5,7 @@ import traceback
 import httpx
 import numpy as np
 import polars
+import torch
 from fastapi import HTTPException
 from omegaconf import OmegaConf
 
@@ -91,11 +92,13 @@ def fetch_inference_metadata() -> dict:
 def _build_dataset(
     df: polars.DataFrame,
     metadata: dict,
+    inference_build_sample_index: int | None,
 ) -> HybridTradeDatasetInference:
     _ensure_trading_bot_root_on_path()
     dataset_kwargs = _hybrid_dataset_kwargs_from_metadata(metadata)
     return HybridTradeDatasetInference(
         dataframe=df,
+        inference_build_sample_index=inference_build_sample_index,
         **dataset_kwargs,
     )
 
@@ -109,6 +112,7 @@ def _build_train_dataset(
     return HybridTradeDataset(
         dataframe=df,
         inference_mode=False,
+        inference_build_sample_index=None,
         **dataset_kwargs,
     )
 
@@ -212,6 +216,31 @@ def _prepare_payload_dict_from_train_sample(
     }
 
 
+def _payload_dicts_from_batched_tensors(
+    batched_x_seq: dict[str, object],
+    batched_x_static: object,
+) -> list[dict[str, object]]:
+    if not isinstance(batched_x_static, torch.Tensor):
+        raise RuntimeError('batched_x_static must be a tensor')
+    batch_size = int(batched_x_static.shape[0])
+    payloads: list[dict[str, object]] = []
+    for batch_index in range(batch_size):
+        normalized_x_seq: dict[str, object] = {}
+        for scale_name, scale_tensor in batched_x_seq.items():
+            if not isinstance(scale_tensor, torch.Tensor):
+                raise RuntimeError('batched x_seq values must be tensors')
+            normalized_x_seq[scale_name] = (
+                scale_tensor[batch_index:batch_index + 1].clone()
+            )
+        payloads.append(
+            {
+                'x_seq': normalized_x_seq,
+                'x_static': batched_x_static[batch_index:batch_index + 1].clone(),
+            },
+        )
+    return payloads
+
+
 def x_seq_2d_from_payload_dict(payload_dict: dict) -> dict[str, object]:
     x_seq_raw = payload_dict['x_seq']
     if not isinstance(x_seq_raw, dict):
@@ -248,6 +277,7 @@ def _prepare_inference_context_from_df(
     inference_dataset = _build_dataset(
         df,
         metadata,
+        inference_build_sample_index=-1,
     )
     return _prepare_inference_context_from_dataset(
         df=df,

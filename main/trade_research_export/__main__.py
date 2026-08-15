@@ -32,7 +32,7 @@ def parse_arguments() -> argparse.Namespace:
         '--num-workers',
         type=int,
         default=0,
-        help='DataLoader workers для параллельной подготовки payload (default: 0)',
+        help='DataLoader workers (spawn) for parallel sample tensor reads (default: 0)',
     )
     parser.add_argument(
         '--prefetch-factor',

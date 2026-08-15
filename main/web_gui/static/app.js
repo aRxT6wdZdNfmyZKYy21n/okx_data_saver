@@ -1289,14 +1289,19 @@
         ? formatPct(Number(exitPolicy.pred_eval_linear) * 100)
         : '—';
       const reason = formatSignOnlyExitReason(exitPolicy.exit_reason);
+      const exitEvalHorizon = exitPolicy.eval_horizon
+        ? String(exitPolicy.eval_horizon)
+        : (exitPolicy.configured_eval_horizon
+          ? String(exitPolicy.configured_eval_horizon)
+          : 'x32');
       let actionClass = 'exit-policy-hold';
-      let actionLabel = `Exit sign_only @ x32: ${action}`;
+      let actionLabel = `Exit sign_only @ ${exitEvalHorizon}: ${action}`;
       if (action === 'CLOSE') {
         actionClass = 'exit-policy-close-flip';
-        actionLabel = 'Exit sign_only @ x32: CLOSE · pred flip';
+        actionLabel = `Exit sign_only @ ${exitEvalHorizon}: CLOSE · pred flip`;
       } else if (exitPolicy.exit_reason === 'sign_valid_renewed') {
         actionClass = 'exit-policy-renewed';
-        actionLabel = 'Exit sign_only @ x32: HOLD · renew OK';
+        actionLabel = `Exit sign_only @ ${exitEvalHorizon}: HOLD · renew OK`;
       }
       return `
       <div class="exit-policy-card ${actionClass}">
