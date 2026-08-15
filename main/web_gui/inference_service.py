@@ -99,6 +99,7 @@ def _build_dataset(
     return HybridTradeDatasetInference(
         dataframe=df,
         inference_build_sample_index=inference_build_sample_index,
+        source_data_path=None,
         **dataset_kwargs,
     )
 
@@ -113,6 +114,7 @@ def _build_train_dataset(
         dataframe=df,
         inference_mode=False,
         inference_build_sample_index=None,
+        source_data_path=None,
         **dataset_kwargs,
     )
 
